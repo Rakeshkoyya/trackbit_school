@@ -45,6 +45,15 @@ SCHOOL_MASTER_TABLES = (
     "guardians",
 )
 
+# P0-D fee port (SPRD §4.6) — engaged in migration d3f4a5b6c7d8.
+SCHOOL_FEE_TABLES = (
+    "fee_structures",
+    "fee_installment_templates",
+    "student_fees",
+    "installments",
+    "fee_transactions",
+)
+
 # NULLIF guards the ::uuid cast: Postgres does NOT guarantee OR short-circuit
 # evaluation, so the cast can run even when an earlier branch is true. NULLIF
 # turns '' into NULL, and NULL::uuid is valid (NULL) — so the cast never errors,

@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     auth,
     billing,
     boards,
+    fees,
     me,
     ops,
     org,
@@ -29,3 +30,4 @@ api_router.include_router(ops.router, prefix="/ops", tags=["ops"])
 # TrackBit School — master data (SPRD §4.2 / §5.1)
 api_router.include_router(academics.router, prefix="/academics", tags=["academics"])
 api_router.include_router(students.router, prefix="/students", tags=["students"])
+api_router.include_router(fees.router, prefix="/fees", tags=["fees"])
