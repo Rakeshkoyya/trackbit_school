@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 app. It answers one question no ERP answers: *"Is my school actually teaching well, right now?"* It
 sits **beside** the school's existing ERP; it does not replace it.
 
-This folder currently contains **only the spec — no code yet.** Two documents:
+The spec lives in `docs/` (also mirrored at the repo root):
 
 - `trackbit-school-prd-v1.md` — **SPRD v1.0**, the build spec (modules, domain model, endpoints,
   screens, packets, Done-when gates). This is the primary implementation guide.
@@ -18,17 +18,33 @@ This folder currently contains **only the spec — no code yet.** Two documents:
 Cite the spec in code comments as `SPRD §x.y`. **Conflict order:** the architecture doc's principles
 and fences win over the PRD; an explicit later founder decision wins over both.
 
-## The bootstrap (this is the first real work)
+## Build status (what exists now)
 
-The app is not started from an empty repo. Per SPRD §2.4 (packet **P0-A**), it is **seeded by copying
-two sibling projects**, which are *not* inside this folder:
+The app has been bootstrapped and the P0 foundation is landing packet by packet. Done + verified
+against real Postgres (full suite **130 passing**, ruff clean, tsc/eslint clean):
 
-- **`../task_management2/`** — the **SEED**. Copy `trackbit_api` → `api/`, `trackbit_web` → `web/`
-  (excluding `.venv`, `node_modules`, `.next`, `.git`; `git init` fresh). Its `CLAUDE.md` and its six
-  architectural laws (below) govern **all** code in this app. **Read `../task_management2/CLAUDE.md`
-  before writing backend code.** Its stack: FastAPI + **sync** SQLAlchemy 2 + PostgreSQL (two DB
+- **P0-A** — `api/` + `web/` seeded from the task_management2 seed; `docs/`; AI (§8) + WhatsApp (§7)
+  config stubs; monorepo git.
+- **P0-B** — roles `admin`(Director)/`coordinator`/`teacher`/`office` (`member`→`teacher` migration
+  `d1e2f3a4b5c6`); `core/roles.py` groups; `require_coordinator_up`/`require_academic`/
+  `require_office_up`; role-aware nav + `landingForRole`; Members UI on 4 roles.
+- **P0-C** — master data (§4.2): `models/academics.py` + `models/students.py` (8 org-scoped + RLS
+  tables, migration `d2e3f4a5b6c7`), `AcademicService`/`StudentService`, 19 CRUD endpoints under
+  `/academics` + `/students`. Migration head = **`d2e3f4a5b6c7`**.
+
+Next up (not built yet): **P0-C frontend** (Settings screens, ST-1/ST-2, roster xlsx import),
+**P0-D/E** fee port, then **P1+** academic modules. See SPRD §10 for the packet plan.
+
+## How this repo was bootstrapped (background)
+
+Per SPRD §2.4 (packet **P0-A**) the app was **seeded from two sibling projects** (not inside this
+folder):
+
+- **`../task_management2/`** — the **SEED** copied into `api/` + `web/`. Its `CLAUDE.md` and its six
+  architectural laws (below) govern **all** code here. **Read `../task_management2/CLAUDE.md`
+  before writing backend code.** Stack: FastAPI + **sync** SQLAlchemy 2 + PostgreSQL (two DB
   roles + RLS), event-sourced tasks, APScheduler, channel-adapter notifications, magic-link auth,
-  Next.js 16 + React 19 + Tailwind v4. Ships with 91 passing tests, ruff clean.
+  Next.js 16 + React 19 + Tailwind v4.
 - **`../fee_management_system/`** — the fee module, **PORTED not mounted** (it's an older async /
   JWT / workspace-tenancy generation). Port its money domain nearly verbatim; see its `CLAUDE.md`
   and SPRD §4.6/§5.6 for the behavioral invariants. The real school registers to test the xlsx
@@ -38,22 +54,15 @@ Legacy — **never copy from these:** `../task_management/` (old), `../school_op
 `fee_management_system` stays live as the school's working tool until the unified app reaches fee
 parity (SPRD §5.6 checklist).
 
-Copy the four spec docs into `docs/` during P0-A so future agents have them in-repo.
-
-### Target layout after bootstrap
+### Layout
 
 ```
-api/    ← from task_management2/trackbit_api; adds services/models/endpoints for academics,
-          students, sessions, assessments, dashboard, fees (see SPRD §2.3)
-web/    ← from task_management2/trackbit_web; new IA: today/ planner/ classroom/ sessions/
-          students/ assessments/ dashboard/ boards/(existing) fees/ members/ settings/
+api/    ← FastAPI backend (+ academics/students; sessions/assessments/dashboard/fees to come)
+web/    ← Next.js frontend (new IA per SPRD §6.2 as modules land)
 docs/   ← the four spec docs
 ```
 
-Use a **new database** `trackbit_school_db` with the same two-role setup — do **not** point at the
-seed's `trackbit_db`.
-
-## Commands (inherited from the seed — apply once `api/`/`web/` exist)
+## Commands
 
 Backend, from `api/` (Python 3.12, **uv** — not pip/poetry):
 
@@ -61,20 +70,43 @@ Backend, from `api/` (Python 3.12, **uv** — not pip/poetry):
 uv sync --extra dev                          # install deps
 uv run uvicorn app.main:app --port 8000      # run API (NO --reload; restart after edits)
 uv run pytest -q                             # full suite
-uv run pytest tests/test_rls.py::test_name   # single test
+uv run pytest tests/test_master_data.py::test_name   # single test
 uv run ruff check app tests                  # lint (--fix to auto-fix)
 uv run alembic upgrade head                  # migrations
-uv run python -m scripts.seed                # demo data
+uv run python -m scripts.seed                # demo data (login kc@demo.trackbit.app / demo1234)
 ```
 
 Frontend, from `web/` (Node 20+): `npm run dev` (needs API up), `npm run build`, `npm run lint`,
 `npx tsc --noEmit`. Env: only `NEXT_PUBLIC_API_BASE_URL` (must end in `/api/v1`).
 
-Tests/Alembic run against **real PostgreSQL** (no SQLite fallback); need `DATABASE_URL` +
-`ADMIN_DATABASE_URL` in `.env`. **Packet Done-when gate:** backend packets end green on
-`uv run pytest -q` + `ruff`; frontend packets end green on `npx tsc --noEmit` + `eslint` +
-`next build`. The **existing 91-test task suite is the regression gate** — it must stay green after
-every integration.
+**Packet Done-when gate:** backend packets end green on `uv run pytest -q` + `ruff`; frontend packets
+end green on `npx tsc --noEmit` + `eslint` + `next build`. The **full backend suite (currently 130) is
+the regression gate** — it must stay green after every change.
+
+### Local dev database (validated setup)
+
+Tests/Alembic need **real PostgreSQL** (no SQLite fallback) with the two-role RLS setup. `api/.env`
+is a template pointing at a to-be-created Aiven `trackbit_school_db` (SPRD §2.4 — do **not** reuse the
+seed's `trackbit_db`). For local dev, the seed's `docker-compose.yml` gives you Postgres on `:5434`:
+
+```bash
+# from api/
+docker compose up -d db                       # postgres 16 on localhost:5434 (user/pw/db: trackbit)
+# one-time: a restricted, NOBYPASSRLS app role so RLS actually applies (test_rls needs this)
+docker exec -i trackbit_db psql -U trackbit -d trackbit_test -c \
+  "CREATE ROLE trackbit_app LOGIN PASSWORD 'apppass' NOSUPERUSER NOBYPASSRLS; \
+   GRANT USAGE ON SCHEMA public TO trackbit_app; \
+   GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO trackbit_app; \
+   GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO trackbit_app; \
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO trackbit_app;"
+# then run with the app role for DATABASE_URL and the owner for migrations:
+export DATABASE_URL="postgresql+psycopg2://trackbit_app:apppass@localhost:5434/trackbit_test"
+export ADMIN_DATABASE_URL="postgresql+psycopg2://trackbit:trackbit@localhost:5434/trackbit_test"
+uv run alembic upgrade head && uv run pytest -q
+```
+
+(Grants must be re-run only if migrations add tables *before* those tables have rows the app touches;
+`ALTER DEFAULT PRIVILEGES` covers new tables created afterward.)
 
 ## Six architectural laws (load-bearing — carry into all new tables/endpoints)
 
