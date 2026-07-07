@@ -25,7 +25,7 @@ def test_invite_link_creates_session(client, unique_email, cleanup):
     inv = client.post(
         "/api/v1/org/members/invite",
         headers=headers,
-        json={"name": "Ramesh", "phone": "+919800001234", "role": "member"},
+        json={"name": "Ramesh", "phone": "+919800001234", "role": "teacher"},
     )
     assert inv.status_code == 200, inv.text
     data = inv.json()
@@ -36,7 +36,7 @@ def test_invite_link_creates_session(client, unique_email, cleanup):
     # Redeeming the invite token mints a session for the invited member.
     sess = client.post("/api/v1/auth/verify", json={"token": token})
     assert sess.status_code == 200, sess.text
-    assert sess.json()["org_role"] == "member"
+    assert sess.json()["org_role"] == "teacher"
     assert sess.json()["org"]["id"] == admin["org"]["id"]
 
     # That session is authenticated.

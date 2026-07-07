@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthShell } from "@/components/auth/auth-shell";
+import { landingForRole } from "@/components/layout/nav-items";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,8 +25,8 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await login(identifier.trim(), password);
-      router.replace("/home");
+      const me = await login(identifier.trim(), password);
+      router.replace(landingForRole(me.org_role));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not sign in.");
     } finally {

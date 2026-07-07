@@ -1,6 +1,16 @@
 // Shapes mirrored from the backend Pydantic schemas.
 
-export type OrgRole = "admin" | "member";
+// SPRD §3.2 — admin (Director) · coordinator · teacher · office.
+export type OrgRole = "admin" | "coordinator" | "teacher" | "office";
+
+// Assignable roles + their plain-school-language labels (SPRD §6.1 voice).
+export const ORG_ROLES: OrgRole[] = ["admin", "coordinator", "teacher", "office"];
+export const ROLE_LABELS: Record<OrgRole, string> = {
+  admin: "Director",
+  coordinator: "Coordinator",
+  teacher: "Teacher",
+  office: "Office",
+};
 
 export interface User {
   id: string;

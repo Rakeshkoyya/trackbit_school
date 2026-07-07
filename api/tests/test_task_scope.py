@@ -44,7 +44,7 @@ def world(client, unique_email, cleanup):
         inv = client.post(
             "/api/v1/org/members/invite", headers=_auth(admin_token),
             json={"name": name, "email": f"{name.lower()}-{uuid.uuid4().hex[:6]}@ex.com",
-                  "role": "member"},
+                  "role": "teacher"},
         ).json()
         cleanup["users"].append(uuid.UUID(inv["user_id"]))
         token = inv["invite_url"].rsplit("/join/", 1)[1]

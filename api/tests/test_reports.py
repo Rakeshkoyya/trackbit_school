@@ -47,7 +47,7 @@ def org_ctx(client, unique_email, cleanup):
     def invite_join(name):
         inv = client.post(
             "/api/v1/org/members/invite", headers=_auth(admin_token),
-            json={"name": name, "phone": _rand_phone(), "role": "member"},
+            json={"name": name, "phone": _rand_phone(), "role": "teacher"},
         ).json()
         cleanup["users"].append(uuid.UUID(inv["user_id"]))
         token = inv["invite_url"].rsplit("/join/", 1)[1]

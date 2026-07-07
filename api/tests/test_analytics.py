@@ -35,7 +35,7 @@ def test_register_invite_join_emit_analytics(client, unique_email, cleanup):
     inv = client.post(
         "/api/v1/org/members/invite",
         headers={"Authorization": f"Bearer {reg['access_token']}"},
-        json={"name": "Staffer", "phone": "+919800009999", "role": "member"},
+        json={"name": "Staffer", "phone": "+919800009999", "role": "teacher"},
     ).json()
     cleanup["users"].append(uuid.UUID(inv["user_id"]))
     token = inv["invite_url"].rsplit("/join/", 1)[1]

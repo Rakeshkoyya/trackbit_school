@@ -32,7 +32,7 @@ def org_ctx(client, unique_email, cleanup):
     cleanup["users"].append(uuid.UUID(reg["user"]["id"]))
     admin_token = reg["access_token"]
 
-    def invite(name, role="member"):
+    def invite(name, role="teacher"):
         inv = client.post(
             "/api/v1/org/members/invite", headers=_auth(admin_token),
             json={"name": name, "phone": _rand_phone(), "role": role},
@@ -97,7 +97,7 @@ def test_free_member_cap(client, org_ctx):
     for i in range(10):
         last = client.post(
             "/api/v1/org/members/invite", headers=_auth(org_ctx["admin_token"]),
-            json={"name": f"Hire {i}", "phone": _rand_phone(), "role": "member"},
+            json={"name": f"Hire {i}", "phone": _rand_phone(), "role": "teacher"},
         )
         if last.status_code == 402:
             break

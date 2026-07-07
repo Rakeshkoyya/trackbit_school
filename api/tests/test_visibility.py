@@ -37,7 +37,7 @@ def world():
         outsider = mk_user("outsider")  # member, NOT on the private board
         stranger = mk_user("stranger")  # not in this org at all
 
-        for role, u in [("admin", admin), ("member", insider), ("member", outsider)]:
+        for role, u in [("admin", admin), ("teacher", insider), ("teacher", outsider)]:
             db.add(Membership(org_id=org.id, user_id=u.id, org_role=role, status="active"))
 
         # stranger belongs to a different org
@@ -45,7 +45,7 @@ def world():
         db.add(other_org)
         db.flush()
         created_orgs.append(other_org.id)
-        db.add(Membership(org_id=other_org.id, user_id=stranger.id, org_role="member",
+        db.add(Membership(org_id=other_org.id, user_id=stranger.id, org_role="teacher",
                           status="active"))
 
         public = Board(org_id=org.id, name="Public", visibility="public",

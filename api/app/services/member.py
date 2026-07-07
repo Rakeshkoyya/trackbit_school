@@ -78,7 +78,7 @@ class MemberService:
         m = self._get_membership(admin.org_id, user_id)
         if m.status != "active":
             raise ValidationError("That member isn't active.")
-        if m.org_role == "admin" and role == "member" and self._active_admin_count(admin.org_id) <= 1:
+        if m.org_role == "admin" and role != "admin" and self._active_admin_count(admin.org_id) <= 1:
             raise ValidationError("An organization needs at least one admin.", code="last_admin")
         if m.org_role != role:
             m.org_role = role

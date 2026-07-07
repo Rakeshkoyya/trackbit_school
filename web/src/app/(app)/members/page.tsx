@@ -16,7 +16,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { ApiError } from "@/lib/api-client";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
-import type { Member } from "@/lib/types";
+import { ORG_ROLES, ROLE_LABELS, type Member, type OrgRole } from "@/lib/types";
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "—";
@@ -34,7 +34,7 @@ function InvitePanel() {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"member" | "admin">("member");
+  const [role, setRole] = useState<OrgRole>("teacher");
   const [result, setResult] = useState<{
     name: string;
     email: string;
@@ -54,7 +54,7 @@ function InvitePanel() {
   function reset() {
     setName("");
     setEmail("");
-    setRole("member");
+    setRole("teacher");
     setResult(null);
   }
 
@@ -113,17 +113,17 @@ function InvitePanel() {
       </div>
       <div>
         <Label>Role</Label>
-        <div className="flex gap-2">
-          {(["member", "admin"] as const).map((r) => (
+        <div className="grid grid-cols-2 gap-2">
+          {ORG_ROLES.map((r) => (
             <button
               key={r}
               type="button"
               onClick={() => setRole(r)}
-              className={`flex-1 rounded-md border px-3 py-2.5 text-sm capitalize ${
+              className={`rounded-md border px-3 py-2.5 text-sm ${
                 role === r ? "border-primary bg-accent" : "border-border"
               }`}
             >
-              {r}
+              {ROLE_LABELS[r]}
             </button>
           ))}
         </div>
@@ -181,7 +181,7 @@ function MembersInner() {
   const { data } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
 
   const changeRole = useMutation({
-    mutationFn: (m: Member) => appApi.changeRole(m.user_id, m.role === "admin" ? "member" : "admin"),
+    mutationFn: ({ m, role }: { m: Member; role: OrgRole }) => appApi.changeRole(m.user_id, role),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["members"] });
       toast.success("Role updated");
@@ -264,11 +264,9 @@ function MembersInner() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {m.name}
-                  {m.role === "admin" ? (
-                    <Badge tone="primary" className="ml-2">
-                      <Shield className="h-3 w-3" /> admin
-                    </Badge>
-                  ) : null}
+                  <Badge tone={m.role === "admin" ? "primary" : "neutral"} className="ml-2">
+                    {m.role === "admin" ? <Shield className="h-3 w-3" /> : null} {ROLE_LABELS[m.role]}
+                  </Badge>
                   {m.pending ? <Badge className="ml-2">pending</Badge> : null}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
@@ -277,13 +275,22 @@ function MembersInner() {
               </div>
               {/* Desktop: inline actions. Mobile: collapse into a kebab → sheet so
                   the buttons don't crowd out the member name (narrow screens). */}
-              <div className="hidden shrink-0 gap-1 lg:flex">
+              <div className="hidden shrink-0 items-center gap-1 lg:flex">
                 <Button variant="ghost" size="sm" onClick={() => onReset(m)}>
                   Reset password
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => changeRole.mutate(m)}>
-                  {m.role === "admin" ? "Make member" : "Make admin"}
-                </Button>
+                <select
+                  aria-label={`Change role for ${m.name}`}
+                  value={m.role}
+                  onChange={(e) => changeRole.mutate({ m, role: e.target.value as OrgRole })}
+                  className="rounded-md border border-border bg-card px-2 py-1.5 text-sm"
+                >
+                  {ORG_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -329,17 +336,26 @@ function MembersInner() {
             >
               Reset password
             </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => {
-                changeRole.mutate(actionsFor);
-                setActionsFor(null);
-              }}
-            >
-              <Shield className="h-4 w-4" />
-              {actionsFor.role === "admin" ? "Make member" : "Make admin"}
-            </Button>
+            <div className="rounded-md border border-border px-3 py-2">
+              <Label htmlFor="role-select" className="mb-1 flex items-center gap-2">
+                <Shield className="h-4 w-4" /> Role
+              </Label>
+              <select
+                id="role-select"
+                value={actionsFor.role}
+                onChange={(e) => {
+                  changeRole.mutate({ m: actionsFor, role: e.target.value as OrgRole });
+                  setActionsFor(null);
+                }}
+                className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm"
+              >
+                {ORG_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
+            </div>
             <Button
               variant="outline"
               className="w-full justify-start text-danger"

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
-import type { BulkMembersResult, OrgRole } from "@/lib/types";
+import { ORG_ROLES, ROLE_LABELS, type BulkMembersResult, type OrgRole } from "@/lib/types";
 
 type CheckStatus = "idle" | "checking" | "ok" | "taken" | "invalid";
 interface Row {
@@ -21,7 +21,7 @@ interface Row {
 }
 
 let rowSeq = 0; // stable keys so per-row state survives add/remove
-const blankRow = (): Row => ({ id: ++rowSeq, username: "", password: "", role: "member", check: "idle" });
+const blankRow = (): Row => ({ id: ++rowSeq, username: "", password: "", role: "teacher", check: "idle" });
 
 /**
  * Username + password staff onboarding. Lives inside the "Add members" sheet as
@@ -161,8 +161,11 @@ export function BulkAddPanel() {
                 value={r.role}
                 onChange={(e) => update(r.id, { role: e.target.value as OrgRole })}
               >
-                <option value="member">member</option>
-                <option value="admin">admin</option>
+                {ORG_ROLES.map((r2) => (
+                  <option key={r2} value={r2}>
+                    {ROLE_LABELS[r2]}
+                  </option>
+                ))}
               </select>
               <button
                 type="button"

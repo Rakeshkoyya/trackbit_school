@@ -3,6 +3,7 @@
 import uuid
 from dataclasses import dataclass
 
+from app.core import roles
 from app.models import Membership, Organization, User
 
 
@@ -32,4 +33,30 @@ class CurrentMember:
 
     @property
     def is_admin(self) -> bool:
-        return self.membership.org_role == "admin"
+        return self.membership.org_role == roles.ADMIN
+
+    @property
+    def is_coordinator(self) -> bool:
+        return self.membership.org_role == roles.COORDINATOR
+
+    @property
+    def is_teacher(self) -> bool:
+        return self.membership.org_role == roles.TEACHER
+
+    @property
+    def is_office(self) -> bool:
+        return self.membership.org_role == roles.OFFICE
+
+    # Role-group predicates mirroring the permission dependencies (SPRD §3.3).
+    @property
+    def is_coordinator_up(self) -> bool:
+        return self.membership.org_role in roles.COORDINATOR_UP
+
+    @property
+    def is_academic(self) -> bool:
+        """Any academic-facing role (admin/coordinator/teacher) — never office."""
+        return self.membership.org_role in roles.ACADEMIC
+
+    @property
+    def is_office_up(self) -> bool:
+        return self.membership.org_role in roles.OFFICE_UP

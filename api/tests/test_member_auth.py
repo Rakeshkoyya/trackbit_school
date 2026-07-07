@@ -15,7 +15,7 @@ from app.services.tokens import TokenService
 # --------------------------------------------------------------------------
 # Shared helpers
 # --------------------------------------------------------------------------
-def _make_user_in_org(db: OrmSession, *, email=None, username=None, password=None, role="member"):
+def _make_user_in_org(db: OrmSession, *, email=None, username=None, password=None, role="teacher"):
     org = Organization(name="MA Org")
     db.add(org)
     db.flush()
@@ -75,7 +75,7 @@ def test_password_reset_token_single_use(db_session, cleanup):
     db_session.flush()
 
     u, o, m = svc.consume_reset_token(raw)
-    assert u.id == user.id and o.id == org.id and m.org_role == "member"
+    assert u.id == user.id and o.id == org.id and m.org_role == "teacher"
 
     with pytest.raises(AuthError):  # already used
         svc.consume_reset_token(raw)
@@ -227,7 +227,7 @@ def test_bulk_create_members(client, unique_email, cleanup):
     h = _admin_headers(client, unique_email, cleanup)
     suffix = uuid.uuid4().hex[:6]
     resp = client.post("/api/v1/org/members/bulk", headers=h, json={"members": [
-        {"name": "Ravi", "username": f"ravi{suffix}", "password": "temppass1", "role": "member"},
+        {"name": "Ravi", "username": f"ravi{suffix}", "password": "temppass1", "role": "teacher"},
         {"name": "Sita", "username": f"sita{suffix}", "password": "temppass2", "role": "admin"},
     ]})
     assert resp.status_code == 200, resp.text
@@ -299,7 +299,7 @@ def test_invite_email_user_is_pending(client, unique_email, cleanup):
     h = _admin_headers(client, unique_email, cleanup)
     invitee = f"invitee-{uuid.uuid4().hex[:8]}@example.com"
     inv = client.post("/api/v1/org/members/invite", headers=h,
-                      json={"name": "Newbie", "email": invitee, "role": "member", "mode": "email_invite"})
+                      json={"name": "Newbie", "email": invitee, "role": "teacher", "mode": "email_invite"})
     assert inv.status_code == 200, inv.text
     cleanup["users"].append(uuid.UUID(inv.json()["user_id"]))
     members = client.get("/api/v1/org/members", headers=h).json()["members"]
@@ -311,7 +311,7 @@ def test_invite_brand_new_returns_link_and_pending(client, unique_email, cleanup
     h = _admin_headers(client, unique_email, cleanup)
     invitee = f"fresh-{uuid.uuid4().hex[:8]}@example.com"
     resp = client.post("/api/v1/org/members/invite", headers=h,
-                       json={"name": "Fresh", "email": invitee, "role": "member"})
+                       json={"name": "Fresh", "email": invitee, "role": "teacher"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     cleanup["users"].append(uuid.UUID(body["user_id"]))
@@ -320,7 +320,7 @@ def test_invite_brand_new_returns_link_and_pending(client, unique_email, cleanup
 
     # Re-inviting the same active member is a clear conflict, not a silent re-add.
     dup = client.post("/api/v1/org/members/invite", headers=h,
-                      json={"name": "Fresh", "email": invitee, "role": "member"})
+                      json={"name": "Fresh", "email": invitee, "role": "teacher"})
     assert dup.status_code == 409 and dup.json()["error"]["code"] == "already_member"
 
 
@@ -333,7 +333,7 @@ def test_invite_email_registered_to_another_org_joins(client, unique_email, clea
 
     h = _admin_headers(client, unique_email, cleanup)  # org B admin
     resp = client.post("/api/v1/org/members/invite", headers=h,
-                       json={"name": "Taken", "email": other_email, "role": "member"})
+                       json={"name": "Taken", "email": other_email, "role": "teacher"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["user_id"] == a["user"]["id"]  # same global account, no new user
 

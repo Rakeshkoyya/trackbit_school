@@ -5,12 +5,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
+from app.core.roles import ROLE_PATTERN, TEACHER
+
 
 class InviteMemberRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=20)
-    role: str = Field(default="member", pattern="^(admin|member)$")
+    role: str = Field(default=TEACHER, pattern=ROLE_PATTERN)
     # invite_link -> return shareable URL the admin sends themselves (plan B4)
     # email_invite -> also "send" it via the email channel (dev stub logs it)
     mode: str = Field(default="invite_link", pattern="^(invite_link|email_invite)$")
@@ -51,7 +53,7 @@ class MembersListResponse(BaseModel):
 
 
 class RoleUpdateRequest(BaseModel):
-    role: str = Field(pattern="^(admin|member)$")
+    role: str = Field(pattern=ROLE_PATTERN)
 
 
 class RemoveMemberResponse(BaseModel):
@@ -64,7 +66,7 @@ class BulkMemberRow(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=8, max_length=128)
-    role: str = Field(default="member", pattern="^(admin|member)$")
+    role: str = Field(default=TEACHER, pattern=ROLE_PATTERN)
 
 
 class BulkMembersRequest(BaseModel):

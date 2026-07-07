@@ -12,7 +12,7 @@ interface AuthState {
   me: Me | null;
   loading: boolean; // initial hydration in progress
   mustSetPassword: boolean;
-  login: (identifier: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<Me>;
   register: (payload: RegisterOrgPayload) => Promise<void>;
   consumeSession: (session: Session) => void;
   switchOrg: (orgId: string) => Promise<void>;
@@ -69,15 +69,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const consumeSession = useCallback((session: Session) => {
+  const consumeSession = useCallback((session: Session): Me => {
     tokenStore.set(session.access_token, session.refresh_token);
-    setMe(sessionToMe(session));
+    const next = sessionToMe(session);
+    setMe(next);
     setMustSetPassword(session.must_set_password);
+    return next;
   }, []);
 
   const login = useCallback(
-    async (identifier: string, password: string) => {
-      consumeSession(await authApi.login(identifier, password));
+    async (identifier: string, password: string): Promise<Me> => {
+      return consumeSession(await authApi.login(identifier, password));
     },
     [consumeSession],
   );
