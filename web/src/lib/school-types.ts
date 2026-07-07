@@ -51,6 +51,46 @@ export interface CalendarSummary {
   events: CalendarEvent[];
 }
 
+export interface SyllabusTopic {
+  id: string;
+  title: string;
+  est_periods: number;
+  position: number;
+}
+
+export interface SyllabusUnit {
+  id: string;
+  title: string;
+  position: number;
+  topics: SyllabusTopic[];
+}
+
+export interface PlanEntry {
+  topic_id: string;
+  topic_title: string;
+  unit_title: string;
+  week_start: string;
+}
+
+export interface Plan {
+  class_subject_id: string;
+  status: "draft" | "approved" | "none";
+  approved_at: string | null;
+  total_est_periods: number;
+  entries: PlanEntry[];
+}
+
+export interface Forecast {
+  class_subject_id: string;
+  subject_name: string;
+  class_label: string;
+  status: "green" | "amber" | "red" | "none";
+  total_topics: number;
+  baseline_finish: string | null;
+  projected_finish: string | null;
+  weeks_behind: number;
+}
+
 export interface ClassSubject {
   id: string;
   class_id: string;

@@ -61,6 +61,24 @@ export const schoolApi = {
 
   classSubjects: (classId: string) =>
     api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
+
+  // planner: syllabus + plan + forecast (M1)
+  syllabus: (csId: string) =>
+    api.get<import("@/lib/school-types").SyllabusUnit[]>(`/planner/syllabus${qs({ class_subject_id: csId })}`),
+  addUnit: (b: { class_subject_id: string; title: string }) =>
+    api.post<import("@/lib/school-types").SyllabusUnit>("/planner/syllabus/units", b),
+  addTopic: (b: { unit_id: string; title: string; est_periods?: number }) =>
+    api.post<import("@/lib/school-types").SyllabusTopic>("/planner/syllabus/topics", b),
+  deleteUnit: (id: string) => api.del<{ message: string }>(`/planner/syllabus/units/${id}`),
+  deleteTopic: (id: string) => api.del<{ message: string }>(`/planner/syllabus/topics/${id}`),
+  plan: (csId: string) =>
+    api.get<import("@/lib/school-types").Plan>(`/planner/plan${qs({ class_subject_id: csId })}`),
+  draftPlan: (csId: string) =>
+    api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/draft`),
+  approvePlan: (csId: string) =>
+    api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/approve`),
+  forecast: (classId: string) =>
+    api.get<import("@/lib/school-types").Forecast[]>(`/planner/plan/forecast${qs({ class_id: classId })}`),
   addClassSubject: (b: {
     class_id: string;
     subject_id: string;

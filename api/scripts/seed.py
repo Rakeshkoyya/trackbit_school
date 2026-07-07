@@ -23,18 +23,24 @@ from app.models import (
     Installment,
     Membership,
     Organization,
+    Plan,
+    PlanEntry,
     SchoolClass,
     Student,
     StudentCategory,
     StudentFee,
     Subject,
+    SyllabusTopic,
+    SyllabusUnit,
     TaskEvent,
     TaskInstance,
     Term,
     Transaction,
     User,
 )
+from app.services.calendar import expand_blocked_dates
 from app.services.fee_math import proportional_installments, q, recompute_student_fee
+from app.services.planner import distribute
 
 IST = timezone(timedelta(hours=5, minutes=30))
 DEMO_ORG_NAME = "SHANA Ops (demo)"
@@ -115,11 +121,48 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     db.flush()
 
     periods = {"English": 6, "Mathematics": 6, "Science": 5, "Social Studies": 4, "Hindi": 4}
-    for c in classes.values():
+    class_subjects: dict[tuple, ClassSubject] = {}
+    for ckey, c in classes.items():
         for sname, pw in periods.items():
             teacher = ramesh if sname in ("Mathematics", "Science") else anil
-            db.add(ClassSubject(org_id=org.id, class_id=c.id, subject_id=subjects[sname].id,
-                                teacher_member_id=mships[teacher].id, periods_per_week=pw))
+            cs = ClassSubject(org_id=org.id, class_id=c.id, subject_id=subjects[sname].id,
+                              teacher_member_id=mships[teacher].id, periods_per_week=pw)
+            db.add(cs)
+            class_subjects[(ckey, sname)] = cs
+    db.flush()
+
+    # Syllabus + an APPROVED plan for 6-A Science (populates the plan/forecast view).
+    sci = class_subjects[("6-A", "Science")]
+    blocked = expand_blocked_dates([
+        (date(2026, 8, 15), date(2026, 8, 15), True),
+        (date(2026, 9, 5), date(2026, 9, 5), True),
+        (date(2026, 9, 21), date(2026, 9, 30), True),
+        (date(2026, 10, 19), date(2026, 10, 23), True),
+    ])
+    syllabus = {
+        "Food & Nutrition": ["Components of food", "Balanced diet", "Deficiency diseases"],
+        "The Living World": ["Cells", "Tissues", "Plant & animal life"],
+        "Matter": ["States of matter", "Separation of substances"],
+        "Motion & Measurement": ["Types of motion", "Measuring length"],
+    }
+    all_topics: list[SyllabusTopic] = []
+    for upos, (utitle, ttitles) in enumerate(syllabus.items()):
+        unit = SyllabusUnit(org_id=org.id, class_subject_id=sci.id, position=upos, title=utitle)
+        db.add(unit)
+        db.flush()
+        for tpos, tt in enumerate(ttitles):
+            topic = SyllabusTopic(org_id=org.id, unit_id=unit.id, position=tpos, title=tt,
+                                  est_periods=3)
+            db.add(topic)
+            all_topics.append(topic)
+    db.flush()
+    weeks = distribute([t.est_periods for t in all_topics], periods_per_week=5,
+                       working_weekdays=year.working_weekdays, blocked=blocked,
+                       year_start=year.start_date, year_end=year.end_date)
+    db.add(Plan(org_id=org.id, class_subject_id=sci.id, status="approved",
+                approved_by=kc.id, approved_at=_now()))
+    for topic, wk in zip(all_topics, weeks, strict=True):
+        db.add(PlanEntry(org_id=org.id, class_subject_id=sci.id, topic_id=topic.id, week_start=wk))
 
     cats = {}
     for name in ["Day Scholar", "Hosteller"]:

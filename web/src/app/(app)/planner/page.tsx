@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, ListChecks, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -85,7 +86,10 @@ function PlannerInner() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <PageHeader title="Planner" subtitle="School calendar & effective teaching days" />
-        <YearSwitcher />
+        <div className="flex items-center gap-2">
+          <YearSwitcher />
+          <Link href="/planner/plan"><Button size="sm" variant="outline"><ListChecks className="h-4 w-4" /> Syllabus & Plan</Button></Link>
+        </div>
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">

@@ -59,6 +59,14 @@ SCHOOL_PLANNER_TABLES = (
     "calendar_events",
 )
 
+# P1-B/C syllabus + plan (SPRD §4.3) — engaged in migration d5b6c7d8e9fa.
+SCHOOL_SYLLABUS_TABLES = (
+    "syllabus_units",
+    "syllabus_topics",
+    "plans",
+    "plan_entries",
+)
+
 # NULLIF guards the ::uuid cast: Postgres does NOT guarantee OR short-circuit
 # evaluation, so the cast can run even when an earlier branch is true. NULLIF
 # turns '' into NULL, and NULL::uuid is valid (NULL) — so the cast never errors,
