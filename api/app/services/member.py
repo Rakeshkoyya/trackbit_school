@@ -43,7 +43,8 @@ class MemberService:
         return MembersListResponse(
             members=[
                 MemberOut(
-                    user_id=u.id, name=u.name, email=u.email, username=u.username, phone=u.phone,
+                    user_id=u.id, member_id=m.id, name=u.name, email=u.email,
+                    username=u.username, phone=u.phone,
                     role=m.org_role, status=m.status, last_active_at=m.last_active_at,
                     has_email=u.email is not None, has_phone=u.phone is not None,
                     pending=bool(u.must_set_password and m.last_active_at is None),

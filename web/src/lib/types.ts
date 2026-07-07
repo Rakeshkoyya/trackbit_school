@@ -150,6 +150,7 @@ export interface CompleteResult {
 
 export interface Member {
   user_id: string;
+  member_id: string | null;
   name: string;
   email: string | null;
   username: string | null;

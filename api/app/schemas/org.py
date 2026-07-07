@@ -36,6 +36,7 @@ class InvitedMemberResponse(BaseModel):
 
 class MemberOut(BaseModel):
     user_id: uuid.UUID
+    member_id: uuid.UUID | None = None  # membership id (for class/subject teacher assignment)
     name: str
     email: str | None = None
     username: str | None = None
