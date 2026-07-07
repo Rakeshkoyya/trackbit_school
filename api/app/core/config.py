@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     def ai_configured(self) -> bool:
         return bool(self.ANTHROPIC_API_KEY)
 
+    # V2-P1 §5.3 — the assisted timetable draft (proposer + validators + repair) is
+    # NOT a guaranteed solver, so it ships behind a flag until piloted. Off => the
+    # /timetable/draft endpoint reports the feature is disabled.
+    TIMETABLE_ASSISTED_DRAFT: bool = False
+
     # Guardian messaging (SPRD §7). New channel alongside push/email. Empty key =>
     # console stub logs the exact message. Guardians have no app/email, so go-live
     # of guardian notify is gated on these keys; dev + pilot-start run on the stub.

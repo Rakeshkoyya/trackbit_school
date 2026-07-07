@@ -39,6 +39,7 @@ from app.models.sessions import (
 )
 from app.models.students import Guardian, Student, StudentCategory
 from app.models.task import EVENT_TYPES, Attachment, TaskEvent, TaskInstance, TaskTemplate
+from app.models.timetable import TimetableSlot
 from app.models.user import User
 
 __all__ = [
@@ -88,5 +89,6 @@ __all__ = [
     "TaskEvent",
     "TaskInstance",
     "TaskTemplate",
+    "TimetableSlot",
     "User",
 ]

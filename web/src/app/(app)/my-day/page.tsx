@@ -119,6 +119,24 @@ function MyDayInner() {
         </section>
       ) : null}
 
+      {data && data.periods.length > 0 ? (
+        <section className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold">Today’s periods</h2>
+          <div className="space-y-1.5">
+            {data.periods.map((p) => (
+              <div key={`${p.period_no}-${p.class_subject_id}`} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                <span className="w-8 shrink-0 text-center text-xs font-semibold text-muted-foreground">P{p.period_no}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium">{p.class_label} · {p.subject_name}</p>
+                  {p.planned_topic ? <p className="truncate text-xs text-muted-foreground">{p.planned_topic}</p> : null}
+                </div>
+                {p.logged ? <Badge tone="success">logged</Badge> : <Badge tone="neutral">to log</Badge>}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <h2 className="mb-2 text-sm font-semibold">Today’s classes</h2>
       {!data || data.classes.length === 0 ? (
         <EmptyState icon={BookOpen} title="No classes assigned to you"

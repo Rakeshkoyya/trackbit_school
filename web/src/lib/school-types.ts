@@ -108,10 +108,104 @@ export interface HomeworkPending {
   text: string;
 }
 
+export interface MyDayPeriod {
+  period_no: number;
+  class_subject_id: string;
+  class_label: string;
+  subject_name: string | null;
+  planned_topic: string | null;
+  planned_topic_id: string | null;
+  logged: boolean;
+}
+
 export interface MyDay {
   date: string;
   classes: MyDayClass[];
+  periods: MyDayPeriod[];
   homework_pending: HomeworkPending[];
+}
+
+// ── timetable (V2-P1, SPRD2 §5.3) ────────────────────────────────────────────
+export interface TimetableSlot {
+  id: string;
+  class_id: string;
+  weekday: number;
+  period_no: number;
+  class_subject_id: string;
+  subject_name: string | null;
+  teacher_member_id: string | null;
+  teacher_name: string | null;
+  effective_from: string;
+  effective_to: string | null;
+}
+
+export interface TimetableClash {
+  weekday: number;
+  period_no: number;
+  teacher_member_id: string;
+  teacher_name: string | null;
+  class_labels: string[];
+}
+
+export interface TimetableGrid {
+  class_id: string;
+  class_label: string;
+  weekdays: number[];
+  periods_per_day: number;
+  slots: TimetableSlot[];
+  clashes: TimetableClash[];
+}
+
+export interface TeacherSlot {
+  weekday: number;
+  period_no: number;
+  class_id: string;
+  class_label: string;
+  subject_name: string | null;
+  class_subject_id: string;
+}
+
+export interface TeacherWeek {
+  member_id: string;
+  weekdays: number[];
+  periods_per_day: number;
+  slots: TeacherSlot[];
+}
+
+export interface PeriodTime {
+  start: string;
+  end: string;
+  kind: string;
+}
+
+export interface PeriodConfig {
+  academic_year_id: string;
+  periods_per_day: number;
+  period_times: PeriodTime[];
+}
+
+export interface TimetableImportCell {
+  weekday: number;
+  period_no: number;
+  class_subject_id: string | null;
+  subject_name: string;
+  confidence: number;
+}
+
+export interface TimetableImportAnalyze {
+  class_id: string;
+  source: string;
+  cells: TimetableImportCell[];
+  unmatched: string[];
+}
+
+export interface TimetableDraft {
+  class_id: string;
+  enabled: boolean;
+  cells: TimetableImportCell[];
+  clashes: TimetableClash[];
+  unresolved: string[];
+  message: string;
 }
 
 export interface ComplianceRow {

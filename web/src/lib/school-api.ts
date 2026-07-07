@@ -178,6 +178,33 @@ export const schoolApi = {
     academic_year_id: string | null;
   }) => api.post<RosterCommitResult>("/students/import/commit", b),
 
+  // ── timetable (V2-P1, SPRD2 §5.3) ─────────────────────────────────────────
+  timetableGrid: (classId: string, onDate?: string) =>
+    api.get<import("@/lib/school-types").TimetableGrid>(
+      `/timetable/grid${qs({ class_id: classId, on_date: onDate })}`,
+    ),
+  setSlot: (b: { class_id: string; weekday: number; period_no: number; class_subject_id: string; effective_from?: string }) =>
+    api.put<import("@/lib/school-types").TimetableGrid>("/timetable/slot", b),
+  clearSlot: (b: { class_id: string; weekday: number; period_no: number; effective_from?: string }) =>
+    api.post<import("@/lib/school-types").TimetableGrid>("/timetable/slot/clear", b),
+  validateTimetable: () =>
+    api.get<import("@/lib/school-types").TimetableClash[]>("/timetable/validate"),
+  myWeek: () => api.get<import("@/lib/school-types").TeacherWeek>("/timetable/my-week"),
+  periodConfig: (yearId: string) =>
+    api.get<import("@/lib/school-types").PeriodConfig>(`/timetable/period-config${qs({ year_id: yearId })}`),
+  setPeriodConfig: (b: { academic_year_id: string; periods_per_day: number; period_times: import("@/lib/school-types").PeriodTime[] }) =>
+    api.put<import("@/lib/school-types").PeriodConfig>("/timetable/period-config", b),
+  timetableImportAnalyze: (classId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<import("@/lib/school-types").TimetableImportAnalyze>(
+      `/timetable/import/analyze${qs({ class_id: classId })}`, form);
+  },
+  timetableImportCommit: (b: { class_id: string; effective_from?: string; cells: { weekday: number; period_no: number; class_subject_id: string }[] }) =>
+    api.post<import("@/lib/school-types").TimetableGrid>("/timetable/import/commit", b),
+  timetableDraft: (classId: string) =>
+    api.post<import("@/lib/school-types").TimetableDraft>(`/timetable/draft${qs({ class_id: classId })}`),
+
   // ── fees ────────────────────────────────────────────────────────────────
   feeSummary: (yearId?: string) => api.get<FeeSummary>(`/fees/summary${qs({ year_id: yearId })}`),
   structures: (yearId?: string) =>

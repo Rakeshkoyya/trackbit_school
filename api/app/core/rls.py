@@ -82,6 +82,11 @@ SCHOOL_SESSION_TABLES = (
     "session_attendance",
 )
 
+# V2-P1 timetable (SPRD2 §4, §5.3) — engaged in migration f0a1b2c3d4e5.
+SCHOOL_TIMETABLE_TABLES = (
+    "timetable_slots",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

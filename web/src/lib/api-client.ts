@@ -144,6 +144,8 @@ export const api = {
   get: <T>(path: string, auth = true) => apiFetch<T>(path, { method: "GET", auth }),
   post: <T>(path: string, body?: unknown, auth = true) =>
     apiFetch<T>(path, { method: "POST", body, auth }),
+  put: <T>(path: string, body?: unknown, auth = true) =>
+    apiFetch<T>(path, { method: "PUT", body, auth }),
   patch: <T>(path: string, body?: unknown, auth = true) =>
     apiFetch<T>(path, { method: "PATCH", body, auth }),
   del: <T>(path: string, auth = true) => apiFetch<T>(path, { method: "DELETE", auth }),

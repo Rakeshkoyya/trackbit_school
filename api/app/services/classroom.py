@@ -40,8 +40,10 @@ from app.schemas.classroom import (
     LessonLogOut,
     MyDayClass,
     MyDayOut,
+    MyDayPeriod,
 )
 from app.services.notify_guardian import notify_guardians
+from app.services.timetable import TimetableService
 
 
 def _label(klass: SchoolClass) -> str:
@@ -80,7 +82,7 @@ class ClassroomService:
         monday = today - timedelta(days=today.weekday())
         year = self._active_year(m.org_id)
         if year is None:
-            return MyDayOut(date=today, classes=[], homework_pending=[])
+            return MyDayOut(date=today, classes=[], periods=[], homework_pending=[])
 
         rows = self.db.execute(
             select(ClassSubject, Subject.name, SchoolClass)
@@ -143,7 +145,22 @@ class ClassroomService:
                     pending.append(HomeworkPending(
                         assignment_id=hw.id, class_label=_label(klass),
                         subject_name=sname, text=hw.text))
-        return MyDayOut(date=today, classes=classes, homework_pending=pending)
+
+        # Today's periods straight from the timetable (V2-P1 §5.4): the teacher's
+        # slots for today, enriched with the planned topic / logged state we already
+        # computed per class-subject above.
+        by_cs = {c.class_subject_id: c for c in classes}
+        periods: list[MyDayPeriod] = []
+        for ts in TimetableService(self.db).teacher_day(m, today):
+            c = by_cs.get(ts.class_subject_id)
+            periods.append(MyDayPeriod(
+                period_no=ts.period_no, class_subject_id=ts.class_subject_id,
+                class_label=ts.class_label, subject_name=ts.subject_name,
+                planned_topic=c.planned_topic if c else None,
+                planned_topic_id=c.planned_topic_id if c else None,
+                logged=c.logged if c else False))
+        periods.sort(key=lambda p: p.period_no)
+        return MyDayOut(date=today, classes=classes, periods=periods, homework_pending=pending)
 
     # ── quick log (CL-2) ─────────────────────────────────────────────────────
     def log(self, m: CurrentMember, body: LessonLogIn) -> LessonLogOut:

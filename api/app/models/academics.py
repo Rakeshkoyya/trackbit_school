@@ -49,6 +49,13 @@ class AcademicYear(Base, UUIDPKMixin, CreatedAtMixin):
     working_weekdays: Mapped[list[int]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[0, 1, 2, 3, 4, 5]'::jsonb")
     )
+    # School timings (V2-M1 wizard step 3 / M3 timetable). periods_per_day bounds
+    # the timetable grid; period_times is a JSON list of {start,end,kind} incl.
+    # breaks (e.g. {"start":"09:00","end":"09:40","kind":"period"}). Empty until set.
+    periods_per_day: Mapped[int] = mapped_column(Integer, nullable=False, server_default="8")
+    period_times: Mapped[list[dict]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
     terms: Mapped[list["Term"]] = relationship(
         "Term", back_populates="academic_year", cascade="all, delete-orphan",

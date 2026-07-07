@@ -84,7 +84,17 @@ wiring of jobs, day suggestions, growth profile) are folded into the v2 packets 
   renames `/insights`→`/dashboard`, `/classroom`→`/my-day`, `/academics`→`/setup`; compliance page
   deleted. All 12 old routes 307-redirect via `next.config.ts` (`/boards/:id` etc. preserved).
   `landingForRole`: admin→`/dashboard`, teacher→`/my-day`. web tsc + eslint + `next build` clean.
-- **Next: V2-P1** (Timetable §5.3), then V2-P2..P5 per SPRD2 §10.
+- **V2-P1 (Timetable) COMPLETE** — SPRD2 §4/§5.3. Backend: `models/timetable.py`
+  (`timetable_slots`, effective-dated append-only cells) + `academic_years.periods_per_day`
+  /`period_times`; migration `f0a1b2c3d4e5` (head); `TimetableService` (grid CRUD with
+  effective-dating, deterministic teacher-clash validator, teacher week, period config,
+  photo/xlsx import via env-gated `services/ai/timetable.py` stub, flag-gated assisted draft
+  `TIMETABLE_ASSISTED_DRAFT`); 12 endpoints under `/timetable`; My Day now renders today's
+  periods from the grid. `test_timetable.py` (8 tests, incl. clash + effective-dating +
+  admin-only). Backend **170 tests passing**, ruff clean. Frontend: Plan → Timetable tab
+  (grid editor + import + draft + periods/day for admin, own-week read view for teacher),
+  `TimetableGrid`/`TeacherWeekGrid` components, `api.put`; web tsc + eslint + build clean.
+- **Next: V2-P2** (Attendance + My Day v2 §5.4), then V2-P3..P5 per SPRD2 §10.
 
 ## How this repo was bootstrapped (background)
 
