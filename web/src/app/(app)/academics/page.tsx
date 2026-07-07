@@ -102,7 +102,7 @@ function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canEdit: bo
   const { data: rows = [] } = useQuery({ queryKey: ["class-subjects", classId], queryFn: () => schoolApi.classSubjects(classId) });
   const { data: subjects = [] } = useQuery({ queryKey: ["subjects"], queryFn: schoolApi.subjects });
   const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
-  const teachers = (membersData?.members ?? []).filter((m) => m.member_id && m.role !== "office");
+  const teachers = (membersData?.members ?? []).filter((m) => m.member_id);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["class-subjects", classId] });
   const add = useMutation({
     mutationFn: () => schoolApi.addClassSubject({ class_id: classId, subject_id: subjectId, teacher_member_id: teacherId || null, periods_per_week: Number(periods) }),
@@ -249,7 +249,7 @@ function SimpleListCard({
 
 function AcademicsInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin" || me?.org_role === "coordinator";
+  const canEdit = me?.org_role === "admin";
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -280,7 +280,7 @@ function AcademicsInner() {
 
 export default function AcademicsPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <AcademicsInner />
     </AuthGuard>
   );

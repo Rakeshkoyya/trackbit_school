@@ -1,5 +1,5 @@
 """P0-D: fee port end-to-end (SPRD §5.6) — structures, enrol, pay/undo/discount,
-append-only ledger, role gates (office only), org isolation."""
+append-only ledger, role gates (admin-only in v2), org isolation."""
 
 import uuid
 
@@ -111,7 +111,7 @@ def test_custom_schedule_must_sum_to_net(client, cleanup):
     assert r.status_code == 422
 
 
-def test_only_office_and_director_see_fees(client, cleanup):
+def test_only_admins_see_fees(client, cleanup):
     admin, h, year, _klass, _student = _setup(client, cleanup)
 
     def _invite(role, phone):
@@ -122,12 +122,11 @@ def test_only_office_and_director_see_fees(client, cleanup):
         return _h(client.post("/api/v1/auth/verify", json={"token": tok}).json()["access_token"])
 
     teacher_h = _invite("teacher", "+919800000011")
-    office_h = _invite("office", "+919800000022")
+    admin2_h = _invite("admin", "+919800000022")
 
-    # teacher (and coordinator) are blocked from fees entirely
+    # v2: teachers are blocked from fees entirely; any admin can read them
     assert client.get("/api/v1/fees/summary", headers=teacher_h).status_code == 403
-    # office can read the fees card
-    assert client.get("/api/v1/fees/summary", headers=office_h).status_code == 200
+    assert client.get("/api/v1/fees/summary", headers=admin2_h).status_code == 200
 
 
 def test_fees_are_org_isolated(client, cleanup):

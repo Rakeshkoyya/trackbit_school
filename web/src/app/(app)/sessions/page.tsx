@@ -112,7 +112,7 @@ function SessionsInner() {
 
 export default function SessionsPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <SessionsInner />
     </AuthGuard>
   );

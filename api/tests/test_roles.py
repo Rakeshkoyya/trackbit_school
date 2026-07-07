@@ -1,11 +1,11 @@
-"""P0-B done-when: the SPRD §3.3 role groups have a test per role.
+"""SPRD v2 §2: two roles — admin | teacher (coordinator/office collapsed into admin).
 
 Two layers:
   * pure, DB-free tests of the role-group predicates + FastAPI guard dependencies
     (the access matrix at role-granularity — per-endpoint enforcement lands with
     each module that adds endpoints);
-  * DB-backed tests that the memberships domain accepts the four roles and that
-    invite/role-change honour them.
+  * DB-backed tests that the memberships domain accepts exactly the two roles and
+    that invite/role-change honour them.
 """
 
 import uuid
@@ -38,27 +38,25 @@ def _member(role: str) -> CurrentMember:
 @pytest.mark.parametrize(
     "role,admin,coord_up,academic,office_up",
     [
-        (roles.ADMIN,       True,  True,  True,  True),
-        (roles.COORDINATOR, False, True,  True,  False),
-        (roles.TEACHER,     False, False, True,  False),
-        (roles.OFFICE,      False, False, False, True),
+        (roles.ADMIN,   True,  True,  True,  True),
+        (roles.TEACHER, False, False, True,  False),
     ],
 )
 def test_role_group_predicates(role, admin, coord_up, academic, office_up):
     m = _member(role)
     assert m.is_admin is admin
     assert m.is_coordinator_up is coord_up
-    assert m.is_academic is academic       # office is the only role excluded from academics
-    assert m.is_office_up is office_up      # teacher/coordinator never reach fees
+    assert m.is_academic is academic       # every v2 member is academic staff
+    assert m.is_office_up is office_up      # teachers never reach fees
 
 
 @pytest.mark.parametrize(
     "guard,allowed",
     [
         (require_admin,          {roles.ADMIN}),
-        (require_coordinator_up, {roles.ADMIN, roles.COORDINATOR}),
-        (require_academic,       {roles.ADMIN, roles.COORDINATOR, roles.TEACHER}),
-        (require_office_up,      {roles.ADMIN, roles.OFFICE}),
+        (require_coordinator_up, {roles.ADMIN}),
+        (require_academic,       {roles.ADMIN, roles.TEACHER}),
+        (require_office_up,      {roles.ADMIN}),
     ],
 )
 def test_guards_admit_exactly_their_group(guard, allowed):
@@ -71,7 +69,7 @@ def test_guards_admit_exactly_their_group(guard, allowed):
                 guard(member=m)
 
 
-# ── DB-backed: the memberships domain accepts the four roles ─────────────────
+# ── DB-backed: the memberships domain accepts exactly the two v2 roles ───────
 
 def _register_admin(client, email, cleanup):
     resp = client.post(
@@ -86,7 +84,7 @@ def _register_admin(client, email, cleanup):
     return body
 
 
-@pytest.mark.parametrize("role", [roles.COORDINATOR, roles.TEACHER, roles.OFFICE])
+@pytest.mark.parametrize("role", [roles.ADMIN, roles.TEACHER])
 def test_invite_accepts_each_school_role(client, unique_email, cleanup, role):
     admin = _register_admin(client, unique_email, cleanup)
     h = {"Authorization": f"Bearer {admin['access_token']}"}
@@ -103,14 +101,16 @@ def test_invite_accepts_each_school_role(client, unique_email, cleanup, role):
     assert sess.json()["org_role"] == role
 
 
-def test_invite_rejects_unknown_role(client, unique_email, cleanup):
+@pytest.mark.parametrize("bad_role", ["member", "coordinator", "office"])
+def test_invite_rejects_retired_roles(client, unique_email, cleanup, bad_role):
     admin = _register_admin(client, unique_email, cleanup)
     h = {"Authorization": f"Bearer {admin['access_token']}"}
     resp = client.post(
         "/api/v1/org/members/invite", headers=h,
-        json={"name": "Nope", "phone": "+919812345678", "role": "member"},
+        json={"name": "Nope", "phone": "+919812345678", "role": bad_role},
     )
-    assert resp.status_code == 422, resp.text  # 'member' no longer exists (mapped to teacher)
+    # 'member' was mapped to teacher in P0-B; coordinator/office retired in v2.
+    assert resp.status_code == 422, resp.text
 
 
 def test_first_user_is_director_admin(client, unique_email, cleanup):

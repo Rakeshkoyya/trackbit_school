@@ -36,25 +36,18 @@ class CurrentMember:
         return self.membership.org_role == roles.ADMIN
 
     @property
-    def is_coordinator(self) -> bool:
-        return self.membership.org_role == roles.COORDINATOR
-
-    @property
     def is_teacher(self) -> bool:
         return self.membership.org_role == roles.TEACHER
 
-    @property
-    def is_office(self) -> bool:
-        return self.membership.org_role == roles.OFFICE
-
-    # Role-group predicates mirroring the permission dependencies (SPRD §3.3).
+    # Role-group predicates mirroring the permission dependencies (SPRD v2 §2:
+    # coordinator_up/office_up are both admin-only; academic = every member).
     @property
     def is_coordinator_up(self) -> bool:
         return self.membership.org_role in roles.COORDINATOR_UP
 
     @property
     def is_academic(self) -> bool:
-        """Any academic-facing role (admin/coordinator/teacher) — never office."""
+        """Any member — in v2 every role (admin/teacher) is academic staff."""
         return self.membership.org_role in roles.ACADEMIC
 
     @property

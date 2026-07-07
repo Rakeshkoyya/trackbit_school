@@ -68,7 +68,7 @@ function AddEventForm({ yearId }: { yearId: string }) {
 
 function PlannerInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin" || me?.org_role === "coordinator";
+  const canEdit = me?.org_role === "admin";
   const { yearId } = useYear();
   const qc = useQueryClient();
   const { data } = useQuery({
@@ -145,7 +145,7 @@ function PlannerInner() {
 
 export default function PlannerPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <PlannerInner />
     </AuthGuard>
   );

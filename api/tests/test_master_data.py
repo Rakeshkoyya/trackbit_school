@@ -99,7 +99,7 @@ def test_teacher_cannot_write_master_data(client, cleanup):
 
     # teacher may READ the structure ...
     assert client.get("/api/v1/academics/years", headers=th).status_code == 200
-    # ... but not create it (coordinator/director only)
+    # ... but not create it (admin-only in v2)
     blocked = client.post("/api/v1/academics/years", headers=th,
                           json={"label": "2027-28", "start_date": "2027-04-01", "end_date": "2028-03-31"})
     assert blocked.status_code == 403

@@ -59,14 +59,15 @@ def test_digest_previews_top_issues(client, cleanup):
     assert "TrackBit" in d["text"] and isinstance(d["issues"], list)
 
 
-def test_fee_card_is_director_only(client, cleanup):
+def test_dashboard_is_admin_only(client, cleanup):
     h, _year, _klass, _cs = _setup(client, cleanup)
     inv = client.post("/api/v1/org/members/invite", headers=h,
-                      json={"name": "Coord", "phone": "+919800007777", "role": "coordinator"})
+                      json={"name": "Teach", "phone": "+919800007777", "role": "teacher"})
     cleanup["users"].append(uuid.UUID(inv.json()["user_id"]))
     token = inv.json()["invite_url"].rsplit("/join/", 1)[1]
     ch = {"Authorization": f"Bearer {client.post('/api/v1/auth/verify', json={'token': token}).json()['access_token']}"}
-    # coordinator can see the dashboard but NOT the fee card
-    cov = client.get("/api/v1/dashboard/overview", headers=ch)
+    # v2: teachers don't see the school dashboard at all; the admin does, fee card included
+    assert client.get("/api/v1/dashboard/overview", headers=ch).status_code == 403
+    cov = client.get("/api/v1/dashboard/overview", headers=h)
     assert cov.status_code == 200
-    assert cov.json()["fees"] is None
+    assert cov.json()["fees"] is not None

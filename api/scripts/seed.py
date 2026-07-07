@@ -90,7 +90,7 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     so every academic + fee screen renders meaningfully on review."""
     teachers = [u for u, m in mships.items() if m.org_role == "teacher"]
     ramesh, anil = teachers[0], teachers[1]
-    priya = next(u for u, m in mships.items() if m.org_role == "coordinator")
+    priya = next(u for u in mships if u.email == "priya@demo.trackbit.app")
 
     year = AcademicYear(org_id=org.id, label="2026-27", start_date=date(2026, 4, 1),
                         end_date=date(2027, 3, 31), is_active=True)
@@ -324,10 +324,10 @@ def seed() -> None:
         db.add_all([kc, priya, ramesh, anil])
         db.flush()
 
-        # School roles (SPRD §3.2): KC director, Priya coordinator, the rest teachers.
+        # School roles (SPRD v2 §2): KC + Priya run the school (admins); the rest teach.
         mships: dict[User, Membership] = {}
         for role, user in [
-            ("admin", kc), ("coordinator", priya), ("teacher", ramesh), ("teacher", anil),
+            ("admin", kc), ("admin", priya), ("teacher", ramesh), ("teacher", anil),
         ]:
             mem = Membership(org_id=org.id, user_id=user.id, org_role=role, last_active_at=_now())
             db.add(mem)
@@ -452,7 +452,7 @@ def seed() -> None:
 
         db.commit()
         print(f"Seeded '{DEMO_ORG_NAME}': org={org.id}")
-        print("  users=4 (director KC, coordinator Priya, teachers Ramesh/Anil)")
+        print("  users=4 (admins KC/Priya, teachers Ramesh/Anil)")
         print("  boards=4 (Daily Ops, Admissions, Maintenance, Housekeeping)")
         print(f"  tasks={len(instances)}")
         print(f"  school: {counts['classes']} classes, {counts['students']} students, "

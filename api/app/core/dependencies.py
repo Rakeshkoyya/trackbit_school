@@ -86,16 +86,16 @@ def require_admin(member: CurrentMember = Depends(get_current_member)) -> Curren
 def require_coordinator_up(
     member: CurrentMember = Depends(get_current_member),
 ) -> CurrentMember:
-    """admin | coordinator — plan upkeep, approvals, marks verification (SPRD §3.3)."""
+    """Admin-only in v2 (SPRD v2 §2) — plan upkeep, approvals, marks verification."""
     if not member.is_coordinator_up:
-        raise ForbiddenError("This action requires a coordinator or director.", code="coordinator_only")
+        raise ForbiddenError("This action requires an admin.", code="admin_only")
     return member
 
 
 def require_academic(
     member: CurrentMember = Depends(get_current_member),
 ) -> CurrentMember:
-    """admin | coordinator | teacher — academic capture/read. Office is excluded (SPRD §3.3)."""
+    """admin | teacher — academic capture/read (every v2 member is academic staff)."""
     if not member.is_academic:
         raise ForbiddenError("This is an academic-staff action.", code="academic_only")
     return member
@@ -104,7 +104,7 @@ def require_academic(
 def require_office_up(
     member: CurrentMember = Depends(get_current_member),
 ) -> CurrentMember:
-    """admin | office — fees. Teachers never reach this (SPRD §3.3)."""
+    """Admin-only in v2 (SPRD v2 §2) — fees. Teachers never reach this."""
     if not member.is_office_up:
-        raise ForbiddenError("This action requires office staff or the director.", code="office_only")
+        raise ForbiddenError("This action requires an admin.", code="admin_only")
     return member

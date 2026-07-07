@@ -361,3 +361,24 @@ Existing modules: **M5 Tasks** continues as built (v2 plan); **M6 Fees** continu
 ---
 
 *Companion docs: `trackbit-prd-v2.md` (task module PRD), `trackbit-v2-implementation-plan.md` (task module build plan). This document defines the product layer above them. v1.1 supersedes v1.0 (2026-07-05) — added: principle P5, pain-point coverage map, day-celebration engine (M1), Sessions (M2), diagnostic intake & skill profiles (M3), teacher growth profile (M4 v1.5), ops board templates (M5), expanded fences.*
+
+---
+
+## v1.2 addendum (2026-07-07) — the "Daily OS" redesign
+
+After the founder's end-to-end walkthrough, **SPRD v2 (`trackbit-school-prd-v2.md`) is
+authoritative wherever it conflicts with this document.** The deltas:
+
+- **Positioning:** TrackBit is now *the school's daily operating system*, no longer a thin
+  layer beside the ERP. The pitch, and the reliability bar, change accordingly.
+- **Roles:** collapsed to `admin` + `teacher` (director/coordinator/office retired).
+- **P1 restated as capture-by-exception:** confirm the norm in one tap, record only deviations.
+- **Fences moved IN:** per-period attendance (exception-capture only) · timetable
+  (import-first + AI-assisted draft with deterministic validators — still no guaranteed
+  solver) · daily report generation · per-student homework.
+- **Fences still standing:** payroll/HR/library/transport/inventory/visitor/social ·
+  report-card designer · test authoring · parent app/login · chat UI · mandatory per-student
+  capture · per-student evidence photos · LMS/teacher training (Playground's lane).
+- **New spine:** wizard compiles the year (plan + timetable) → teachers confirm each period
+  by exception → the system joins captures into per-student truth ("every hour" tracking is
+  a *join*, not a capture) → the 8 AM daily report → gaps become tasks.

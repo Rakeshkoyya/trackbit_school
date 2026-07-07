@@ -81,10 +81,12 @@ def test_approve_requires_director(client, cleanup):
     client.post(f"/api/v1/planner/plan/{cs['id']}/draft", headers=h)
 
     inv = client.post("/api/v1/org/members/invite", headers=h,
-                      json={"name": "Coord", "phone": "+919800005555", "role": "coordinator"})
+                      json={"name": "Teach", "phone": "+919800005555", "role": "teacher"})
     cleanup["users"].append(uuid.UUID(inv.json()["user_id"]))
     token = inv.json()["invite_url"].rsplit("/join/", 1)[1]
     ch = {"Authorization": f"Bearer {client.post('/api/v1/auth/verify', json={'token': token}).json()['access_token']}"}
-    # coordinator can draft but NOT approve (director-only)
-    assert client.post(f"/api/v1/planner/plan/{cs['id']}/draft", headers=ch).status_code == 200
+    # v2: teachers can view plans but neither draft nor approve (admin-only)
+    assert client.post(f"/api/v1/planner/plan/{cs['id']}/draft", headers=ch).status_code == 403
     assert client.post(f"/api/v1/planner/plan/{cs['id']}/approve", headers=ch).status_code == 403
+    # the admin can approve
+    assert client.post(f"/api/v1/planner/plan/{cs['id']}/approve", headers=h).status_code == 200

@@ -4,19 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is right now
 
-**TrackBit School** — the unified school product: an *Academic Health Layer* + Tasks + Fees in one
-app. It answers one question no ERP answers: *"Is my school actually teaching well, right now?"* It
-sits **beside** the school's existing ERP; it does not replace it.
+**TrackBit School** — **the school's daily operating system** (v2 redesign, July 2026): it plans
+the academic year down to the period, captures each day with near-zero teacher effort
+(capture-by-exception), knows what every student is doing during school + hostel hours, and
+writes the school's daily report itself.
 
 The spec lives in `docs/` (also mirrored at the repo root):
 
-- `trackbit-school-prd-v1.md` — **SPRD v1.0**, the build spec (modules, domain model, endpoints,
-  screens, packets, Done-when gates). This is the primary implementation guide.
-- `trackbit-product-architecture.md` — **v1.1**, the "why": positioning, product principles, and the
-  fences (what we deliberately do *not* build).
+- `trackbit-school-prd-v2.md` — **SPRD v2.0, the CURRENT build spec** (cite as `SPRD2 §x.y`).
+  Vision, roles, IA, new modules (wizard, timetable, attendance, My Day v2, recommendations,
+  daily report, student timeline), packets V2-P0..P5.
+- `trackbit-school-prd-v1.md` — SPRD v1.0; still the reference for carried modules (fees, tasks,
+  assessments, sessions, master data).
+- `trackbit-product-architecture.md` — the "why": principles + fences (see its v1.2 addendum).
 
-Cite the spec in code comments as `SPRD §x.y`. **Conflict order:** the architecture doc's principles
-and fences win over the PRD; an explicit later founder decision wins over both.
+**Conflict order: SPRD2 > architecture doc > SPRD v1**; an explicit later founder decision wins
+over all.
 
 ## Build status (what exists now)
 
@@ -65,10 +68,14 @@ Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@
   track completion); `/assessments/*`; web `/assessments` (scores grid / bands / trends tabs) + skill
   areas on `/academics`. Weak-subject alerts feed the dashboard. Migration head **`d8e9fab0c1d2`**.
 
-**All product phases P0–P3 are complete** (11 migrations, 163 tests). **Deferred items:** the
-*fees-mode* xlsx import; scheduled background jobs (4 pm unlogged reminder, Saturday guardian summary,
-Monday digest *delivery* — builders/previews exist, cron wiring does not); PL-6 day-celebration
-suggestions + `day_catalog`; the DB-3 teacher growth profile (v1.5). See SPRD §10.
+**All SPRD v1 product phases P0–P3 are complete.** v1 deferred items (fees-mode xlsx import, cron
+wiring of jobs, day suggestions, growth profile) are folded into the v2 packets (SPRD2 §9–§10).
+
+**v2 redesign started (2026-07-07):**
+- **V2-P0-A (roles) COMPLETE** — two roles admin/teacher (SPRD2 §2); migration `e9fab0c1d2e3`
+  applied (head); coordinator/office collapsed into admin; seed + all guards + web types/nav/13
+  page guards updated. Backend **162 tests passing**, ruff clean; web tsc + eslint + build clean.
+- **Next: V2-P0-B** (IA reshell), then V2-P1..P5 per SPRD2 §10.
 
 ## How this repo was bootstrapped (background)
 
@@ -164,9 +171,11 @@ uv run alembic upgrade head && uv run pytest -q
 
 ## Five product principles (acceptance criteria, not slogans)
 
-- **P1 — One-minute teacher budget.** ≤ ~1 min/day capture per teacher; measured in taps and seconds
-  on every teacher screen (quick-log ≤ 3 taps / ≤ 25s; 15-student session ≤ 60s). Feature over
-  budget → redesign or cut.
+- **P1v2 — One-minute budget via capture-by-exception.** The teacher confirms the norm in one tap
+  and records only deviations (attendance = "all present" minus tapped absentees; checks = "class
+  did it" minus exceptions). Budgets: quick-log ≤ 3 taps / ≤ 25s; routine period card ≤ 5 taps /
+  ≤ 30s; 15-student session ≤ 60s. Any feature needing per-student entry for a whole class is
+  mis-designed — redesign or cut.
 - **P2 — Plan is baseline, log is actual.** The approved plan is locked; re-forecast is **computed**
   from baseline + logs + remaining effective periods — never stored as mutated plan rows.
 - **P3 — Teachers get value before they give data** (logging homework auto-notifies parents).
@@ -175,13 +184,15 @@ uv run alembic upgrade head && uv run pytest -q
 - **P5 — Nobody writes a report.** Every report is a byproduct of doing the work, captured at the
   moment with evidence (a tap, a count, a batch photo — never per-student photos).
 
-## Roles & hard rules
+## Roles & hard rules (v2 — SPRD2 §2, implemented)
 
-Roles extend the seed's admin/member: `admin` (Director) · `coordinator` · `teacher` · `office`
-(existing `member` → `teacher` on migration). New deps: `require_coordinator_up`, `require_academic`,
-`require_office_up`. Permissions are backend-enforced (SPRD §3.3), UI mirrors. Non-negotiable:
-**teachers never see fees; office never sees academic data; band tiers never reach parents.**
-Parents have **no login** in v1 — guardians are records that receive outbound notifications only.
+**Two roles only:** `admin` (runs the school: setup, plan approval, bands, fees, dashboard,
+members) · `teacher` (all academic staff incl. wardens: My Day, sessions, plan/timetable views,
+their students, tasks). Migration `e9fab0c1d2e3` collapsed coordinator/office → admin.
+`require_coordinator_up` / `require_office_up` are now **admin-only aliases** (consolidate to
+`require_admin` opportunistically when touching a file); `require_academic` = any member.
+Non-negotiable: **teachers never see fees; band tiers never reach parents/guardians.**
+Parents have **no login** — guardians are records that receive outbound notifications only.
 
 ## AI services & stubs
 
@@ -192,20 +203,23 @@ integrations (email/R2/billing/push stub when keys blank). **No chat UI** — AI
 a human-confirm surface before persisting** (editable drafts, verify grids). Model ids come from env
 (`AI_MODEL_DRAFT`, `AI_MODEL_PARSE`); use current Claude models per the claude-api skill.
 
-## Fences — do NOT build (SPRD §11 / arch §8, binding)
+## Fences — v2 (SPRD2 §11, binding; supersedes arch §8)
 
-No timetable generator (periods/week is entered data, never generated) · no school-wide attendance
-registers (M2 Sessions are teacher-run classes only, not registers) · no test authoring/conducting
-(TrackBit records the school's own paper tests) · no parent app/login · no chatbot/AI-orchestrator
-UI · no per-student evidence photos (batch only) · no visitor/inventory/social/health modules · no
-report-card designer. LMS + teacher training belong to a separate product (Playground). If a school
-asks for these, the answer is "we work alongside your ERP," not a rebuild.
+**Moved IN by founder decision (July 2026):** per-period attendance (capture-by-exception only) ·
+timetable (import-first + AI-assisted draft with **deterministic** validators — still no guaranteed
+solver) · daily report generation · per-student homework.
+
+**Still OUT:** payroll/HR/library/transport/inventory/visitor/social modules · report-card
+designer · test authoring/conducting · parent app or login (notifications only) · chat UI /
+AI-orchestrator surface · **mandatory per-student capture** (exception-only, always — P1v2) ·
+per-student evidence photos (batch only). LMS + teacher training = Playground's lane.
 
 ## Build order
 
-Work **packet-by-packet** per SPRD §10; do not mark a packet done until its **Done-when** criteria
-pass. Sequence: **P0** foundation (bootstrap → roles → master data → fee port) → **P1** Planner +
-Classroom Log (the make-or-break phase: are teachers still logging in week 4?) → **P1.5** Sessions →
-**P2** Dashboard + digest → **P3** Assessments & Bands. Growth profiles and WhatsApp capture are
-v1.5. The core loop: **M1 sets the plan → M2 records reality → M3/M4 detect gaps → M5 assigns the
-response → M4 shows whether it worked.**
+Work **packet-by-packet** per **SPRD2 §10**; do not mark a packet done until its **Done-when**
+criteria pass. Sequence: V2-P0-B (IA reshell) → V2-P1 (timetable) → V2-P2 (attendance + My Day v2)
+→ V2-P3 (recommendations/checks) → V2-P4 (daily report + timeline + cron wiring) → V2-P5 (wizard +
+plan generation). After every packet the v1 flows (quick log, sessions, fees, tasks) must still
+pass their tests. The core loop v2: **wizard compiles the year → teachers confirm each period by
+exception → the system joins it into per-student truth → the 8 AM report tells the admin what
+needs attention → gaps become tasks.**

@@ -103,7 +103,7 @@ function CaptureInner({ id }: { id: string }) {
 export default function SessionCapturePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <CaptureInner id={id} />
     </AuthGuard>
   );

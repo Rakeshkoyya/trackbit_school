@@ -102,7 +102,7 @@ function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
 
 function MyDayInner() {
   const { me } = useAuth();
-  const canSeeCompliance = me?.org_role === "admin" || me?.org_role === "coordinator";
+  const canSeeCompliance = me?.org_role === "admin";
   const [hwFor, setHwFor] = useState<MyDayClass | null>(null);
   const { data } = useQuery({ queryKey: ["my-day"], queryFn: schoolApi.myDay });
 
@@ -129,7 +129,7 @@ function MyDayInner() {
       <h2 className="mb-2 text-sm font-semibold">Today’s classes</h2>
       {!data || data.classes.length === 0 ? (
         <EmptyState icon={BookOpen} title="No classes assigned to you"
-          body="Ask your coordinator to assign your subjects on the Setup → class page." />
+          body="Ask your admin to assign your subjects on the Setup → class page." />
       ) : (
         <div className="space-y-3">
           {data.classes.map((c) => <ClassCard key={c.class_subject_id} c={c} onHomework={() => setHwFor(c)} />)}
@@ -142,7 +142,7 @@ function MyDayInner() {
 
 export default function ClassroomPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <MyDayInner />
     </AuthGuard>
   );

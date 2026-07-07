@@ -182,7 +182,7 @@ function InsightsInner() {
 
 export default function InsightsPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator"]}>
+    <AuthGuard allow={["admin"]}>
       <InsightsInner />
     </AuthGuard>
   );

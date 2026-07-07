@@ -136,7 +136,7 @@ function FeeDetailInner({ id }: { id: string }) {
 export default function FeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   return (
-    <AuthGuard allow={["admin", "office"]}>
+    <AuthGuard allow={["admin"]}>
       <FeeDetailInner id={id} />
     </AuthGuard>
   );

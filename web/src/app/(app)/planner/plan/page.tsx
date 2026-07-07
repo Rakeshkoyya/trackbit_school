@@ -119,7 +119,7 @@ function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit: boolea
 
 function PlanInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin" || me?.org_role === "coordinator";
+  const canEdit = me?.org_role === "admin";
   const canApprove = me?.org_role === "admin";
   const { yearId } = useYear();
   const [pickedClass, setPickedClass] = useState("");
@@ -195,7 +195,7 @@ function PlanInner() {
 
 export default function PlanPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <PlanInner />
     </AuthGuard>
   );

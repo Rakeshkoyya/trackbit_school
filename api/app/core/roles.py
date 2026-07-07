@@ -1,29 +1,33 @@
-"""Org roles and role-group helpers (SPRD §3.2–3.3).
+"""Org roles and role-group helpers (SPRD v2 §2; supersedes v1 §3.2–3.3).
 
-Extends the seed's admin/member model to the four TrackBit School roles. The
-former `member` role maps to `teacher` on migration (P0-B). `admin` keeps every
-existing admin semantic (it is the Director).
+v2 collapses the four school roles to two:
+  * `admin`   — runs the school: setup, plan approval, bands, fees, dashboard,
+                members. Whoever registers the org is an admin and can add more.
+  * `teacher` — all academic staff (subject teachers, wardens, coordinators in
+                spirit): My Day capture, sessions, homework, viewing plans.
 
-Hard rules the groups below encode (SPRD §3.3):
-  - teachers never see fees        -> fees use OFFICE_UP (admin|office)
-  - office never sees academics    -> academics use ACADEMIC (admin|coordinator|teacher)
-  - approvals/verify are staff-lead -> COORDINATOR_UP (admin|coordinator)
+Former `coordinator` and `office` memberships were migrated to `admin`
+(migration e9fab0c1d2e3_two_roles).
+
+The v1 group names are kept so permission dependencies and services don't
+churn; their v2 meanings:
+  - COORDINATOR_UP -> admin only          (approvals, verification, compliance)
+  - OFFICE_UP      -> admin only          (fees; teachers never see fees)
+  - ACADEMIC       -> admin | teacher     (every member is academic staff in v2)
 """
 
-ADMIN = "admin"  # Director
-COORDINATOR = "coordinator"
+ADMIN = "admin"
 TEACHER = "teacher"
-OFFICE = "office"
 
-ALL_ROLES: tuple[str, ...] = (ADMIN, COORDINATOR, TEACHER, OFFICE)
+ALL_ROLES: tuple[str, ...] = (ADMIN, TEACHER)
 
 # Role groups consumed by the permission dependencies (app/core/dependencies.py).
-COORDINATOR_UP: frozenset[str] = frozenset({ADMIN, COORDINATOR})
-ACADEMIC: frozenset[str] = frozenset({ADMIN, COORDINATOR, TEACHER})
-OFFICE_UP: frozenset[str] = frozenset({ADMIN, OFFICE})
+COORDINATOR_UP: frozenset[str] = frozenset({ADMIN})
+ACADEMIC: frozenset[str] = frozenset({ADMIN, TEACHER})
+OFFICE_UP: frozenset[str] = frozenset({ADMIN})
 
 # Shared pydantic pattern for role fields on request schemas.
-ROLE_PATTERN = "^(admin|coordinator|teacher|office)$"
+ROLE_PATTERN = "^(admin|teacher)$"
 
 # SQL fragment for the memberships CHECK constraint (kept in sync with the model).
-ROLE_SQL_TUPLE = "('admin', 'coordinator', 'teacher', 'office')"
+ROLE_SQL_TUPLE = "('admin', 'teacher')"

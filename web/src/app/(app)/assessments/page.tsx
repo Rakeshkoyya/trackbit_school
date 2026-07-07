@@ -174,7 +174,7 @@ function TrendsView({ classId }: { classId: string }) {
 
 function AssessmentsInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin" || me?.org_role === "coordinator";
+  const canEdit = me?.org_role === "admin";
   const { yearId } = useYear();
   const [tab, setTab] = useState<"scores" | "bands" | "trends">("scores");
   const [pickedClass, setPickedClass] = useState("");
@@ -260,7 +260,7 @@ function NewCycleSheet({ open, onOpenChange, termId, yearId }: { open: boolean; 
 
 export default function AssessmentsPage() {
   return (
-    <AuthGuard allow={["admin", "coordinator", "teacher"]}>
+    <AuthGuard allow={["admin", "teacher"]}>
       <AssessmentsInner />
     </AuthGuard>
   );

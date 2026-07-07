@@ -202,7 +202,7 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
 
 function StudentsInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin" || me?.org_role === "coordinator";
+  const canEdit = me?.org_role === "admin";
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);

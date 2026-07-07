@@ -147,7 +147,7 @@ function FeesInner() {
 
 export default function FeesPage() {
   return (
-    <AuthGuard allow={["admin", "office"]}>
+    <AuthGuard allow={["admin"]}>
       <FeesInner />
     </AuthGuard>
   );

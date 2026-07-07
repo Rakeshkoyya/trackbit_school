@@ -71,9 +71,9 @@ class Membership(Base, UUIDPKMixin, CreatedAtMixin):
 
     __table_args__ = (
         UniqueConstraint("org_id", "user_id"),
-        # SPRD §3.2: admin (Director) · coordinator · teacher · office.
+        # SPRD v2 §2: two roles — admin (runs the school) · teacher (all staff).
         CheckConstraint(
-            "org_role IN ('admin', 'coordinator', 'teacher', 'office')", name="org_role_valid"
+            "org_role IN ('admin', 'teacher')", name="org_role_valid"
         ),
         CheckConstraint("status IN ('active', 'removed')", name="status_valid"),
         Index("ix_memberships_user_status", "user_id", "status"),

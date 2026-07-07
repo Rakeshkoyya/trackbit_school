@@ -123,7 +123,7 @@ function StructuresInner() {
 
 export default function StructuresPage() {
   return (
-    <AuthGuard allow={["admin", "office"]}>
+    <AuthGuard allow={["admin"]}>
       <StructuresInner />
     </AuthGuard>
   );

@@ -37,7 +37,7 @@ function ComplianceInner() {
 
 export default function CompliancePage() {
   return (
-    <AuthGuard allow={["admin", "coordinator"]}>
+    <AuthGuard allow={["admin"]}>
       <ComplianceInner />
     </AuthGuard>
   );
