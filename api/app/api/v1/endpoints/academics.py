@@ -28,8 +28,10 @@ from app.schemas.academics import (
     YearOut,
     YearUpdate,
 )
+from app.schemas.calendar import CalendarEventCreate, CalendarEventOut, CalendarSummary
 from app.schemas.common import MessageResponse
 from app.services.academics import AcademicService
+from app.services.calendar import CalendarService
 
 router = APIRouter()
 
@@ -165,3 +167,29 @@ def delete_class_subject(cs_id: uuid.UUID, m: CurrentMember = Depends(require_co
                          db: Session = Depends(get_db)):
     AcademicService(db).delete_class_subject(m, cs_id)
     return MessageResponse(message="Removed.")
+
+
+# ── calendar & effective teaching days (M1) ───────────────────────────────────
+@router.get("/calendar/summary", response_model=CalendarSummary)
+def calendar_summary(year_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                     db: Session = Depends(get_db)):
+    return CalendarService(db).summary(m, year_id)
+
+
+@router.get("/calendar/events", response_model=list[CalendarEventOut])
+def list_events(year_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                db: Session = Depends(get_db)):
+    return CalendarService(db).list_events(m, year_id)
+
+
+@router.post("/calendar/events", response_model=CalendarEventOut)
+def create_event(body: CalendarEventCreate, m: CurrentMember = Depends(require_coordinator_up),
+                 db: Session = Depends(get_db)):
+    return CalendarService(db).create_event(m, body)
+
+
+@router.delete("/calendar/events/{event_id}", response_model=MessageResponse)
+def delete_event(event_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+                 db: Session = Depends(get_db)):
+    CalendarService(db).delete_event(m, event_id)
+    return MessageResponse(message="Event removed.")

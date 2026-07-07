@@ -29,6 +29,28 @@ export interface SchoolClass {
   class_teacher_member_id: string | null;
 }
 
+export type CalendarEventType = "holiday" | "exam_block" | "event" | "celebration";
+
+export interface CalendarEvent {
+  id: string;
+  academic_year_id: string;
+  type: CalendarEventType;
+  title: string;
+  start_date: string;
+  end_date: string;
+  affects_teaching: boolean;
+  notes: string | null;
+}
+
+export interface CalendarSummary {
+  academic_year_id: string;
+  start_date: string;
+  end_date: string;
+  working_weekdays: number[];
+  teaching_days: number;
+  events: CalendarEvent[];
+}
+
 export interface ClassSubject {
   id: string;
   class_id: string;

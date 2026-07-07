@@ -2,6 +2,7 @@
 
 from app.models.academics import (
     AcademicYear,
+    CalendarEvent,
     ClassSubject,
     SchoolClass,
     Subject,
@@ -32,6 +33,7 @@ __all__ = [
     "Board",
     "BoardCategory",
     "BoardMember",
+    "CalendarEvent",
     "ClassSubject",
     "DeviceToken",
     "EVENT_TYPES",

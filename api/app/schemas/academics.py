@@ -26,6 +26,7 @@ class YearUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=32)
     start_date: date | None = None
     end_date: date | None = None
+    working_weekdays: list[int] | None = Field(default=None)
 
 
 class YearOut(BaseModel):
@@ -35,6 +36,7 @@ class YearOut(BaseModel):
     start_date: date
     end_date: date
     is_active: bool
+    working_weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5])
 
 
 # ── Term ─────────────────────────────────────────────────────────────────────

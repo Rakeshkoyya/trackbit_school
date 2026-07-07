@@ -4,7 +4,7 @@ Idempotent: wipes and recreates the demo org by name. Run:
     python -m scripts.seed
 """
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -12,14 +12,29 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models import (
+    AcademicYear,
     Board,
     BoardMember,
+    CalendarEvent,
+    ClassSubject,
+    FeeInstallmentTemplate,
+    FeeStructure,
+    Guardian,
+    Installment,
     Membership,
     Organization,
+    SchoolClass,
+    Student,
+    StudentCategory,
+    StudentFee,
+    Subject,
     TaskEvent,
     TaskInstance,
+    Term,
+    Transaction,
     User,
 )
+from app.services.fee_math import proportional_installments, q, recompute_student_fee
 
 IST = timezone(timedelta(hours=5, minutes=30))
 DEMO_ORG_NAME = "SHANA Ops (demo)"
@@ -51,6 +66,126 @@ def wipe_demo(db: Session) -> None:
     db.flush()
 
 
+def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict:
+    """Populate one demo year: calendar, classes/subjects, a roster, and fees —
+    so every academic + fee screen renders meaningfully on review."""
+    teachers = [u for u, m in mships.items() if m.org_role == "teacher"]
+    ramesh, anil = teachers[0], teachers[1]
+    priya = next(u for u, m in mships.items() if m.org_role == "coordinator")
+
+    year = AcademicYear(org_id=org.id, label="2026-27", start_date=date(2026, 4, 1),
+                        end_date=date(2027, 3, 31), is_active=True)
+    db.add(year)
+    db.flush()
+    db.add_all([
+        Term(org_id=org.id, academic_year_id=year.id, name="Term 1",
+             start_date=date(2026, 4, 1), end_date=date(2026, 9, 30)),
+        Term(org_id=org.id, academic_year_id=year.id, name="Term 2",
+             start_date=date(2026, 10, 1), end_date=date(2027, 3, 31)),
+    ])
+
+    subjects = {}
+    for name in ["English", "Mathematics", "Science", "Social Studies", "Hindi"]:
+        s = Subject(org_id=org.id, name=name)
+        db.add(s)
+        subjects[name] = s
+    db.flush()
+
+    # Calendar — a holiday, a celebration, and an exam block (drive effective days).
+    db.add_all([
+        CalendarEvent(org_id=org.id, academic_year_id=year.id, type="holiday",
+                      title="Independence Day", start_date=date(2026, 8, 15),
+                      end_date=date(2026, 8, 15)),
+        CalendarEvent(org_id=org.id, academic_year_id=year.id, type="celebration",
+                      title="Teachers' Day", start_date=date(2026, 9, 5), end_date=date(2026, 9, 5)),
+        CalendarEvent(org_id=org.id, academic_year_id=year.id, type="exam_block",
+                      title="Half-yearly Exams", start_date=date(2026, 9, 21),
+                      end_date=date(2026, 9, 30)),
+        CalendarEvent(org_id=org.id, academic_year_id=year.id, type="holiday",
+                      title="Dussehra Break", start_date=date(2026, 10, 19),
+                      end_date=date(2026, 10, 23)),
+    ])
+
+    classes = {}
+    for cname, section, teacher in [("6", "A", ramesh), ("6", "B", anil), ("7", "A", priya)]:
+        c = SchoolClass(org_id=org.id, academic_year_id=year.id, name=cname, section=section,
+                        class_teacher_member_id=mships[teacher].id)
+        db.add(c)
+        classes[f"{cname}-{section}"] = c
+    db.flush()
+
+    periods = {"English": 6, "Mathematics": 6, "Science": 5, "Social Studies": 4, "Hindi": 4}
+    for c in classes.values():
+        for sname, pw in periods.items():
+            teacher = ramesh if sname in ("Mathematics", "Science") else anil
+            db.add(ClassSubject(org_id=org.id, class_id=c.id, subject_id=subjects[sname].id,
+                                teacher_member_id=mships[teacher].id, periods_per_week=pw))
+
+    cats = {}
+    for name in ["Day Scholar", "Hosteller"]:
+        cat = StudentCategory(org_id=org.id, name=name)
+        db.add(cat)
+        cats[name] = cat
+    db.flush()
+
+    # Roster — 15 students across the three classes, with a primary guardian.
+    first = ["Asha", "Bhavya", "Chetan", "Divya", "Esha", "Farhan", "Gita", "Harsh",
+             "Isha", "Jatin", "Kiran", "Lata", "Manoj", "Nisha", "Omar"]
+    class_keys = ["6-A", "6-B", "7-A"]
+    students = []
+    for i, name in enumerate(first):
+        ckey = class_keys[i % 3]
+        cat = cats["Hosteller"] if i % 4 == 0 else cats["Day Scholar"]
+        st = Student(org_id=org.id, admission_no=f"A{601 + i}", full_name=f"{name} Kumar",
+                     class_id=classes[ckey].id, roll_no=str(i + 1), category_id=cat.id)
+        db.add(st)
+        db.flush()
+        db.add(Guardian(org_id=org.id, student_id=st.id, name=f"Mr. {name}'s Father",
+                        relation="Father", phone=f"+9198000100{i:02d}", is_primary=True))
+        students.append(st)
+
+    # Fee structure for class 6, then enrol the class-6 students + a couple of payments.
+    fs = FeeStructure(org_id=org.id, class_name="6", academic_year_id=year.id,
+                      total_amount=q(30000), num_installments=3, created_by=kc.id,
+                      templates=[
+                          FeeInstallmentTemplate(org_id=org.id, installment_number=n,
+                                                 label=f"Installment {n}", amount=q(10000),
+                                                 due_date=due)
+                          for n, due in [(1, date(2026, 4, 15)), (2, date(2026, 8, 15)),
+                                         (3, date(2026, 12, 15))]
+                      ])
+    db.add(fs)
+    db.flush()
+
+    enrolled = 0
+    for idx, st in enumerate(s for s in students if s.class_id in
+                             (classes["6-A"].id, classes["6-B"].id)):
+        scaled = proportional_installments(q(30000), [q(10000)] * 3)
+        sf = StudentFee(org_id=org.id, student_id=st.id, fee_structure_id=fs.id,
+                        academic_year_id=year.id, total_fee=q(30000), discount=q(0),
+                        net_fee=q(30000), created_by=kc.id, installments=[
+                            Installment(org_id=org.id, installment_number=n + 1,
+                                        label=t.label, amount=scaled[n], due_date=t.due_date)
+                            for n, t in enumerate(sorted(fs.templates,
+                                                         key=lambda x: x.installment_number))
+                        ])
+        db.add(sf)
+        db.flush()
+        # First two enrolments have paid installment 1.
+        if idx < 2:
+            inst = sf.installments[0]
+            inst.paid_amount = q(10000)
+            inst.paid_date = date(2026, 4, 10)
+            db.add(Transaction(org_id=org.id, student_fee_id=sf.id, installment_id=inst.id,
+                               amount=q(10000), type="payment", mode="cash",
+                               created_by=kc.id, created_by_name=kc.name))
+        recompute_student_fee(sf)
+        enrolled += 1
+
+    db.flush()
+    return {"students": len(students), "classes": len(classes), "enrolled": enrolled}
+
+
 def seed() -> None:
     db = SessionLocal()
     try:
@@ -70,11 +205,17 @@ def seed() -> None:
         db.flush()
 
         # School roles (SPRD §3.2): KC director, Priya coordinator, the rest teachers.
+        mships: dict[User, Membership] = {}
         for role, user in [
             ("admin", kc), ("coordinator", priya), ("teacher", ramesh), ("teacher", anil),
         ]:
-            db.add(Membership(org_id=org.id, user_id=user.id, org_role=role, last_active_at=_now()))
+            mem = Membership(org_id=org.id, user_id=user.id, org_role=role, last_active_at=_now())
+            db.add(mem)
+            mships[user] = mem
         db.flush()
+
+        # --- School master data + academics (M1) + fees (M6) ----------------
+        counts = _seed_school(db, org, kc, mships)
 
         # --- Boards ---------------------------------------------------------
         daily = Board(org_id=org.id, name="Daily Ops", visibility="public",
@@ -179,9 +320,11 @@ def seed() -> None:
 
         db.commit()
         print(f"Seeded '{DEMO_ORG_NAME}': org={org.id}")
-        print("  users=4 (admin KC, members Priya/Ramesh/Anil)")
+        print("  users=4 (director KC, coordinator Priya, teachers Ramesh/Anil)")
         print("  boards=2 (Daily Ops public, Admissions private)")
-        print(f"  instances={len(instances)}")
+        print(f"  tasks={len(instances)}")
+        print(f"  school: {counts['classes']} classes, {counts['students']} students, "
+              f"{counts['enrolled']} fee enrolments (year 2026-27)")
         print("  login: kc@demo.trackbit.app / demo1234")
     except Exception:
         db.rollback()

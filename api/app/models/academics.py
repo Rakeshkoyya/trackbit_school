@@ -10,13 +10,15 @@ from datetime import date
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     ForeignKey,
     Integer,
     Text,
     UniqueConstraint,
+    text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -42,6 +44,11 @@ class AcademicYear(Base, UUIDPKMixin, CreatedAtMixin):
     # Exactly one active year per org is enforced in the service layer, not the DB
     # (a partial unique index would fight the archive-on-replace flow).
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Working weekdays as Python weekday ints (Mon=0 … Sun=6). Default Mon–Sat —
+    # the Indian-school norm. Drives the effective-teaching-days engine (M1).
+    working_weekdays: Mapped[list[int]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[0, 1, 2, 3, 4, 5]'::jsonb")
+    )
 
     terms: Mapped[list["Term"]] = relationship(
         "Term", back_populates="academic_year", cascade="all, delete-orphan",
@@ -128,4 +135,29 @@ class ClassSubject(Base, UUIDPKMixin, CreatedAtMixin):
 
     __table_args__ = (
         UniqueConstraint("class_id", "subject_id", name="uq_class_subjects_class_id"),
+    )
+
+
+class CalendarEvent(Base, UUIDPKMixin, CreatedAtMixin):
+    """School-calendar entry (SPRD §4.3). affects_teaching marks days the
+    effective-days engine removes from the teaching total (holidays, exam blocks,
+    events, celebrations)."""
+
+    __tablename__ = "calendar_events"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    academic_year_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("academic_years.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    affects_teaching: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('holiday', 'exam_block', 'event', 'celebration')", name="type_valid"
+        ),
     )

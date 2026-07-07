@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  CalendarRange,
   CheckCircle2,
   GraduationCap,
   Home,
@@ -26,6 +27,7 @@ export const memberNav: NavItem[] = [
   { label: "Done", href: "/done", icon: CheckCircle2 },
 ];
 
+const planner: NavItem = { label: "Planner", href: "/planner", icon: CalendarRange };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
 const setup: NavItem = { label: "Setup", href: "/academics", icon: BookOpen };
@@ -37,13 +39,13 @@ const members: NavItem = { label: "Members", href: "/members", icon: Users, tour
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [...memberNav, students, fees, dashboard, setup, members];
+      return [...memberNav, planner, students, fees, dashboard, setup, members];
     case "coordinator":
-      return [...memberNav, students, dashboard, setup];
+      return [...memberNav, planner, students, dashboard, setup];
     case "office":
       return [...memberNav, fees];
     case "teacher":
-      return [...memberNav, students];
+      return [...memberNav, planner, students];
     default:
       return memberNav;
   }

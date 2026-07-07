@@ -1,6 +1,8 @@
 import { api } from "@/lib/api-client";
 import type {
   AcademicYear,
+  CalendarEvent,
+  CalendarSummary,
   ClassSubject,
   FeeStructure,
   FeeSummary,
@@ -43,6 +45,19 @@ export const schoolApi = {
   createClass: (b: { academic_year_id: string; name: string; section?: string | null }) =>
     api.post<SchoolClass>("/academics/classes", b),
   deleteClass: (id: string) => api.del<{ message: string }>(`/academics/classes/${id}`),
+
+  // calendar (M1)
+  calendarSummary: (yearId: string) =>
+    api.get<CalendarSummary>(`/academics/calendar/summary${qs({ year_id: yearId })}`),
+  createEvent: (b: {
+    academic_year_id: string;
+    type: string;
+    title: string;
+    start_date: string;
+    end_date: string;
+    affects_teaching?: boolean;
+  }) => api.post<CalendarEvent>("/academics/calendar/events", b),
+  deleteEvent: (id: string) => api.del<{ message: string }>(`/academics/calendar/events/${id}`),
 
   classSubjects: (classId: string) =>
     api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
