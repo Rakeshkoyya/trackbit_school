@@ -1,0 +1,26 @@
+# TrackBit School — monorepo ignore (api + web)
+
+# Python / backend
+api/.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+api/media/
+
+# Node / frontend
+web/node_modules/
+web/.next/
+web/out/
+*.tsbuildinfo
+
+# Env & secrets (only .env.example is committed)
+.env
+.env.local
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

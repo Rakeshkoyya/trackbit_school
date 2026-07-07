@@ -1,0 +1,30 @@
+# Keep the build context small; never ship local builds or secrets.
+
+# Dependencies (reinstalled fresh via `npm ci` in the image)
+node_modules/
+
+# Next.js build output (rebuilt in the image)
+.next/
+out/
+build/
+
+# Env & secrets — NEXT_PUBLIC_* is passed as a build arg instead
+.env
+.env.*
+!.env.example
+
+# VCS & editor
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Misc local files
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+.vercel
+
+# Docker
+Dockerfile
+.dockerignore

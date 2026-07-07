@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/*
+  TrackBit design tokens. North-star palette: calm and warm, never alarming.
+  Overdue uses amber (warning), not red — "misses never stack into shame".
+  Two themes: light (:root) and dark (.dark on <html>). The .dark class is set
+  pre-hydration by an inline script in layout.tsx, so there is no flash; the
+  topbar toggle (theme-toggle.tsx) flips it and persists to localStorage.
+  Components only ever reference the semantic tokens below, so both themes flow
+  through automatically via the @theme inline mapping.
+*/
+:root {
+  color-scheme: light;
+
+  --background: #f7f7f5;        /* warm off-white app canvas */
+  --foreground: #1c1b19;        /* near-black ink */
+  --card: #ffffff;
+  --card-foreground: #1c1b19;
+  --muted: #f0efea;
+  --muted-foreground: #6b6a64;
+  --border: #e6e4dd;
+  --input: #e6e4dd;
+  --ring: #2f6f4f;
+
+  --primary: #2f6f4f;           /* calm forest green — "done" energy */
+  --primary-foreground: #ffffff;
+
+  --accent: #eef4f0;
+  --accent-foreground: #234a37;
+
+  --success: #2f8f5b;
+  --success-foreground: #ffffff;
+
+  --warning: #b5791f;           /* amber for overdue — gentle, not red */
+  --warning-foreground: #ffffff;
+  --warning-soft: #fbf3e3;
+
+  --danger: #b3402f;            /* reserved; used sparingly (destructive only) */
+  --danger-foreground: #ffffff;
+
+  --radius: 0.75rem;
+}
+
+/*
+  Dark theme — a warm charcoal canvas (not cold blue-grey) so it stays in the
+  same calm family as light. Greens/ambers are nudged brighter so they read
+  against the dark surfaces; foreground is a warm off-white, never pure white.
+*/
+.dark {
+  color-scheme: dark;
+
+  --background: #16160f;        /* warm near-black canvas */
+  --foreground: #ece9e1;        /* warm off-white ink */
+  --card: #21211b;             /* raised surface */
+  --card-foreground: #ece9e1;
+  --muted: #2a2922;
+  --muted-foreground: #a6a399;
+  --border: #34332b;
+  --input: #34332b;
+  --ring: #5fae84;
+
+  --primary: #3a9468;           /* forest green, brightened for dark */
+  --primary-foreground: #f7faf8;
+
+  --accent: #243029;            /* deep green-tinted surface */
+  --accent-foreground: #bfe3cf;
+
+  --success: #43a771;
+  --success-foreground: #07150e;
+
+  --warning: #d49a3f;           /* amber, brightened for dark */
+  --warning-foreground: #1c1405;
+  --warning-soft: #2d2415;      /* dark amber wash for overdue rows */
+
+  --danger: #d8624e;
+  --danger-foreground: #1a0a07;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 0.25rem);
+  --radius-sm: calc(var(--radius) - 0.4rem);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Celebration & micro-interactions (plan §3.1) ---- */
+@keyframes tb-check-pop {
+  0% { transform: scale(0.6); }
+  55% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes tb-row-out {
+  0% { opacity: 1; transform: translateX(0); max-height: 120px; }
+  60% { opacity: 0; transform: translateX(8px); }
+  100% { opacity: 0; transform: translateX(8px); max-height: 0; margin: 0; padding-top: 0; padding-bottom: 0; }
+}
+@keyframes tb-sparkle {
+  0% { transform: translate(0, 0) scale(0); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; }
+}
+@keyframes tb-ritual-in {
+  0% { opacity: 0; transform: scale(0.94); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes tb-pop-in {
+  0% { opacity: 0; transform: scale(0.5); }
+  60% { opacity: 1; transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+@keyframes tb-menu-in {
+  0% { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.tb-check-pop { animation: tb-check-pop 220ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.tb-row-out { animation: tb-row-out 700ms ease forwards; overflow: hidden; }
+.tb-ritual-in { animation: tb-ritual-in 360ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.tb-pop-in { animation: tb-pop-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.tb-menu-in { animation: tb-menu-in 140ms ease-out; transform-origin: top right; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-check-pop, .tb-row-out, .tb-ritual-in, .tb-pop-in, .tb-menu-in { animation: none; }
+}
