@@ -305,7 +305,13 @@ def seed() -> None:
                       category="tasks", created_by=kc.id, owner_id=kc.id)
         admissions = Board(org_id=org.id, name="Admissions", visibility="private",
                            category="tasks", created_by=kc.id, owner_id=kc.id)
-        db.add_all([daily, admissions])
+        # Ops board templates (SPRD §5.5, zero new code) — the director's
+        # repair/maintenance and cleaning trackers ship as ready-made boards.
+        maintenance = Board(org_id=org.id, name="Maintenance", visibility="public",
+                            category="tasks", created_by=kc.id, owner_id=kc.id)
+        housekeeping = Board(org_id=org.id, name="Housekeeping", visibility="public",
+                             category="tasks", created_by=kc.id, owner_id=kc.id)
+        db.add_all([daily, admissions, maintenance, housekeeping])
         db.flush()
 
         # Board membership. Owners are always board members (so a flip to private
@@ -314,6 +320,8 @@ def seed() -> None:
             BoardMember(board_id=daily.id, user_id=kc.id),
             BoardMember(board_id=admissions.id, user_id=kc.id),
             BoardMember(board_id=admissions.id, user_id=priya.id),
+            BoardMember(board_id=maintenance.id, user_id=kc.id),
+            BoardMember(board_id=housekeeping.id, user_id=kc.id),
         ])
         db.flush()
 
@@ -401,10 +409,14 @@ def seed() -> None:
                      {"type": "completed", "actor": priya.id, "when": _today_at(13, 0)},
                  ])
 
+        # Ops board templates in action.
+        add_task(maintenance, "Fix broken fan in 6-B", assignee=anil, due=_today_at(12, 0))
+        add_task(housekeeping, "Clean science lab", assignee=ramesh, due=_today_at(17, 0))
+
         db.commit()
         print(f"Seeded '{DEMO_ORG_NAME}': org={org.id}")
         print("  users=4 (director KC, coordinator Priya, teachers Ramesh/Anil)")
-        print("  boards=2 (Daily Ops public, Admissions private)")
+        print("  boards=4 (Daily Ops, Admissions, Maintenance, Housekeeping)")
         print(f"  tasks={len(instances)}")
         print(f"  school: {counts['classes']} classes, {counts['students']} students, "
               f"{counts['enrolled']} fee enrolments (year 2026-27)")

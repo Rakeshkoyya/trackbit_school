@@ -175,6 +175,47 @@ export interface SessionRecord {
   evidence_url: string | null;
 }
 
+// ── director dashboard (M4) ─────────────────────────────────────────────────
+export interface DashboardAlert {
+  id: string;
+  type: "pace" | "compliance" | "homework";
+  severity: "amber" | "red";
+  title: string;
+  detail: string;
+  class_id: string | null;
+  class_subject_id: string | null;
+}
+
+export interface HomeworkClassHealth {
+  class_label: string;
+  assignments: number;
+  completion: number | null;
+}
+
+export interface HomeworkHealth {
+  window_days: number;
+  overall_completion: number | null;
+  classes: HomeworkClassHealth[];
+}
+
+export interface DashboardOverview {
+  academic_year_id: string | null;
+  rag_green: number;
+  rag_amber: number;
+  rag_red: number;
+  rag: Forecast[];
+  fees: FeeSummary | null;
+  sessions: SessionRecord[];
+  homework: HomeworkHealth;
+  alerts: DashboardAlert[];
+}
+
+export interface Digest {
+  text: string;
+  issues: string[];
+  wins: string[];
+}
+
 export interface ClassSubject {
   id: string;
   class_id: string;

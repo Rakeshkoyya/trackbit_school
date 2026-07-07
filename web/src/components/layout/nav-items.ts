@@ -35,7 +35,7 @@ const planner: NavItem = { label: "Planner", href: "/planner", icon: CalendarRan
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
 const setup: NavItem = { label: "Setup", href: "/academics", icon: BookOpen };
-const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
+const dashboard: NavItem = { label: "Dashboard", href: "/insights", icon: BarChart3 };
 const members: NavItem = { label: "Members", href: "/members", icon: Users, tour: "nav-members" };
 
 // Role-aware primary nav (single source of truth for sidebar + bottom tabs).
@@ -60,5 +60,7 @@ export function navForRole(role: OrgRole | string | undefined): NavItem[] {
 // teacher My Day (P1) and Fees home (P0-E) land later, so those roles route to
 // the task Home for now. One place to extend as the module homes arrive.
 export function landingForRole(role: OrgRole | string | undefined): string {
-  return role === "admin" ? "/dashboard" : "/home";
+  if (role === "admin") return "/insights";      // Director → school dashboard
+  if (role === "teacher") return "/classroom";    // Teacher → My Day
+  return "/home";
 }

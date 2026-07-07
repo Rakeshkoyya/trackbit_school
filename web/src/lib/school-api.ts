@@ -107,6 +107,14 @@ export const schoolApi = {
     return api.upload<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/photo`, form);
   },
   sessionRecords: () => api.get<import("@/lib/school-types").SessionRecord[]>("/sessions/records"),
+
+  // director dashboard (M4)
+  dashboard: (yearId?: string) =>
+    api.get<import("@/lib/school-types").DashboardOverview>(`/dashboard/overview${qs({ year_id: yearId })}`),
+  digest: (yearId?: string) =>
+    api.get<import("@/lib/school-types").Digest>(`/dashboard/digest${qs({ year_id: yearId })}`),
+  createTaskFromAlert: (b: { board_id: string; title: string; description?: string | null }) =>
+    api.post<{ id: string }>("/dashboard/alerts/create-task", b),
   addClassSubject: (b: {
     class_id: string;
     subject_id: string;

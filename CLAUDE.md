@@ -52,15 +52,19 @@ Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@
 — all `@demo.trackbit.app`.
 
 - **P1.5** — `models/sessions.py` (sessions, session_students, session_meetings, session_attendance;
-  migration `d7d8e9fab0c1`); `SessionService` (My Sessions, create+roster, get-or-create today's
-  meeting, upsert attendance, batch-photo evidence via `storage`, records feed); `/sessions/*`;
-  web `/sessions` (SS-1) + `/sessions/[id]` (SS-2 tap-capture + one batch photo). Migration head
-  **`d7d8e9fab0c1`**.
+  migration `d7d8e9fab0c1`); `SessionService`; `/sessions/*`; web `/sessions` (SS-1) +
+  `/sessions/[id]` (SS-2 tap-capture + one batch photo).
+- **P2** — Director Dashboard (M4): `services/dashboard.py` composes planner forecast + fees + session
+  records + classroom compliance/homework into a RAG board + alert feed (pace/compliance/homework);
+  one-tap **alert→task** (reuses `TaskService.create`); Monday **digest** preview. `/dashboard/*`
+  (fee card director-only, §3.3); web `/insights` (nav "Dashboard" → `/insights`). Board templates
+  (Maintenance/Housekeeping) ship via seed (§5.5, zero new code). Migration head still
+  **`d7d8e9fab0c1`** (no new tables — the dashboard stores nothing).
 
-**Deferred items:** the *fees-mode* xlsx import; the 4 pm unlogged-class reminder + Saturday guardian
-summary background jobs (capture endpoints exist; scheduled jobs not wired). Next: **P2 Director
-Dashboard + weekly digest** (RAG board tying pace + homework + sessions + fees, one-tap alert→task),
-then P3 Assessments (SPRD §10).
+**Deferred items:** the *fees-mode* xlsx import; scheduled background jobs (4 pm unlogged reminder,
+Saturday guardian summary, Monday digest delivery — the digest *builder* + preview exist; the cron
+wiring does not); PL-6 day-celebration suggestions + `day_catalog`. Next: **P3 Assessments & Bands**
+(diagnostic intake, skill profiles, A/B/C tiers, interventions → tasks) — SPRD §5.3 / §10.
 
 ## How this repo was bootstrapped (background)
 
