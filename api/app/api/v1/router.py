@@ -2,7 +2,19 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, billing, boards, me, ops, org, push, recurring, tasks
+from app.api.v1.endpoints import (
+    academics,
+    auth,
+    billing,
+    boards,
+    me,
+    ops,
+    org,
+    push,
+    recurring,
+    students,
+    tasks,
+)
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -14,3 +26,6 @@ api_router.include_router(recurring.router, prefix="/recurring", tags=["recurrin
 api_router.include_router(me.router, prefix="/me", tags=["me"])
 api_router.include_router(push.router, prefix="/push", tags=["push"])
 api_router.include_router(ops.router, prefix="/ops", tags=["ops"])
+# TrackBit School — master data (SPRD §4.2 / §5.1)
+api_router.include_router(academics.router, prefix="/academics", tags=["academics"])
+api_router.include_router(students.router, prefix="/students", tags=["students"])

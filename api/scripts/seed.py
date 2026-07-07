@@ -69,7 +69,10 @@ def seed() -> None:
         db.add_all([kc, priya, ramesh, anil])
         db.flush()
 
-        for role, user in [("admin", kc), ("member", priya), ("member", ramesh), ("member", anil)]:
+        # School roles (SPRD §3.2): KC director, Priya coordinator, the rest teachers.
+        for role, user in [
+            ("admin", kc), ("coordinator", priya), ("teacher", ramesh), ("teacher", anil),
+        ]:
             db.add(Membership(org_id=org.id, user_id=user.id, org_role=role, last_active_at=_now()))
         db.flush()
 

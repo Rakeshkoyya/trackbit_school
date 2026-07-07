@@ -17,6 +17,13 @@ migration role), so the safety net is real and testable.
 """
 
 # Tables that carry a non-null org_id and represent tenant business data.
+#
+# IMPORTANT: the initial migration reads this tuple *live* when it enables RLS,
+# so it must only ever list tables that exist by the end of that migration (the
+# seed's task-module tables). New modules add their own org-scoped tables and
+# engage RLS for them in their OWN migration via `enable_rls_sql([...])` — do NOT
+# append to this tuple, or a fresh `alembic upgrade` would try to enable RLS on
+# tables that don't exist yet. `SCHOOL_MASTER_TABLES` below documents P0-C's set.
 ORG_SCOPED_TABLES = (
     "memberships",
     "boards",
@@ -24,6 +31,18 @@ ORG_SCOPED_TABLES = (
     "task_instances",
     "task_events",
     "notifications",
+)
+
+# P0-C master data (SPRD §4.2) — engaged in migration d2e3f4a5b6c7.
+SCHOOL_MASTER_TABLES = (
+    "academic_years",
+    "terms",
+    "student_categories",
+    "subjects",
+    "school_classes",
+    "class_subjects",
+    "students",
+    "guardians",
 )
 
 # NULLIF guards the ::uuid cast: Postgres does NOT guarantee OR short-circuit
@@ -38,10 +57,10 @@ _USING = (
 )
 
 
-def create_policies_sql() -> list[str]:
+def create_policies_sql(tables: "tuple[str, ...] | list[str] | None" = None) -> list[str]:
     """(Re)create the org_isolation policy on each table (idempotent via DROP IF EXISTS)."""
     stmts: list[str] = []
-    for table in ORG_SCOPED_TABLES:
+    for table in ORG_SCOPED_TABLES if tables is None else tables:
         stmts.append(f"DROP POLICY IF EXISTS org_isolation ON {table};")
         stmts.append(
             f"CREATE POLICY org_isolation ON {table} "
@@ -50,19 +69,34 @@ def create_policies_sql() -> list[str]:
     return stmts
 
 
-def upgrade_sql() -> list[str]:
+def enable_rls_sql(tables: "tuple[str, ...] | list[str] | None" = None) -> list[str]:
+    """Enable + force RLS and (re)create the org_isolation policy on `tables`.
+
+    Pass an explicit list from a module's migration to engage RLS for that
+    module's new tables. Defaults to the seed's ORG_SCOPED_TABLES."""
+    target = ORG_SCOPED_TABLES if tables is None else tables
     stmts: list[str] = []
-    for table in ORG_SCOPED_TABLES:
+    for table in target:
         stmts.append(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
         stmts.append(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
-    stmts.extend(create_policies_sql())
+    stmts.extend(create_policies_sql(target))
     return stmts
 
 
-def downgrade_sql() -> list[str]:
+def disable_rls_sql(tables: "tuple[str, ...] | list[str] | None" = None) -> list[str]:
+    target = ORG_SCOPED_TABLES if tables is None else tables
     stmts: list[str] = []
-    for table in ORG_SCOPED_TABLES:
+    for table in target:
         stmts.append(f"DROP POLICY IF EXISTS org_isolation ON {table};")
         stmts.append(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY;")
         stmts.append(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY;")
     return stmts
+
+
+# Back-compat aliases used by the initial migration (operate on ORG_SCOPED_TABLES).
+def upgrade_sql() -> list[str]:
+    return enable_rls_sql()
+
+
+def downgrade_sql() -> list[str]:
+    return disable_rls_sql()

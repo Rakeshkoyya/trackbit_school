@@ -17,7 +17,9 @@ down_revision: str | None = "c9d0e1f2a3b4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_CK = "ck_memberships_org_role_valid"
+# Bare constraint token — alembic re-applies the ck_%(table)s_ naming convention,
+# so passing the full name would double-prefix it (ck_memberships_ck_memberships_…).
+_CK = "org_role_valid"
 
 
 def upgrade() -> None:
