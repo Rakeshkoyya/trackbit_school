@@ -79,3 +79,23 @@ class StudentDetailOut(StudentOut):
     class_label: str | None = None
     category_name: str | None = None
     guardians: list[GuardianOut] = Field(default_factory=list)
+
+
+# ── roster xlsx import (SPRD §5.6, students mode) ────────────────────────────
+class RosterAnalyzeOut(BaseModel):
+    columns: list[str]
+    mapping: dict[str, str]  # target field -> source column (heuristic suggestion)
+    rows: list[dict]  # all parsed rows (client re-sends these to /commit)
+    row_count: int
+
+
+class RosterCommitIn(BaseModel):
+    mapping: dict[str, str]
+    rows: list[dict] = Field(max_length=5000)
+    academic_year_id: uuid.UUID | None = None  # scopes class matching
+
+
+class RosterCommitOut(BaseModel):
+    created: int
+    skipped: int
+    errors: list[dict] = Field(default_factory=list)

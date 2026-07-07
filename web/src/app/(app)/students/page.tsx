@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Trash2, UserPlus } from "lucide-react";
+import { Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type { StudentListItem } from "@/lib/school-types";
+import type { RosterAnalyze, StudentListItem } from "@/lib/school-types";
 
 function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
@@ -134,11 +134,78 @@ function StudentDetailSheet({ id, onClose, canEdit }: { id: string | null; onClo
   );
 }
 
+function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const qc = useQueryClient();
+  const { yearId } = useYear();
+  const [analysis, setAnalysis] = useState<RosterAnalyze | null>(null);
+
+  const analyze = useMutation({
+    mutationFn: (file: File) => schoolApi.importRosterAnalyze(file),
+    onSuccess: setAnalysis,
+    onError: (e) => showApiError(e, "Could not read the file"),
+  });
+  const commit = useMutation({
+    mutationFn: () =>
+      schoolApi.importRosterCommit({ mapping: analysis!.mapping, rows: analysis!.rows, academic_year_id: yearId }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["students"] });
+      toast.success(`Imported ${res.created} · skipped ${res.skipped}`);
+      setAnalysis(null);
+      onOpenChange(false);
+    },
+    onError: (e) => showApiError(e, "Import failed"),
+  });
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) setAnalysis(null); onOpenChange(v); }} title="Import roster (.xlsx)">
+      {!analysis ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Upload your student register. Columns are matched automatically — review before importing.
+          </p>
+          <input
+            type="file" accept=".xlsx"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) analyze.mutate(f); }}
+            className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-primary-foreground"
+          />
+          {analyze.isPending ? <p className="text-sm text-muted-foreground">Reading…</p> : null}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm"><span className="font-medium">{analysis.row_count}</span> rows found. Detected columns:</p>
+          <ul className="space-y-1 text-sm">
+            {Object.entries(analysis.mapping).map(([field, col]) => (
+              <li key={field} className="flex justify-between border-b border-border py-1">
+                <span className="text-muted-foreground">{field.replace(/_/g, " ")}</span>
+                <span className="font-medium">{col}</span>
+              </li>
+            ))}
+          </ul>
+          {!analysis.mapping.full_name || !analysis.mapping.admission_no ? (
+            <p className="text-sm text-warning">Name and admission no. columns are required to import.</p>
+          ) : null}
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setAnalysis(null)}>Back</Button>
+            <Button
+              className="flex-1"
+              disabled={commit.isPending || !analysis.mapping.full_name || !analysis.mapping.admission_no}
+              onClick={() => commit.mutate()}
+            >
+              {commit.isPending ? "Importing…" : `Import ${analysis.row_count}`}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 function StudentsInner() {
   const { me } = useAuth();
   const canEdit = me?.org_role === "admin" || me?.org_role === "coordinator";
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const { data: students = [] } = useQuery({
     queryKey: ["students", query],
@@ -149,7 +216,12 @@ function StudentsInner() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Students ({students.length})</h1>
-        {canEdit ? <Button size="sm" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" /> Add</Button> : null}
+        {canEdit ? (
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}><Upload className="h-4 w-4" /> Import</Button>
+            <Button size="sm" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" /> Add</Button>
+          </div>
+        ) : null}
       </div>
       <div className="relative mb-4">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -174,6 +246,7 @@ function StudentsInner() {
         </div>
       )}
       <AddStudentSheet open={addOpen} onOpenChange={setAddOpen} />
+      <ImportSheet open={importOpen} onOpenChange={setImportOpen} />
       <StudentDetailSheet id={detailId} onClose={() => setDetailId(null)} canEdit={canEdit} />
     </div>
   );

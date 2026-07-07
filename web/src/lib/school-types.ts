@@ -69,6 +69,19 @@ export interface StudentDetail extends StudentListItem {
   guardians: Guardian[];
 }
 
+export interface RosterAnalyze {
+  columns: string[];
+  mapping: Record<string, string>;
+  rows: Record<string, unknown>[];
+  row_count: number;
+}
+
+export interface RosterCommitResult {
+  created: number;
+  skipped: number;
+  errors: { row: number; reason: string }[];
+}
+
 // ── fees ──────────────────────────────────────────────────────────────────
 export interface FeeTemplate {
   installment_number: number;

@@ -8,7 +8,7 @@ their own modules, not here.
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
@@ -21,14 +21,33 @@ from app.schemas.students import (
     GuardianCreate,
     GuardianOut,
     GuardianUpdate,
+    RosterAnalyzeOut,
+    RosterCommitIn,
+    RosterCommitOut,
     StudentCreate,
     StudentDetailOut,
     StudentOut,
     StudentUpdate,
 )
+from app.services import roster_import
+from app.services.roster_import import RosterImporter
 from app.services.students import StudentService
 
 router = APIRouter()
+
+
+# ── roster xlsx import (SPRD §5.6) ───────────────────────────────────────────
+@router.post("/import/analyze", response_model=RosterAnalyzeOut)
+async def import_analyze(file: UploadFile = File(...),
+                         _: CurrentMember = Depends(require_coordinator_up)):
+    return roster_import.analyze(await file.read())
+
+
+@router.post("/import/commit", response_model=RosterCommitOut)
+def import_commit(body: RosterCommitIn, m: CurrentMember = Depends(require_coordinator_up),
+                  db: Session = Depends(get_db)):
+    return RosterImporter(db).commit(
+        m, mapping=body.mapping, rows=body.rows, academic_year_id=body.academic_year_id)
 
 
 # ── categories ───────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ import type {
   FeeStructure,
   FeeSummary,
   Guardian,
+  RosterAnalyze,
+  RosterCommitResult,
   SchoolClass,
   StudentCategory,
   StudentDetail,
@@ -68,6 +70,16 @@ export const schoolApi = {
   addGuardian: (studentId: string, b: Record<string, unknown>) =>
     api.post<Guardian>(`/students/${studentId}/guardians`, b),
   deleteGuardian: (id: string) => api.del<{ message: string }>(`/students/guardians/${id}`),
+  importRosterAnalyze: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<RosterAnalyze>("/students/import/analyze", form);
+  },
+  importRosterCommit: (b: {
+    mapping: Record<string, string>;
+    rows: Record<string, unknown>[];
+    academic_year_id: string | null;
+  }) => api.post<RosterCommitResult>("/students/import/commit", b),
 
   // ── fees ────────────────────────────────────────────────────────────────
   feeSummary: (yearId?: string) => api.get<FeeSummary>(`/fees/summary${qs({ year_id: yearId })}`),
