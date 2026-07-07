@@ -91,6 +91,44 @@ export interface Forecast {
   weeks_behind: number;
 }
 
+export interface MyDayClass {
+  class_subject_id: string;
+  class_label: string;
+  subject_name: string;
+  planned_topic: string | null;
+  planned_topic_id: string | null;
+  logged: boolean;
+  homework_set: boolean;
+}
+
+export interface HomeworkPending {
+  assignment_id: string;
+  class_label: string;
+  subject_name: string;
+  text: string;
+}
+
+export interface MyDay {
+  date: string;
+  classes: MyDayClass[];
+  homework_pending: HomeworkPending[];
+}
+
+export interface ComplianceRow {
+  class_subject_id: string;
+  class_label: string;
+  subject_name: string;
+  teacher_name: string | null;
+  logged: boolean;
+}
+
+export interface Compliance {
+  date: string;
+  logged_count: number;
+  total: number;
+  rows: ComplianceRow[];
+}
+
 export interface ClassSubject {
   id: string;
   class_id: string;

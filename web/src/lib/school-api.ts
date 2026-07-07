@@ -79,6 +79,16 @@ export const schoolApi = {
     api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/approve`),
   forecast: (classId: string) =>
     api.get<import("@/lib/school-types").Forecast[]>(`/planner/plan/forecast${qs({ class_id: classId })}`),
+
+  // classroom (M2)
+  myDay: () => api.get<import("@/lib/school-types").MyDay>("/classroom/my-day"),
+  logLesson: (b: { class_subject_id: string; topic_id?: string | null; coverage: string }) =>
+    api.post<{ id: string }>("/classroom/lesson-logs", b),
+  addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null }) =>
+    api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
+  checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
+    api.post<{ id: string }>(`/classroom/homework/${id}/check`, b),
+  compliance: () => api.get<import("@/lib/school-types").Compliance>("/classroom/compliance"),
   addClassSubject: (b: {
     class_id: string;
     subject_id: string;

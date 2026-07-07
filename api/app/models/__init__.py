@@ -12,6 +12,7 @@ from app.models.analytics import AnalyticsEvent
 from app.models.auth_token import AuthToken
 from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
+from app.models.classroom import HomeworkAssignment, HomeworkCheck, LessonLog
 from app.models.fees import (
     FeeInstallmentTemplate,
     FeeStructure,
@@ -41,8 +42,11 @@ __all__ = [
     "FeeInstallmentTemplate",
     "FeeStructure",
     "Guardian",
+    "HomeworkAssignment",
+    "HomeworkCheck",
     "Installment",
     "Invoice",
+    "LessonLog",
     "Membership",
     "Notification",
     "Organization",

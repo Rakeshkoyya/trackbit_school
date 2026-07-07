@@ -67,6 +67,13 @@ SCHOOL_SYLLABUS_TABLES = (
     "plan_entries",
 )
 
+# P1-D/E classroom capture (SPRD §4.4) — engaged in migration d6c7d8e9fab0.
+SCHOOL_CLASSROOM_TABLES = (
+    "lesson_logs",
+    "homework_assignments",
+    "homework_checks",
+)
+
 # NULLIF guards the ::uuid cast: Postgres does NOT guarantee OR short-circuit
 # evaluation, so the cast can run even when an earlier branch is true. NULLIF
 # turns '' into NULL, and NULL::uuid is valid (NULL) — so the cast never errors,

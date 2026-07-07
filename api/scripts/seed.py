@@ -20,7 +20,9 @@ from app.models import (
     FeeInstallmentTemplate,
     FeeStructure,
     Guardian,
+    HomeworkAssignment,
     Installment,
+    LessonLog,
     Membership,
     Organization,
     Plan,
@@ -56,7 +58,8 @@ def _today_at(hour: int, minute: int = 0) -> datetime:
     return local.astimezone(UTC)
 
 
-DEMO_EMAILS = ["kc@demo.trackbit.app", "priya@demo.trackbit.app"]
+DEMO_EMAILS = ["kc@demo.trackbit.app", "priya@demo.trackbit.app",
+               "ramesh@demo.trackbit.app", "anil@demo.trackbit.app"]
 DEMO_PHONES = ["+919800000001", "+919800000002"]
 
 
@@ -164,6 +167,16 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     for topic, wk in zip(all_topics, weeks, strict=True):
         db.add(PlanEntry(org_id=org.id, class_subject_id=sci.id, topic_id=topic.id, week_start=wk))
 
+    # A day of classroom capture for Ramesh (6-A Math) so My Day + compliance have
+    # data: today's class logged, and yesterday's homework awaiting a completion count.
+    today_ist = datetime.now(IST).date()
+    math = class_subjects[("6-A", "Mathematics")]
+    db.add(LessonLog(org_id=org.id, class_subject_id=math.id, date=today_ist,
+                     member_id=mships[ramesh].id, coverage="full"))
+    db.add(HomeworkAssignment(org_id=org.id, class_subject_id=math.id,
+                              date=today_ist - timedelta(days=1), text="Exercise 4.2, sums 1–10",
+                              due_date=today_ist + timedelta(days=1), notified_at=_now()))
+
     cats = {}
     for name in ["Day Scholar", "Hosteller"]:
         cat = StudentCategory(org_id=org.id, name=name)
@@ -242,8 +255,11 @@ def seed() -> None:
         kc = User(name="KC", email="kc@demo.trackbit.app", password_hash=hash_password("demo1234"))
         priya = User(name="Priya", email="priya@demo.trackbit.app",
                      password_hash=hash_password("demo1234"))
-        ramesh = User(name="Ramesh", phone="+919800000001")  # phone-only staffer
-        anil = User(name="Anil", phone="+919800000002")
+        # Teachers get a login too so the reviewer can experience the teacher flow.
+        ramesh = User(name="Ramesh", email="ramesh@demo.trackbit.app", phone="+919800000001",
+                      password_hash=hash_password("demo1234"))
+        anil = User(name="Anil", email="anil@demo.trackbit.app", phone="+919800000002",
+                    password_hash=hash_password("demo1234"))
         db.add_all([kc, priya, ramesh, anil])
         db.flush()
 

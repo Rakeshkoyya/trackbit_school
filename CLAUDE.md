@@ -37,12 +37,23 @@ ruff clean; web tsc + eslint + `next build` clean). Migration head = **`d3f4a5b6
 - **P0-E** — fee frontend: `/fees` (summary + list + enrol), `/fees/[id]` (pay/undo/discount +
   ledger), `/fees/structures`; global year switcher (`year-context` + `YearSwitcher`).
 
-**Deferred parity item:** the *fees-mode* xlsx import (importing existing balances/quarterly
-payments from the register — the students-mode roster import is done). Manual enrol/pay covers the
-loop meanwhile.
+**P1 (Planner + Classroom Log) is in progress** — migration head **`d6c7d8e9fab0`**:
+- **P1-A** — `CalendarEvent` + `academic_years.working_weekdays`; `services/calendar.py`
+  effective-teaching-days engine; `/academics/calendar/*`; web `/planner` (PL-1).
+- **P1-B/C** — `models/planner.py` (syllabus_units/topics, plans, plan_entries); `PlannerService`
+  (greedy `distribute`, heuristic `split_text`, draft/approve baseline, computed forecast);
+  `/planner/*`; web `/planner/plan` (PL-3/4/5).
+- **P1-D/E/F** — `models/classroom.py` (lesson_logs, homework_assignments/checks);
+  `ClassroomService` (My Day, quick log, homework + guardian-notify stub, compliance);
+  `notify_guardian.py` (WhatsApp console stub); `/classroom/*`; web `/classroom` (My Day, CL-1/2/3)
+  + `/classroom/compliance` (CL-4).
 
-Next: **P1** Planner + Classroom Log (the make-or-break phase), then P1.5 Sessions, P2 Dashboard,
-P3 Assessments. See SPRD §10.
+Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@`/`anil@` (teachers)
+— all `@demo.trackbit.app`.
+
+**Deferred items:** the *fees-mode* xlsx import; the 4 pm unlogged-class reminder + Saturday guardian
+summary background jobs (the capture endpoints exist; the scheduled jobs are not wired yet); M2
+Sessions (P1.5). Next: P1.5 Sessions → P2 Director Dashboard + digest → P3 Assessments (SPRD §10).
 
 ## How this repo was bootstrapped (background)
 

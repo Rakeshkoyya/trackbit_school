@@ -7,6 +7,7 @@ import {
   Home,
   LayoutGrid,
   type LucideIcon,
+  Sun,
   Users,
   Wallet,
 } from "lucide-react";
@@ -27,6 +28,7 @@ export const memberNav: NavItem[] = [
   { label: "Done", href: "/done", icon: CheckCircle2 },
 ];
 
+const myDay: NavItem = { label: "My Day", href: "/classroom", icon: Sun };
 const planner: NavItem = { label: "Planner", href: "/planner", icon: CalendarRange };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
@@ -39,13 +41,13 @@ const members: NavItem = { label: "Members", href: "/members", icon: Users, tour
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [...memberNav, planner, students, fees, dashboard, setup, members];
+      return [...memberNav, myDay, planner, students, fees, dashboard, setup, members];
     case "coordinator":
-      return [...memberNav, planner, students, dashboard, setup];
+      return [...memberNav, myDay, planner, students, dashboard, setup];
     case "office":
       return [...memberNav, fees];
     case "teacher":
-      return [...memberNav, planner, students];
+      return [...memberNav, myDay, planner, students];
     default:
       return memberNav;
   }
