@@ -81,7 +81,7 @@ export function RecurringDetailView({ templateId }: { templateId: string }) {
       <EmptyState
         title="Recurring task not found"
         body="It may have been removed."
-        action={<Button onClick={() => router.push("/boards")}>Back to boards</Button>}
+        action={<Button onClick={() => router.push("/tasks/boards")}>Back to boards</Button>}
       />
     );
   }

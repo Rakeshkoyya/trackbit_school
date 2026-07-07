@@ -110,7 +110,7 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
       <EmptyState
         title="Task not found"
         body="It may have been deleted or you can no longer see its board."
-        action={<Button onClick={() => router.push("/home")}>Back to Home</Button>}
+        action={<Button onClick={() => router.push("/tasks")}>Back to Today</Button>}
       />
     );
   }

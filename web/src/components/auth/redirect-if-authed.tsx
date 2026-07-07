@@ -28,7 +28,7 @@ export function RedirectIfAuthed() {
   );
 
   useEffect(() => {
-    if (authed) router.replace("/home");
+    if (authed) router.replace("/tasks");
   }, [authed, router]);
 
   if (!authed) return null;

@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/contexts/auth-context";
 import type { OrgRole } from "@/lib/types";
+import { landingForRole } from "@/components/layout/nav-items";
 
 function FullScreenSpinner() {
   return (
@@ -39,7 +40,7 @@ export function AuthGuard({
     } else if (mustSetPassword) {
       router.replace("/auth/set-password");
     } else if (denied(me.org_role)) {
-      router.replace("/home");
+      router.replace(landingForRole(me.org_role));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, me, mustSetPassword, requireRole, allow, router]);

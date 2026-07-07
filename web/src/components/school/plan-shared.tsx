@@ -1,29 +1,63 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { CheckCircle2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { AuthGuard } from "@/components/auth/auth-guard";
-import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui/page-header";
-import { useAuth } from "@/contexts/auth-context";
-import { useYear } from "@/contexts/year-context";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
+import type { ClassSubject, SchoolClass } from "@/lib/school-types";
 
-const RAG: Record<string, "success" | "warning" | "neutral"> = {
+export const RAG: Record<string, "success" | "warning" | "neutral"> = {
   green: "success", amber: "warning", red: "warning", none: "neutral",
 };
-const weekLabel = (d: string) =>
+export const weekLabel = (d: string) =>
   new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
-function SyllabusEditor({ csId, canEdit }: { csId: string; canEdit: boolean }) {
+/**
+ * Shared class → class-subject selection for the Plan area's Syllabus and Week
+ * plan tabs. Derives the effective pick (user's choice if still valid, else the
+ * first available) with no setState-in-effect.
+ */
+export function useClassSubjectPick(yearId: string | null) {
+  const [pickedClass, setPickedClass] = useState("");
+  const [pickedCs, setPickedCs] = useState("");
+  const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
+  const classId = classes.some((c) => c.id === pickedClass) ? pickedClass : (classes[0]?.id ?? "");
+  const { data: subjects = [] } = useQuery({ queryKey: ["class-subjects", classId], queryFn: () => schoolApi.classSubjects(classId), enabled: !!classId });
+  const csId = subjects.some((s) => s.id === pickedCs) ? pickedCs : (subjects[0]?.id ?? "");
+  return { classes, classId, setClassId: setPickedClass, subjects, csId, setCsId: setPickedCs };
+}
+
+export function ClassSelect({ classes, classId, onChange }: {
+  classes: SchoolClass[];
+  classId: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <select className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm" value={classId} onChange={(e) => onChange(e.target.value)}>
+      {classes.map((c) => <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>)}
+    </select>
+  );
+}
+
+export function SubjectSelect({ subjects, csId, onChange }: {
+  subjects: ClassSubject[];
+  csId: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <select className="rounded-md border border-border bg-card px-2 py-1.5 text-sm" value={csId} onChange={(e) => onChange(e.target.value)}>
+      {subjects.map((s) => <option key={s.id} value={s.id}>{s.subject_name}</option>)}
+    </select>
+  );
+}
+
+export function SyllabusEditor({ csId, canEdit }: { csId: string; canEdit: boolean }) {
   const qc = useQueryClient();
   const [unitTitle, setUnitTitle] = useState("");
   const [topicFor, setTopicFor] = useState<string | null>(null);
@@ -74,7 +108,7 @@ function SyllabusEditor({ csId, canEdit }: { csId: string; canEdit: boolean }) {
   );
 }
 
-function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit: boolean; canApprove: boolean }) {
+export function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit: boolean; canApprove: boolean }) {
   const qc = useQueryClient();
   const { data: plan } = useQuery({ queryKey: ["plan", csId], queryFn: () => schoolApi.plan(csId) });
   const inv = () => { qc.invalidateQueries({ queryKey: ["plan", csId] }); qc.invalidateQueries({ queryKey: ["forecast"] }); };
@@ -114,89 +148,5 @@ function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit: boolea
         </div>
       ) : null}
     </div>
-  );
-}
-
-function PlanInner() {
-  const { me } = useAuth();
-  const canEdit = me?.org_role === "admin";
-  const canApprove = me?.org_role === "admin";
-  const { yearId } = useYear();
-  const [pickedClass, setPickedClass] = useState("");
-  const [pickedCs, setPickedCs] = useState("");
-
-  const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
-  // Derive the effective selection (no setState-in-effect): the user's pick if
-  // still valid, else the first available.
-  const classId = classes.some((c) => c.id === pickedClass) ? pickedClass : (classes[0]?.id ?? "");
-  const setClassId = setPickedClass;
-
-  const { data: subjects = [] } = useQuery({ queryKey: ["class-subjects", classId], queryFn: () => schoolApi.classSubjects(classId), enabled: !!classId });
-  const { data: forecast = [] } = useQuery({ queryKey: ["forecast", classId], queryFn: () => schoolApi.forecast(classId), enabled: !!classId });
-
-  const csId = subjects.some((s) => s.id === pickedCs) ? pickedCs : (subjects[0]?.id ?? "");
-  const setCsId = setPickedCs;
-
-  return (
-    <div>
-      <Link href="/planner" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Calendar
-      </Link>
-      <div className="mb-4 flex items-center justify-between">
-        <PageHeader title="Syllabus & plan" subtitle="Chapters, week-by-week plan, and pace forecast" />
-        <div className="flex items-center gap-2">
-          <YearSwitcher />
-          <select className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm" value={classId} onChange={(e) => setClassId(e.target.value)}>
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <h2 className="mb-2 text-sm font-semibold">Pace forecast</h2>
-      <div className="mb-6 space-y-2">
-        {forecast.length === 0 ? <p className="text-sm text-muted-foreground">No subjects on this class yet.</p> : null}
-        {forecast.map((f) => (
-          <div key={f.class_subject_id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{f.subject_name}</p>
-              <p className="text-xs text-muted-foreground">
-                {f.baseline_finish ? `baseline ${weekLabel(f.baseline_finish)}` : "no plan"}
-                {f.projected_finish && f.weeks_behind > 0 ? ` · projected ${weekLabel(f.projected_finish)} (${f.weeks_behind}w behind)` : ""}
-              </p>
-            </div>
-            <Badge tone={RAG[f.status]}>{f.status === "none" ? "no plan" : f.status}</Badge>
-          </div>
-        ))}
-      </div>
-
-      {csId ? (
-        <>
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Subject</h2>
-            <select className="rounded-md border border-border bg-card px-2 py-1.5 text-sm" value={csId} onChange={(e) => setCsId(e.target.value)}>
-              {subjects.map((s) => <option key={s.id} value={s.id}>{s.subject_name}</option>)}
-            </select>
-          </div>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Syllabus</h3>
-              <SyllabusEditor csId={csId} canEdit={canEdit} />
-            </div>
-            <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Week-by-week plan</h3>
-              <PlanView csId={csId} canEdit={canEdit} canApprove={canApprove} />
-            </div>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-export default function PlanPage() {
-  return (
-    <AuthGuard allow={["admin", "teacher"]}>
-      <PlanInner />
-    </AuthGuard>
   );
 }

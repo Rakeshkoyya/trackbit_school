@@ -33,7 +33,7 @@ export function ResetClient({ token }: { token: string }) {
     try {
       const session = await authApi.resetPassword(token, pw);
       consumeSession(session);
-      router.replace("/home");
+      router.replace("/tasks");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "This link could not be used.");
     } finally {

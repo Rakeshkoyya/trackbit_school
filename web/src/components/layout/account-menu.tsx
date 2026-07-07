@@ -189,7 +189,7 @@ export function AccountMenu() {
             </div>
             {isAdmin && org.plan === "free" && (
               <Link
-                href="/settings"
+                href="/setup/settings"
                 onClick={() => setOpen(false)}
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-xs font-medium text-accent-foreground transition hover:opacity-90"
               >
@@ -284,7 +284,7 @@ export function AccountMenu() {
             />
             {isAdmin && (
               <MenuLink
-                href="/settings"
+                href="/setup/settings"
                 icon={Settings}
                 label="Organization settings"
                 onNavigate={() => setOpen(false)}

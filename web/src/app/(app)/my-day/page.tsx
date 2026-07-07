@@ -1,8 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, ClipboardCheck, Send, Users2 } from "lucide-react";
-import Link from "next/link";
+import { BookOpen, Check, ClipboardCheck, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -13,7 +12,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
-import { useAuth } from "@/contexts/auth-context";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
 import type { HomeworkPending, MyDayClass } from "@/lib/school-types";
@@ -101,18 +99,13 @@ function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
 }
 
 function MyDayInner() {
-  const { me } = useAuth();
-  const canSeeCompliance = me?.org_role === "admin";
   const [hwFor, setHwFor] = useState<MyDayClass | null>(null);
   const { data } = useQuery({ queryKey: ["my-day"], queryFn: schoolApi.myDay });
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6">
         <PageHeader title="My Day" subtitle="Log what you taught and set homework — under a minute per class" />
-        {canSeeCompliance ? (
-          <Link href="/classroom/compliance"><Button size="sm" variant="outline"><Users2 className="h-4 w-4" /> Compliance</Button></Link>
-        ) : null}
       </div>
 
       {data && data.homework_pending.length > 0 ? (

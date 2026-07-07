@@ -1,17 +1,13 @@
 import {
   BarChart3,
-  BookOpen,
   CalendarClock,
   CalendarRange,
-  CheckCircle2,
-  ClipboardList,
+  CheckSquare,
   GraduationCap,
-  Home,
-  LayoutGrid,
-  type LucideIcon,
+  Settings2,
   Sun,
-  Users,
   Wallet,
+  type LucideIcon,
 } from "lucide-react";
 
 import type { OrgRole } from "@/lib/types";
@@ -23,40 +19,36 @@ export type NavItem = {
   tour?: string; // data-tour anchor for the guided tour
 };
 
-// The existing task module (M5) surfaces — available to all staff roles.
-export const memberNav: NavItem[] = [
-  { label: "Home", href: "/home", icon: Home },
-  { label: "Boards", href: "/boards", icon: LayoutGrid, tour: "nav-boards" },
-  { label: "Done", href: "/done", icon: CheckCircle2 },
-];
-
-const myDay: NavItem = { label: "My Day", href: "/classroom", icon: Sun };
+// Consolidated v2 IA (SPRD2 §3). Each item is one area; areas group their old
+// v1 screens into internal tabs (see the area layouts).
+const myDay: NavItem = { label: "My Day", href: "/my-day", icon: Sun };
 const sessions: NavItem = { label: "Sessions", href: "/sessions", icon: CalendarClock };
-const planner: NavItem = { label: "Planner", href: "/planner", icon: CalendarRange };
+const plan: NavItem = { label: "Plan", href: "/plan", icon: CalendarRange };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
-const assessments: NavItem = { label: "Assessments", href: "/assessments", icon: ClipboardList };
+const tasks: NavItem = { label: "Tasks", href: "/tasks", icon: CheckSquare, tour: "nav-boards" };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
-const setup: NavItem = { label: "Setup", href: "/academics", icon: BookOpen };
-const dashboard: NavItem = { label: "Dashboard", href: "/insights", icon: BarChart3 };
-const members: NavItem = { label: "Members", href: "/members", icon: Users, tour: "nav-members" };
+const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
+const setup: NavItem = { label: "Setup", href: "/setup", icon: Settings2, tour: "nav-members" };
 
 // Role-aware primary nav (single source of truth for sidebar + bottom tabs).
-// Hard rule (SPRD v2 §2): teachers never see Fees/Dashboard/Setup/Members.
+// SPRD2 §3 — teacher sidebar (5): My Day · Sessions · Plan · Students · Tasks.
+// Admin sidebar (6): Dashboard · Plan · Students · Fees · Tasks · Setup
+// (Members lives inside Setup). Hard rule (§2): teachers never see Fees/Setup.
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [...memberNav, myDay, sessions, planner, students, assessments, fees, dashboard, setup, members];
+      return [dashboard, plan, students, fees, tasks, setup];
     case "teacher":
-      return [...memberNav, myDay, sessions, planner, students, assessments];
+      return [myDay, sessions, plan, students, tasks];
     default:
-      return memberNav;
+      return [tasks];
   }
 }
 
-// Role-aware landing ("Today") after login (SPRD v2 §2): admin → school
-// dashboard, teacher → My Day. One place to extend as module homes evolve.
+// Role-aware landing after login (SPRD2 §3): admin → Dashboard (leads with the
+// daily report), teacher → My Day. One place to extend as module homes evolve.
 export function landingForRole(role: OrgRole | string | undefined): string {
-  if (role === "admin") return "/insights";      // Director → school dashboard
-  if (role === "teacher") return "/classroom";    // Teacher → My Day
-  return "/home";
+  if (role === "admin") return "/dashboard"; // school dashboard / daily report
+  if (role === "teacher") return "/my-day"; // My Day period timeline
+  return "/tasks";
 }

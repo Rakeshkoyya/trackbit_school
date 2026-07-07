@@ -1,28 +1,31 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ClipboardList, Plus, TrendingDown } from "lucide-react";
+import { CheckCircle2, TrendingDown } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { AuthGuard } from "@/components/auth/auth-guard";
-import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
-import { useAuth } from "@/contexts/auth-context";
-import { useYear } from "@/contexts/year-context";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
 import type { BandRow } from "@/lib/school-types";
 
-const TIER_TONE: Record<string, "success" | "warning" | "neutral"> = { A: "success", B: "neutral", C: "warning" };
+export const TIER_TONE: Record<string, "success" | "warning" | "neutral"> = { A: "success", B: "neutral", C: "warning" };
 
-function ScoreGrid({ cycleId, classId, canVerify }: { cycleId: string; classId: string; canVerify: boolean }) {
+/** Class-only picker shared by the Students area's Scores / Bands / Trends tabs. */
+export function useClassPick(yearId: string | null) {
+  const [picked, setPicked] = useState("");
+  const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
+  const classId = classes.some((c) => c.id === picked) ? picked : (classes[0]?.id ?? "");
+  return { classes, classId, setClassId: setPicked };
+}
+
+export function ScoreGrid({ cycleId, classId, canVerify }: { cycleId: string; classId: string; canVerify: boolean }) {
   const qc = useQueryClient();
   const [edits, setEdits] = useState<Record<string, number>>({});
   const { data: grid } = useQuery({ queryKey: ["grid", cycleId, classId], queryFn: () => schoolApi.scoreGrid(cycleId, classId) });
@@ -116,7 +119,7 @@ function InterventionSheet({ row, termId, onClose }: { row: BandRow | null; term
   );
 }
 
-function BandBoard({ classId, termId, canEdit }: { classId: string; termId: string | null; canEdit: boolean }) {
+export function BandBoard({ classId, termId, canEdit }: { classId: string; termId: string | null; canEdit: boolean }) {
   const qc = useQueryClient();
   const [ivFor, setIvFor] = useState<BandRow | null>(null);
   const { data: board } = useQuery({ queryKey: ["bands", classId, termId], queryFn: () => schoolApi.bandBoard(classId, termId ?? undefined) });
@@ -154,7 +157,7 @@ function BandBoard({ classId, termId, canEdit }: { classId: string; termId: stri
   );
 }
 
-function TrendsView({ classId }: { classId: string }) {
+export function TrendsView({ classId }: { classId: string }) {
   const { data: trends = [] } = useQuery({ queryKey: ["trends", classId], queryFn: () => schoolApi.trends(classId) });
   if (!trends.length) return <p className="text-sm text-muted-foreground">No test cycles yet.</p>;
   return (
@@ -172,66 +175,7 @@ function TrendsView({ classId }: { classId: string }) {
   );
 }
 
-function AssessmentsInner() {
-  const { me } = useAuth();
-  const canEdit = me?.org_role === "admin";
-  const { yearId } = useYear();
-  const [tab, setTab] = useState<"scores" | "bands" | "trends">("scores");
-  const [pickedClass, setPickedClass] = useState("");
-  const [pickedCycle, setPickedCycle] = useState("");
-  const [newCycle, setNewCycle] = useState(false);
-
-  const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
-  const { data: terms = [] } = useQuery({ queryKey: ["terms", yearId], queryFn: () => schoolApi.terms(yearId ?? undefined), enabled: !!yearId });
-  const { data: cycles = [] } = useQuery({ queryKey: ["cycles", yearId], queryFn: () => schoolApi.cycles(), enabled: !!yearId });
-  const classId = classes.some((c) => c.id === pickedClass) ? pickedClass : (classes[0]?.id ?? "");
-  const cycleId = cycles.some((c) => c.id === pickedCycle) ? pickedCycle : (cycles[0]?.id ?? "");
-  const termId = terms[0]?.id ?? null;
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <PageHeader title="Assessments" subtitle="Diagnostics, marks, bands & interventions" />
-        <div className="flex items-center gap-2">
-          <YearSwitcher />
-          <select className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm" value={classId} onChange={(e) => setPickedClass(e.target.value)}>
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>)}
-          </select>
-        </div>
-      </div>
-
-      <div className="mb-4 flex gap-1 rounded-lg bg-muted p-1 text-sm">
-        {(["scores", "bands", "trends"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`flex-1 rounded-md px-3 py-1.5 font-medium capitalize ${tab === t ? "bg-card shadow-sm" : "text-muted-foreground"}`}>{t}</button>
-        ))}
-      </div>
-
-      {tab === "scores" ? (
-        <div>
-          <div className="mb-3 flex items-center gap-2">
-            <select className="rounded-md border border-border bg-card px-2 py-1.5 text-sm" value={cycleId} onChange={(e) => setPickedCycle(e.target.value)}>
-              {cycles.length === 0 ? <option value="">No cycles</option> : null}
-              {cycles.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
-            </select>
-            {canEdit ? <Button size="sm" variant="outline" onClick={() => setNewCycle(true)}><Plus className="h-4 w-4" /> New cycle</Button> : null}
-          </div>
-          {cycleId && classId ? <ScoreGrid cycleId={cycleId} classId={classId} canVerify={canEdit} /> : (
-            <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              <ClipboardList className="mx-auto mb-2 h-6 w-6" /> Create a cycle to record scores.
-            </p>
-          )}
-          <NewCycleSheet open={newCycle} onOpenChange={setNewCycle} termId={termId} yearId={yearId} />
-        </div>
-      ) : tab === "bands" ? (
-        classId ? <BandBoard classId={classId} termId={termId} canEdit={canEdit} /> : null
-      ) : (
-        classId ? <TrendsView classId={classId} /> : null
-      )}
-    </div>
-  );
-}
-
-function NewCycleSheet({ open, onOpenChange, termId, yearId }: { open: boolean; onOpenChange: (v: boolean) => void; termId: string | null; yearId: string | null }) {
+export function NewCycleSheet({ open, onOpenChange, termId, yearId }: { open: boolean; onOpenChange: (v: boolean) => void; termId: string | null; yearId: string | null }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [type, setType] = useState("diagnostic");
@@ -255,13 +199,5 @@ function NewCycleSheet({ open, onOpenChange, termId, yearId }: { open: boolean; 
         <Button type="submit" className="w-full" disabled={create.isPending || !name.trim() || !d || !termId}>Create</Button>
       </form>
     </Sheet>
-  );
-}
-
-export default function AssessmentsPage() {
-  return (
-    <AuthGuard allow={["admin", "teacher"]}>
-      <AssessmentsInner />
-    </AuthGuard>
   );
 }

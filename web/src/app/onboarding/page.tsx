@@ -191,8 +191,8 @@ function DoneStep() {
       <p className="mt-2 text-sm text-muted-foreground">
         Your team and tasks live on your Home screen. That&apos;s where the day starts.
       </p>
-      <Button size="lg" className="mt-8" onClick={() => router.replace("/home")}>
-        Go to Home <ArrowRight className="h-4 w-4" />
+      <Button size="lg" className="mt-8" onClick={() => router.replace("/tasks")}>
+        Get started <ArrowRight className="h-4 w-4" />
       </Button>
     </div>
   );
@@ -210,7 +210,7 @@ function OnboardingInner() {
       </div>
       {step < 2 ? (
         <button
-          onClick={() => (window.location.href = "/home")}
+          onClick={() => (window.location.href = "/tasks")}
           className="mt-4 text-center text-xs text-muted-foreground hover:text-foreground"
         >
           Skip setup

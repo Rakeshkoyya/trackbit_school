@@ -47,7 +47,7 @@ export default function SetPasswordPage() {
     setBusy(true);
     try {
       await setPassword(pw, name);
-      router.replace("/home");
+      router.replace("/tasks");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not set password.");
     } finally {

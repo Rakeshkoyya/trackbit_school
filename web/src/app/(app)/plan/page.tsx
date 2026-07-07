@@ -1,8 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, ListChecks, Plus, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { CalendarDays, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -66,7 +65,7 @@ function AddEventForm({ yearId }: { yearId: string }) {
   );
 }
 
-function PlannerInner() {
+function PlanYearInner() {
   const { me } = useAuth();
   const canEdit = me?.org_role === "admin";
   const { yearId } = useYear();
@@ -85,11 +84,8 @@ function PlannerInner() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <PageHeader title="Planner" subtitle="School calendar & effective teaching days" />
-        <div className="flex items-center gap-2">
-          <YearSwitcher />
-          <Link href="/planner/plan"><Button size="sm" variant="outline"><ListChecks className="h-4 w-4" /> Syllabus & Plan</Button></Link>
-        </div>
+        <PageHeader title="Year" subtitle="School calendar & effective teaching days" />
+        <YearSwitcher />
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
@@ -143,10 +139,10 @@ function PlannerInner() {
   );
 }
 
-export default function PlannerPage() {
+export default function PlanYearPage() {
   return (
     <AuthGuard allow={["admin", "teacher"]}>
-      <PlannerInner />
+      <PlanYearInner />
     </AuthGuard>
   );
 }

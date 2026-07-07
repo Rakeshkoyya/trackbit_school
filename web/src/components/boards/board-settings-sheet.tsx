@@ -84,7 +84,7 @@ export function BoardSettingsSheet({
       qc.invalidateQueries({ queryKey: ["boards"] });
       toast.success("Board archived");
       onOpenChange(false);
-      router.push("/boards");
+      router.push("/tasks/boards");
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Could not archive"),
   });
@@ -95,7 +95,7 @@ export function BoardSettingsSheet({
       qc.invalidateQueries({ queryKey: ["boards"] });
       toast.success("Board deleted");
       onOpenChange(false);
-      router.push("/boards");
+      router.push("/tasks/boards");
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Could not delete"),
   });

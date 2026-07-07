@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
+import { landingForRole } from "@/components/layout/nav-items";
 import { ApiError, tokenStore } from "@/lib/api-client";
 import { authApi, type RegisterOrgPayload } from "@/lib/auth-api";
 import type { Me, Session } from "@/lib/types";
@@ -101,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       queryClient.clear();
       setMe(sessionToMe(session));
       setMustSetPassword(session.must_set_password);
-      router.replace("/home");
+      router.replace(landingForRole(session.org_role));
     },
     [queryClient, router],
   );

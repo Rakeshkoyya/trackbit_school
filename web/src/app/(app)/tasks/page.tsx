@@ -28,7 +28,7 @@ function instanceId(row: BoardRow): string | null {
   return row.kind === "recurring" ? row.today_instance_id : row.id;
 }
 
-export default function HomePage() {
+export default function TasksTodayPage() {
   const qc = useQueryClient();
   const router = useRouter();
   const { me } = useAuth();

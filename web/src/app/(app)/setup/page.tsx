@@ -278,9 +278,9 @@ function AcademicsInner() {
   );
 }
 
-export default function AcademicsPage() {
+export default function SetupAcademicsPage() {
   return (
-    <AuthGuard allow={["admin", "teacher"]}>
+    <AuthGuard requireRole="admin">
       <AcademicsInner />
     </AuthGuard>
   );

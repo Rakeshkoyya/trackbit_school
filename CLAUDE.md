@@ -75,7 +75,16 @@ wiring of jobs, day suggestions, growth profile) are folded into the v2 packets 
 - **V2-P0-A (roles) COMPLETE** — two roles admin/teacher (SPRD2 §2); migration `e9fab0c1d2e3`
   applied (head); coordinator/office collapsed into admin; seed + all guards + web types/nav/13
   page guards updated. Backend **162 tests passing**, ruff clean; web tsc + eslint + build clean.
-- **Next: V2-P0-B** (IA reshell), then V2-P1..P5 per SPRD2 §10.
+- **V2-P0-B (IA reshell) COMPLETE** — frontend only (SPRD2 §3, §6, §12). Consolidated nav:
+  teacher sidebar (5) `My Day · Sessions · Plan · Students · Tasks`; admin (6) `Dashboard · Plan ·
+  Students · Fees · Tasks · Setup`. New route-based tab areas (`SubTabs` component + per-area
+  `layout.tsx`): **Tasks** (Today/Boards/Done) · **Plan** (Year/Syllabus/Week plan/Timetable —
+  Timetable is a V2-P1 placeholder) · **Students** (Directory/Scores/Bands/Trends — Assessments
+  moved here) · **Setup** (Academics/Members/Settings, admin-only, hosts the wizard later). Route
+  renames `/insights`→`/dashboard`, `/classroom`→`/my-day`, `/academics`→`/setup`; compliance page
+  deleted. All 12 old routes 307-redirect via `next.config.ts` (`/boards/:id` etc. preserved).
+  `landingForRole`: admin→`/dashboard`, teacher→`/my-day`. web tsc + eslint + `next build` clean.
+- **Next: V2-P1** (Timetable §5.3), then V2-P2..P5 per SPRD2 §10.
 
 ## How this repo was bootstrapped (background)
 

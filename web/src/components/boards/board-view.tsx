@@ -115,7 +115,7 @@ export function BoardView({ boardId }: { boardId: string }) {
       <EmptyState
         title="Board not found"
         body="It may be private, archived, or removed."
-        action={<Button onClick={() => router.push("/boards")}>Back to boards</Button>}
+        action={<Button onClick={() => router.push("/tasks/boards")}>Back to boards</Button>}
       />
     );
   }
@@ -136,7 +136,7 @@ export function BoardView({ boardId }: { boardId: string }) {
     <div>
       <header className="mb-5">
         <button
-          onClick={() => router.push("/boards")}
+          onClick={() => router.push("/tasks/boards")}
           className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> Boards

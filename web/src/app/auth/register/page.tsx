@@ -37,8 +37,9 @@ export default function RegisterPage() {
     setBusy(true);
     try {
       await register({ org_name: orgName, name, email, password, timezone: ORG_TIMEZONE });
-      // Land on Home and kick off the in-product guided tour.
-      router.replace("/home?tour=1");
+      // Registering an org makes you its admin → land on the Dashboard and kick
+      // off the in-product guided tour (nav anchors live in the sidebar).
+      router.replace("/dashboard?tour=1");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not create your organization.");
     } finally {
