@@ -115,6 +115,34 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").Digest>(`/dashboard/digest${qs({ year_id: yearId })}`),
   createTaskFromAlert: (b: { board_id: string; title: string; description?: string | null }) =>
     api.post<{ id: string }>("/dashboard/alerts/create-task", b),
+
+  // assessments & bands (M3)
+  skillAreas: () => api.get<import("@/lib/school-types").SkillArea[]>("/assessments/skill-areas"),
+  seedSkills: () => api.post<import("@/lib/school-types").SkillArea[]>("/assessments/skill-areas/seed-defaults"),
+  createSkill: (name: string) => api.post<import("@/lib/school-types").SkillArea>("/assessments/skill-areas", { name }),
+  deleteSkill: (id: string) => api.del<{ message: string }>(`/assessments/skill-areas/${id}`),
+  cycles: (termId?: string) => api.get<import("@/lib/school-types").Cycle[]>(`/assessments/cycles${qs({ term_id: termId })}`),
+  createCycle: (b: { term_id: string; type: string; name: string; date: string }) =>
+    api.post<import("@/lib/school-types").Cycle>("/assessments/cycles", b),
+  scoreGrid: (cycleId: string, classId: string) =>
+    api.get<import("@/lib/school-types").ScoreGrid>(`/assessments/cycles/${cycleId}/grid${qs({ class_id: classId })}`),
+  saveScores: (cycleId: string, rows: { student_id: string; subject_id?: string; skill_area_id?: string; score: number; max_score: number }[]) =>
+    api.post<{ message: string }>(`/assessments/cycles/${cycleId}/scores`, { rows }),
+  verifyScores: (cycleId: string) => api.post<{ message: string }>(`/assessments/cycles/${cycleId}/verify`),
+  bandBoard: (classId: string, termId?: string) =>
+    api.get<import("@/lib/school-types").BandBoard>(`/assessments/bands${qs({ class_id: classId, term_id: termId })}`),
+  setBand: (b: { student_id: string; term_id: string; tier: string; note?: string | null }) =>
+    api.post<{ message: string }>("/assessments/bands", b),
+  bandHistory: (studentId: string) =>
+    api.get<import("@/lib/school-types").BandHistoryRow[]>(`/assessments/students/${studentId}/bands`),
+  skillProfile: (studentId: string) =>
+    api.get<import("@/lib/school-types").SkillProfile>(`/assessments/students/${studentId}/skill-profile`),
+  trends: (classId: string) =>
+    api.get<import("@/lib/school-types").SubjectTrend[]>(`/assessments/classes/${classId}/trends`),
+  studentInterventions: (studentId: string) =>
+    api.get<import("@/lib/school-types").Intervention[]>(`/assessments/students/${studentId}/interventions`),
+  createIntervention: (b: { student_id: string; term_id: string; goal_text: string; target_tier: string; board_id: string; items: string[] }) =>
+    api.post<import("@/lib/school-types").Intervention>("/assessments/interventions", b),
   addClassSubject: (b: {
     class_id: string;
     subject_id: string;

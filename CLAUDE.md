@@ -55,16 +55,20 @@ Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@
   migration `d7d8e9fab0c1`); `SessionService`; `/sessions/*`; web `/sessions` (SS-1) +
   `/sessions/[id]` (SS-2 tap-capture + one batch photo).
 - **P2** — Director Dashboard (M4): `services/dashboard.py` composes planner forecast + fees + session
-  records + classroom compliance/homework into a RAG board + alert feed (pace/compliance/homework);
-  one-tap **alert→task** (reuses `TaskService.create`); Monday **digest** preview. `/dashboard/*`
-  (fee card director-only, §3.3); web `/insights` (nav "Dashboard" → `/insights`). Board templates
-  (Maintenance/Housekeeping) ship via seed (§5.5, zero new code). Migration head still
-  **`d7d8e9fab0c1`** (no new tables — the dashboard stores nothing).
+  records + classroom compliance/homework + weak-subject trends into a RAG board + alert feed;
+  one-tap **alert→task**; Monday **digest** preview. `/dashboard/*` (fee card director-only, §3.3);
+  web `/insights`. Board templates (Maintenance/Housekeeping) ship via seed (§5.5).
+- **P3** — Assessments & Bands (M3): `models/assessments.py` (skill_areas, assessment_cycles,
+  assessment_scores, student_bands, interventions, intervention_items; migration `d8e9fab0c1d2`);
+  `AssessmentService` (skill areas, cycles, score grid + verify, band suggestion + append-only set +
+  history, skill profile, subject trends + weak detection, interventions that spawn M5 tasks and
+  track completion); `/assessments/*`; web `/assessments` (scores grid / bands / trends tabs) + skill
+  areas on `/academics`. Weak-subject alerts feed the dashboard. Migration head **`d8e9fab0c1d2`**.
 
-**Deferred items:** the *fees-mode* xlsx import; scheduled background jobs (4 pm unlogged reminder,
-Saturday guardian summary, Monday digest delivery — the digest *builder* + preview exist; the cron
-wiring does not); PL-6 day-celebration suggestions + `day_catalog`. Next: **P3 Assessments & Bands**
-(diagnostic intake, skill profiles, A/B/C tiers, interventions → tasks) — SPRD §5.3 / §10.
+**All product phases P0–P3 are complete** (11 migrations, 163 tests). **Deferred items:** the
+*fees-mode* xlsx import; scheduled background jobs (4 pm unlogged reminder, Saturday guardian summary,
+Monday digest *delivery* — builders/previews exist, cron wiring does not); PL-6 day-celebration
+suggestions + `day_catalog`; the DB-3 teacher growth profile (v1.5). See SPRD §10.
 
 ## How this repo was bootstrapped (background)
 

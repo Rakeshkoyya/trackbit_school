@@ -13,6 +13,8 @@ from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models import (
     AcademicYear,
+    AssessmentCycle,
+    AssessmentScore,
     Board,
     BoardMember,
     CalendarEvent,
@@ -22,6 +24,8 @@ from app.models import (
     Guardian,
     HomeworkAssignment,
     Installment,
+    Intervention,
+    InterventionItem,
     LessonLog,
     Membership,
     Organization,
@@ -31,7 +35,9 @@ from app.models import (
     SessionAttendance,
     SessionMeeting,
     SessionStudent,
+    SkillArea,
     Student,
+    StudentBand,
     StudentCategory,
     StudentFee,
     Subject,
@@ -90,12 +96,14 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
                         end_date=date(2027, 3, 31), is_active=True)
     db.add(year)
     db.flush()
+    term1 = Term(org_id=org.id, academic_year_id=year.id, name="Term 1",
+                 start_date=date(2026, 4, 1), end_date=date(2026, 9, 30))
     db.add_all([
-        Term(org_id=org.id, academic_year_id=year.id, name="Term 1",
-             start_date=date(2026, 4, 1), end_date=date(2026, 9, 30)),
+        term1,
         Term(org_id=org.id, academic_year_id=year.id, name="Term 2",
              start_date=date(2026, 10, 1), end_date=date(2027, 3, 31)),
     ])
+    db.flush()
 
     subjects = {}
     for name in ["English", "Mathematics", "Science", "Social Studies", "Hindi"]:
@@ -243,9 +251,38 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
         enrolled += 1
     db.flush()
 
+    # Assessments (M3): skill areas + a term-start diagnostic with skill scores for
+    # 6-A, plus bands + an intervention — so the assessment screens render on review.
+    sixa = [s for s in students if s.class_id == classes["6-A"].id]
+    skill_areas = []
+    for i, sname in enumerate(["Reading", "Writing", "Speaking", "Math"]):
+        sk = SkillArea(org_id=org.id, name=sname, position=i)
+        db.add(sk)
+        skill_areas.append(sk)
+    db.flush()
+    diag = AssessmentCycle(org_id=org.id, term_id=term1.id, type="diagnostic",
+                           name="Term-start diagnostic", date=date(2026, 4, 5))
+    db.add(diag)
+    db.flush()
+    for si, st in enumerate(sixa):
+        for ki, sk in enumerate(skill_areas):
+            base = 35 if si == 0 else 55 + (si * 5)  # first student is weak (→ C band)
+            db.add(AssessmentScore(org_id=org.id, cycle_id=diag.id, student_id=st.id,
+                                   skill_area_id=sk.id, score=min(base + ki * 4, 95), max_score=100,
+                                   entered_by=kc.id, verified_by=kc.id))
+    if sixa:
+        db.add(StudentBand(org_id=org.id, student_id=sixa[0].id, term_id=term1.id, tier="C",
+                           set_by=kc.id, note="Weak on reading — needs support"))
+        iv = Intervention(org_id=org.id, student_id=sixa[0].id, term_id=term1.id,
+                          goal_text="Move C→B in reading this term", target_tier="B")
+        db.add(iv)
+        db.flush()
+        for text in ["Daily hard-words drill", "15 min reading practice", "Weekly reading check"]:
+            db.add(InterventionItem(org_id=org.id, intervention_id=iv.id, text=text))
+    db.flush()
+
     # Ramesh's after-school homework class (Flow 6): 6-A roster + today's meeting with
     # attendance captured — so Sessions + the records feed render on review.
-    sixa = [s for s in students if s.class_id == classes["6-A"].id]
     session = SessionModel(org_id=org.id, name="Homework Class 6A",
                            owner_member_id=mships[ramesh].id, weekdays=[0, 2, 4], time="16:15")
     db.add(session)

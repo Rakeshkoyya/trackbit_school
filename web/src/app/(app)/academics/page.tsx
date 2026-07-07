@@ -211,6 +211,11 @@ function AcademicsInner() {
           list={schoolApi.categories} create={schoolApi.createCategory} remove={schoolApi.deleteCategory}
           seed={schoolApi.seedCategories}
         />
+        <SimpleListCard
+          title="Skill areas (diagnostic)" queryKey={["skill-areas"]} placeholder="Reading" canEdit={canEdit}
+          list={schoolApi.skillAreas} create={schoolApi.createSkill} remove={schoolApi.deleteSkill}
+          seed={schoolApi.seedSkills}
+        />
       </div>
     </div>
   );

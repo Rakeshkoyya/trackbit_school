@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CalendarRange,
   CheckCircle2,
+  ClipboardList,
   GraduationCap,
   Home,
   LayoutGrid,
@@ -33,6 +34,7 @@ const myDay: NavItem = { label: "My Day", href: "/classroom", icon: Sun };
 const sessions: NavItem = { label: "Sessions", href: "/sessions", icon: CalendarClock };
 const planner: NavItem = { label: "Planner", href: "/planner", icon: CalendarRange };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
+const assessments: NavItem = { label: "Assessments", href: "/assessments", icon: ClipboardList };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
 const setup: NavItem = { label: "Setup", href: "/academics", icon: BookOpen };
 const dashboard: NavItem = { label: "Dashboard", href: "/insights", icon: BarChart3 };
@@ -43,13 +45,13 @@ const members: NavItem = { label: "Members", href: "/members", icon: Users, tour
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [...memberNav, myDay, sessions, planner, students, fees, dashboard, setup, members];
+      return [...memberNav, myDay, sessions, planner, students, assessments, fees, dashboard, setup, members];
     case "coordinator":
-      return [...memberNav, myDay, sessions, planner, students, dashboard, setup];
+      return [...memberNav, myDay, sessions, planner, students, assessments, dashboard, setup];
     case "office":
       return [...memberNav, fees];
     case "teacher":
-      return [...memberNav, myDay, sessions, planner, students];
+      return [...memberNav, myDay, sessions, planner, students, assessments];
     default:
       return memberNav;
   }

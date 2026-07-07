@@ -119,6 +119,14 @@ class DashboardService:
                     id=f"homework:{c.class_label}", type="homework", severity="amber",
                     title=f"{c.class_label} homework completion at {int(c.completion * 100)}%",
                     detail="Follow up on homework completion with the class teacher."))
+        # weak-subject early warning (class average falling across cycles, M3)
+        from app.services.assessments import AssessmentService
+        for t in AssessmentService(self.db).weak_subjects(m):
+            latest = t.points[-1]["avg_pct"] if t.points else 0
+            alerts.append(Alert(
+                id=f"weak:{t.subject_id}", type="homework", severity="amber",
+                title=f"{t.subject_name} average dropped to {latest}%",
+                detail="Class average is falling across test cycles — review with the teacher."))
         return alerts
 
     def overview(self, m: CurrentMember, year_id: uuid.UUID | None = None) -> DashboardOverview:

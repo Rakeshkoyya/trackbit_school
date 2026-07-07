@@ -9,6 +9,14 @@ from app.models.academics import (
     Term,
 )
 from app.models.analytics import AnalyticsEvent
+from app.models.assessments import (
+    AssessmentCycle,
+    AssessmentScore,
+    Intervention,
+    InterventionItem,
+    SkillArea,
+    StudentBand,
+)
 from app.models.auth_token import AuthToken
 from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
@@ -36,6 +44,8 @@ from app.models.user import User
 __all__ = [
     "AcademicYear",
     "AnalyticsEvent",
+    "AssessmentCycle",
+    "AssessmentScore",
     "Attachment",
     "AuthToken",
     "Board",
@@ -51,6 +61,8 @@ __all__ = [
     "HomeworkAssignment",
     "HomeworkCheck",
     "Installment",
+    "Intervention",
+    "InterventionItem",
     "Invoice",
     "LessonLog",
     "Membership",
@@ -63,7 +75,9 @@ __all__ = [
     "SessionAttendance",
     "SessionMeeting",
     "SessionStudent",
+    "SkillArea",
     "Student",
+    "StudentBand",
     "StudentCategory",
     "StudentFee",
     "Subject",

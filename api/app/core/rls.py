@@ -82,6 +82,16 @@ SCHOOL_SESSION_TABLES = (
     "session_attendance",
 )
 
+# P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
+SCHOOL_ASSESSMENT_TABLES = (
+    "skill_areas",
+    "assessment_cycles",
+    "assessment_scores",
+    "student_bands",
+    "interventions",
+    "intervention_items",
+)
+
 # NULLIF guards the ::uuid cast: Postgres does NOT guarantee OR short-circuit
 # evaluation, so the cast can run even when an earlier branch is true. NULLIF
 # turns '' into NULL, and NULL::uuid is valid (NULL) — so the cast never errors,

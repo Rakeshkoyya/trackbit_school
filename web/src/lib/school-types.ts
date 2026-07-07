@@ -216,6 +216,59 @@ export interface Digest {
   wins: string[];
 }
 
+// ── assessments & bands (M3) ────────────────────────────────────────────────
+export interface SkillArea { id: string; name: string; position: number }
+
+export type CycleType = "diagnostic" | "unit_test" | "term_exam";
+export interface Cycle { id: string; term_id: string; type: CycleType; name: string; date: string }
+
+export interface GridColumn { id: string; name: string; kind: "subject" | "skill" }
+export interface GridCell { student_id: string; column_id: string; score: number; max_score: number }
+export interface ScoreGrid {
+  cycle_id: string;
+  cycle_type: string;
+  verified: boolean;
+  columns: GridColumn[];
+  students: { student_id: string; full_name: string }[];
+  cells: GridCell[];
+}
+
+export interface BandRow {
+  student_id: string;
+  full_name: string;
+  current_tier: string | null;
+  suggested_tier: string | null;
+  latest_pct: number | null;
+}
+export interface BandBoard { class_id: string; term_id: string | null; rows: BandRow[] }
+export interface BandHistoryRow {
+  id: string;
+  tier: string;
+  scope_skill_area_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface SkillProfileCycle { cycle_id: string; name: string; date: string; scores: Record<string, number> }
+export interface SkillProfile { student_id: string; skills: string[]; cycles: SkillProfileCycle[] }
+
+export interface SubjectTrend {
+  subject_id: string;
+  subject_name: string;
+  points: { cycle_name: string; date: string; avg_pct: number }[];
+  weak: boolean;
+}
+
+export interface InterventionItem { id: string; text: string; task_instance_id: string | null; done: boolean }
+export interface Intervention {
+  id: string;
+  student_id: string;
+  goal_text: string;
+  target_tier: string;
+  status: string;
+  items: InterventionItem[];
+}
+
 export interface ClassSubject {
   id: string;
   class_id: string;
