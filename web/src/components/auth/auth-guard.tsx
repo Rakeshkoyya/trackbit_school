@@ -15,16 +15,22 @@ function FullScreenSpinner() {
   );
 }
 
-/** Gate authenticated areas; redirect to login when there's no session. */
+/** Gate authenticated areas; redirect to login when there's no session.
+ *  `requireRole` locks to one role; `allow` accepts any role in the list. */
 export function AuthGuard({
   children,
   requireRole,
+  allow,
 }: {
   children: React.ReactNode;
   requireRole?: OrgRole;
+  allow?: OrgRole[];
 }) {
   const { me, loading, mustSetPassword } = useAuth();
   const router = useRouter();
+
+  const denied = (r: OrgRole) =>
+    (requireRole && r !== requireRole) || (allow && !allow.includes(r));
 
   useEffect(() => {
     if (loading) return;
@@ -32,12 +38,13 @@ export function AuthGuard({
       router.replace("/auth/login");
     } else if (mustSetPassword) {
       router.replace("/auth/set-password");
-    } else if (requireRole && me.org_role !== requireRole) {
+    } else if (denied(me.org_role)) {
       router.replace("/home");
     }
-  }, [loading, me, mustSetPassword, requireRole, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, me, mustSetPassword, requireRole, allow, router]);
 
-  if (loading || !me || mustSetPassword || (requireRole && me.org_role !== requireRole)) {
+  if (loading || !me || mustSetPassword || denied(me.org_role)) {
     return <FullScreenSpinner />;
   }
   return <>{children}</>;

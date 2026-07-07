@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_academic, require_coordinator_up
+from app.core.dependencies import get_current_member, require_academic, require_coordinator_up
 from app.schemas.academics import (
     ClassCreate,
     ClassOut,
@@ -35,8 +35,11 @@ router = APIRouter()
 
 
 # ── years ────────────────────────────────────────────────────────────────────
+# Years are org-level master data (the global academic-year switcher, SPRD §6.3
+# header). Readable by any member — incl. office, who scopes fees by year — while
+# writes stay coordinator/director.
 @router.get("/years", response_model=list[YearOut])
-def list_years(m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+def list_years(m: CurrentMember = Depends(get_current_member), db: Session = Depends(get_db)):
     return AcademicService(db).list_years(m)
 
 

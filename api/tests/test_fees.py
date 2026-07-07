@@ -92,8 +92,8 @@ def test_full_fee_lifecycle(client, cleanup):
     assert {t["type"] for t in txns} == {"payment", "undo"}
 
     # discount 5000 -> net 25000, unpaid installments rescale to sum 25000
-    disc = client.put(f"/api/v1/fees/student-fees/{detail['id']}", headers=h,
-                      json={"discount": "5000"}).json()
+    disc = client.patch(f"/api/v1/fees/student-fees/{detail['id']}", headers=h,
+                        json={"discount": "5000"}).json()
     assert disc["net_fee"] == "25000.00"
     assert sum(float(i["amount"]) for i in disc["installments"]) == 25000.0
 

@@ -4,6 +4,7 @@ import { BottomTabs } from "@/components/layout/bottom-tabs";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
+import { YearProvider } from "@/contexts/year-context";
 
 /**
  * Authenticated app shell: sidebar on desktop, bottom tabs on mobile.
@@ -13,6 +14,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
       <CelebrationProvider>
+        <YearProvider>
         <div className="flex min-h-dvh">
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col">
@@ -24,6 +26,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <GuidedTour />
+        </YearProvider>
       </CelebrationProvider>
     </AuthGuard>
   );

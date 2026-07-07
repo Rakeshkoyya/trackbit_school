@@ -1,10 +1,13 @@
 import {
   BarChart3,
+  BookOpen,
   CheckCircle2,
+  GraduationCap,
   Home,
   LayoutGrid,
   type LucideIcon,
   Users,
+  Wallet,
 } from "lucide-react";
 
 import type { OrgRole } from "@/lib/types";
@@ -23,22 +26,24 @@ export const memberNav: NavItem[] = [
   { label: "Done", href: "/done", icon: CheckCircle2 },
 ];
 
-// Whole-school dashboard — director + coordinator (SPRD §3.3). Members/settings
-// live in the account menu (avatar popover), admin-only.
-const dashboardNav: NavItem[] = [{ label: "Dashboard", href: "/dashboard", icon: BarChart3 }];
-const membersNav: NavItem[] = [{ label: "Members", href: "/members", icon: Users, tour: "nav-members" }];
+const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
+const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
+const setup: NavItem = { label: "Setup", href: "/academics", icon: BookOpen };
+const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
+const members: NavItem = { label: "Members", href: "/members", icon: Users, tour: "nav-members" };
 
-// Role-aware primary nav. As the academic (Planner/Classroom/Sessions/Students/
-// Assessments) and Fees routes land per SPRD §6.2, extend the per-role lists
-// here — this is the single source of truth for both sidebar and bottom tabs.
+// Role-aware primary nav (single source of truth for sidebar + bottom tabs).
+// Hard rules (SPRD §3.3): teachers never see Fees; office sees only tasks + Fees.
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [...memberNav, ...dashboardNav, ...membersNav];
+      return [...memberNav, students, fees, dashboard, setup, members];
     case "coordinator":
-      return [...memberNav, ...dashboardNav];
+      return [...memberNav, students, dashboard, setup];
     case "office":
+      return [...memberNav, fees];
     case "teacher":
+      return [...memberNav, students];
     default:
       return memberNav;
   }

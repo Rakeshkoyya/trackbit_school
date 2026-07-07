@@ -69,7 +69,7 @@ def get_student_fee(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_
     return FeeService(db).get_student_fee(m, sf_id)
 
 
-@router.put("/student-fees/{sf_id}", response_model=StudentFeeDetail)
+@router.patch("/student-fees/{sf_id}", response_model=StudentFeeDetail)
 def update_discount(sf_id: uuid.UUID, body: StudentFeeUpdate,
                     m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db)):
     return FeeService(db).update_discount(m, sf_id, body)
@@ -100,7 +100,7 @@ def undo(inst_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
     return FeeService(db).undo(m, inst_id)
 
 
-@router.put("/installments/{inst_id}/due-date", response_model=StudentFeeDetail)
+@router.patch("/installments/{inst_id}/due-date", response_model=StudentFeeDetail)
 def update_due_date(inst_id: uuid.UUID, body: DueDateUpdate,
                     m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db)):
     return FeeService(db).update_due_date(m, inst_id, body)
