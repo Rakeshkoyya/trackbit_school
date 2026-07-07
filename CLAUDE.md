@@ -20,20 +20,29 @@ and fences win over the PRD; an explicit later founder decision wins over both.
 
 ## Build status (what exists now)
 
-The app has been bootstrapped and the P0 foundation is landing packet by packet. Done + verified
-against real Postgres (full suite **130 passing**, ruff clean, tsc/eslint clean):
+**P0 (foundation) is complete**, verified against real Postgres (backend suite **143 passing**,
+ruff clean; web tsc + eslint + `next build` clean). Migration head = **`d3f4a5b6c7d8`**.
 
 - **P0-A** — `api/` + `web/` seeded from the task_management2 seed; `docs/`; AI (§8) + WhatsApp (§7)
   config stubs; monorepo git.
-- **P0-B** — roles `admin`(Director)/`coordinator`/`teacher`/`office` (`member`→`teacher` migration
-  `d1e2f3a4b5c6`); `core/roles.py` groups; `require_coordinator_up`/`require_academic`/
-  `require_office_up`; role-aware nav + `landingForRole`; Members UI on 4 roles.
-- **P0-C** — master data (§4.2): `models/academics.py` + `models/students.py` (8 org-scoped + RLS
-  tables, migration `d2e3f4a5b6c7`), `AcademicService`/`StudentService`, 19 CRUD endpoints under
-  `/academics` + `/students`. Migration head = **`d2e3f4a5b6c7`**.
+- **P0-B** — roles `admin`(Director)/`coordinator`/`teacher`/`office` (`member`→`teacher` migration);
+  `core/roles.py` groups; `require_coordinator_up`/`require_academic`/`require_office_up`;
+  role-aware nav + `landingForRole`; Members UI on 4 roles.
+- **P0-C** — master data (§4.2): `models/academics.py` + `models/students.py` (8 org-scoped+RLS
+  tables), `AcademicService`/`StudentService`, 19 endpoints under `/academics` + `/students`;
+  frontend `/academics` setup + `/students` (ST-1/ST-2); **roster xlsx importer** (heuristic
+  mapping, `roster_import.py`, `/students/import/*`, FE-5).
+- **P0-D** — fee port (§4.6): `fee_math.py` (ported money math), `models/fees.py` (5 tables),
+  `FeeService`, 11 endpoints under `/fees` (all `require_office_up`).
+- **P0-E** — fee frontend: `/fees` (summary + list + enrol), `/fees/[id]` (pay/undo/discount +
+  ledger), `/fees/structures`; global year switcher (`year-context` + `YearSwitcher`).
 
-Next up (not built yet): **P0-C frontend** (Settings screens, ST-1/ST-2, roster xlsx import),
-**P0-D/E** fee port, then **P1+** academic modules. See SPRD §10 for the packet plan.
+**Deferred parity item:** the *fees-mode* xlsx import (importing existing balances/quarterly
+payments from the register — the students-mode roster import is done). Manual enrol/pay covers the
+loop meanwhile.
+
+Next: **P1** Planner + Classroom Log (the make-or-break phase), then P1.5 Sessions, P2 Dashboard,
+P3 Assessments. See SPRD §10.
 
 ## How this repo was bootstrapped (background)
 
