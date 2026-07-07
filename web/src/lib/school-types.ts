@@ -129,6 +129,52 @@ export interface Compliance {
   rows: ComplianceRow[];
 }
 
+// ── sessions (M2) ───────────────────────────────────────────────────────────
+export interface SessionSummary {
+  id: string;
+  name: string;
+  weekdays: number[];
+  time: string | null;
+  active: boolean;
+  roster_count: number;
+}
+
+export interface SessionDetail extends SessionSummary {
+  students: { student_id: string; full_name: string; roll_no: string | null }[];
+}
+
+export type AttendanceStatus = "present" | "late" | "absent";
+
+export interface MeetingRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  status: AttendanceStatus | null;
+  late_minutes: number | null;
+  homework_done: boolean | null;
+}
+
+export interface Meeting {
+  id: string;
+  session_id: string;
+  date: string;
+  evidence_url: string | null;
+  roster: MeetingRow[];
+}
+
+export interface SessionRecord {
+  session_id: string;
+  meeting_id: string;
+  session_name: string;
+  date: string;
+  present: number;
+  late: number;
+  absent: number;
+  homework_done: number;
+  total: number;
+  evidence_url: string | null;
+}
+
 export interface ClassSubject {
   id: string;
   class_id: string;

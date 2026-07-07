@@ -89,6 +89,24 @@ export const schoolApi = {
   checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
     api.post<{ id: string }>(`/classroom/homework/${id}/check`, b),
   compliance: () => api.get<import("@/lib/school-types").Compliance>("/classroom/compliance"),
+
+  // sessions (M2)
+  sessions: () => api.get<import("@/lib/school-types").SessionSummary[]>("/sessions"),
+  session: (id: string) => api.get<import("@/lib/school-types").SessionDetail>(`/sessions/${id}`),
+  createSession: (b: { name: string; weekdays: number[]; time?: string | null; student_ids: string[] }) =>
+    api.post<import("@/lib/school-types").SessionDetail>("/sessions", b),
+  deleteSession: (id: string) => api.del<{ message: string }>(`/sessions/${id}`),
+  openMeeting: (sessionId: string) =>
+    api.post<import("@/lib/school-types").Meeting>(`/sessions/${sessionId}/meetings`),
+  recordAttendance: (meetingId: string, rows: {
+    student_id: string; status: string; late_minutes?: number | null; homework_done?: boolean | null;
+  }[]) => api.patch<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/attendance`, { rows }),
+  uploadEvidence: (meetingId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/photo`, form);
+  },
+  sessionRecords: () => api.get<import("@/lib/school-types").SessionRecord[]>("/sessions/records"),
   addClassSubject: (b: {
     class_id: string;
     subject_id: string;

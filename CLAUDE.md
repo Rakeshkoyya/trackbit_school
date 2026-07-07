@@ -51,9 +51,16 @@ ruff clean; web tsc + eslint + `next build` clean). Migration head = **`d3f4a5b6
 Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@`/`anil@` (teachers)
 — all `@demo.trackbit.app`.
 
+- **P1.5** — `models/sessions.py` (sessions, session_students, session_meetings, session_attendance;
+  migration `d7d8e9fab0c1`); `SessionService` (My Sessions, create+roster, get-or-create today's
+  meeting, upsert attendance, batch-photo evidence via `storage`, records feed); `/sessions/*`;
+  web `/sessions` (SS-1) + `/sessions/[id]` (SS-2 tap-capture + one batch photo). Migration head
+  **`d7d8e9fab0c1`**.
+
 **Deferred items:** the *fees-mode* xlsx import; the 4 pm unlogged-class reminder + Saturday guardian
-summary background jobs (the capture endpoints exist; the scheduled jobs are not wired yet); M2
-Sessions (P1.5). Next: P1.5 Sessions → P2 Director Dashboard + digest → P3 Assessments (SPRD §10).
+summary background jobs (capture endpoints exist; scheduled jobs not wired). Next: **P2 Director
+Dashboard + weekly digest** (RAG board tying pace + homework + sessions + fees, one-tap alert→task),
+then P3 Assessments (SPRD §10).
 
 ## How this repo was bootstrapped (background)
 

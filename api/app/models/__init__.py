@@ -23,6 +23,12 @@ from app.models.fees import (
 from app.models.notification import DeviceToken, Notification
 from app.models.org import Membership, Organization
 from app.models.planner import Plan, PlanEntry, SyllabusTopic, SyllabusUnit
+from app.models.sessions import (
+    Session,
+    SessionAttendance,
+    SessionMeeting,
+    SessionStudent,
+)
 from app.models.students import Guardian, Student, StudentCategory
 from app.models.task import EVENT_TYPES, Attachment, TaskEvent, TaskInstance, TaskTemplate
 from app.models.user import User
@@ -53,6 +59,10 @@ __all__ = [
     "Plan",
     "PlanEntry",
     "SchoolClass",
+    "Session",
+    "SessionAttendance",
+    "SessionMeeting",
+    "SessionStudent",
     "Student",
     "StudentCategory",
     "StudentFee",

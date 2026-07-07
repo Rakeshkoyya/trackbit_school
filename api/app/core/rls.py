@@ -74,6 +74,14 @@ SCHOOL_CLASSROOM_TABLES = (
     "homework_checks",
 )
 
+# P1.5 sessions (SPRD §4.4) — engaged in migration d7d8e9fab0c1.
+SCHOOL_SESSION_TABLES = (
+    "sessions",
+    "session_students",
+    "session_meetings",
+    "session_attendance",
+)
+
 # NULLIF guards the ::uuid cast: Postgres does NOT guarantee OR short-circuit
 # evaluation, so the cast can run even when an earlier branch is true. NULLIF
 # turns '' into NULL, and NULL::uuid is valid (NULL) — so the cast never errors,

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  CalendarClock,
   CalendarRange,
   CheckCircle2,
   GraduationCap,
@@ -29,6 +30,7 @@ export const memberNav: NavItem[] = [
 ];
 
 const myDay: NavItem = { label: "My Day", href: "/classroom", icon: Sun };
+const sessions: NavItem = { label: "Sessions", href: "/sessions", icon: CalendarClock };
 const planner: NavItem = { label: "Planner", href: "/planner", icon: CalendarRange };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
@@ -41,13 +43,13 @@ const members: NavItem = { label: "Members", href: "/members", icon: Users, tour
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [...memberNav, myDay, planner, students, fees, dashboard, setup, members];
+      return [...memberNav, myDay, sessions, planner, students, fees, dashboard, setup, members];
     case "coordinator":
-      return [...memberNav, myDay, planner, students, dashboard, setup];
+      return [...memberNav, myDay, sessions, planner, students, dashboard, setup];
     case "office":
       return [...memberNav, fees];
     case "teacher":
-      return [...memberNav, myDay, planner, students];
+      return [...memberNav, myDay, sessions, planner, students];
     default:
       return memberNav;
   }

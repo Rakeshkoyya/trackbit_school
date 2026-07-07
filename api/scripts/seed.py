@@ -28,6 +28,9 @@ from app.models import (
     Plan,
     PlanEntry,
     SchoolClass,
+    SessionAttendance,
+    SessionMeeting,
+    SessionStudent,
     Student,
     StudentCategory,
     StudentFee,
@@ -40,6 +43,7 @@ from app.models import (
     Transaction,
     User,
 )
+from app.models import Session as SessionModel
 from app.services.calendar import expand_blocked_dates
 from app.services.fee_math import proportional_installments, q, recompute_student_fee
 from app.services.planner import distribute
@@ -237,6 +241,26 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
                                created_by=kc.id, created_by_name=kc.name))
         recompute_student_fee(sf)
         enrolled += 1
+    db.flush()
+
+    # Ramesh's after-school homework class (Flow 6): 6-A roster + today's meeting with
+    # attendance captured — so Sessions + the records feed render on review.
+    sixa = [s for s in students if s.class_id == classes["6-A"].id]
+    session = SessionModel(org_id=org.id, name="Homework Class 6A",
+                           owner_member_id=mships[ramesh].id, weekdays=[0, 2, 4], time="16:15")
+    db.add(session)
+    db.flush()
+    for st in sixa:
+        db.add(SessionStudent(org_id=org.id, session_id=session.id, student_id=st.id))
+    meeting = SessionMeeting(org_id=org.id, session_id=session.id, date=today_ist)
+    db.add(meeting)
+    db.flush()
+    for i, st in enumerate(sixa):
+        status = "absent" if i == 0 else "late" if i == 1 else "present"
+        db.add(SessionAttendance(
+            org_id=org.id, meeting_id=meeting.id, student_id=st.id, status=status,
+            late_minutes=8 if status == "late" else None,
+            homework_done=(status != "absent" and i % 2 == 0)))
 
     db.flush()
     return {"students": len(students), "classes": len(classes), "enrolled": enrolled}
