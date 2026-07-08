@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CalendarClock, IndianRupee, Send, Wand2 } from "lucide-react";
+import { AlertTriangle, BookOpen, CalendarClock, FileText, IndianRupee, RefreshCw, Send, Wand2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -81,6 +81,75 @@ function DigestSheet({ open, onClose, yearId }: { open: boolean; onClose: () => 
   );
 }
 
+// The 8 AM report — the day, written by the system (V2-P4 §5.6). Leads the board.
+function ReportView() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({ queryKey: ["daily-report"], queryFn: () => schoolApi.dailyReport() });
+  const regen = useMutation({
+    mutationFn: () => schoolApi.regenerateReport(),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["daily-report"] }); toast.success("Report refreshed"); },
+    onError: (e) => showApiError(e, "Could not refresh"),
+  });
+  if (!data) return null;
+  const { risks, ambiguities, wins } = data.highlights;
+  return (
+    <section className="mb-6 rounded-xl border border-border bg-card p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <FileText className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Daily report · {data.for_date}</h2>
+        <Badge tone={risks.length ? "warning" : "success"}>
+          {risks.length ? `${risks.length} need attention` : "all calm"}
+        </Badge>
+        <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => regen.mutate()} disabled={regen.isPending}>
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Read"}</Button>
+        </div>
+      </div>
+
+      {risks.length > 0 ? (
+        <ul className="mb-1 space-y-0.5">
+          {risks.map((r, i) => <li key={i} className="flex gap-2 text-sm"><span className="text-danger">•</span>{r}</li>)}
+        </ul>
+      ) : null}
+      {ambiguities.length > 0 ? (
+        <p className="text-xs text-muted-foreground">{ambiguities.length} thing(s) worth a look — open the report.</p>
+      ) : null}
+
+      {open ? (
+        <div className="mt-3 space-y-3 border-t border-border pt-3">
+          {data.sections.map((s) => (
+            <div key={s.heading}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{s.heading}</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {s.lines.map((l, i) => <li key={i} className="text-sm">{l}</li>)}
+              </ul>
+            </div>
+          ))}
+          {ambiguities.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-warning">Worth a look</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {ambiguities.map((a, i) => <li key={i} className="text-sm">{a}</li>)}
+              </ul>
+            </div>
+          ) : null}
+          {wins.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#234a37]">Wins</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {wins.map((w, i) => <li key={i} className="text-sm">{w}</li>)}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function InsightsInner() {
   const { yearId } = useYear();
   const [alertFor, setAlertFor] = useState<DashboardAlert | null>(null);
@@ -96,6 +165,8 @@ function InsightsInner() {
           <Button size="sm" variant="outline" onClick={() => setDigestOpen(true)}><Wand2 className="h-4 w-4" /> Digest</Button>
         </div>
       </div>
+
+      <ReportView />
 
       {/* RAG + fees + homework summary */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">

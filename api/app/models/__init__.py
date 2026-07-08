@@ -33,6 +33,7 @@ from app.models.fees import (
 from app.models.notification import DeviceToken, Notification
 from app.models.org import Membership, Organization
 from app.models.planner import Plan, PlanEntry, SyllabusTopic, SyllabusUnit
+from app.models.reports import DailyReport
 from app.models.sessions import (
     Session,
     SessionAttendance,
@@ -60,6 +61,7 @@ __all__ = [
     "CheckResult",
     "ClassSubject",
     "DailyCheck",
+    "DailyReport",
     "DeviceToken",
     "EVENT_TYPES",
     "FeeInstallmentTemplate",

@@ -19,6 +19,9 @@ _JOBS = {
     "report_card": jobs.run_report_card,
     "nudge": jobs.run_nudge_scan,
     "grace": jobs.run_grace_downgrade,
+    "daily_report": jobs.run_daily_report,
+    "teacher_reminder": jobs.run_teacher_reminder,
+    "saturday_summary": jobs.run_saturday_summary,
 }
 
 

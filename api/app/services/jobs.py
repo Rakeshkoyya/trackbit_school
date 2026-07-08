@@ -15,9 +15,25 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.timeutil import org_day_bounds
-from app.models import Membership, Notification, Organization, TaskInstance, User
+from app.models import (
+    AttendanceException,
+    AttendanceMark,
+    ClassSubject,
+    DailyReport,
+    Guardian,
+    HomeworkAssignment,
+    LessonLog,
+    Membership,
+    Notification,
+    Organization,
+    Student,
+    TaskInstance,
+    TimetableSlot,
+    User,
+)
 from app.services import events, notifications
 from app.services.dispatcher import deliver
+from app.services.notify_guardian import notify_guardians
 from app.services.recurrence import RecurringService
 
 logger = logging.getLogger("trackbit.jobs")
@@ -298,11 +314,179 @@ def run_grace_downgrade() -> int:
         db.close()
 
 
+# ---- V2-P4: daily report + reminders (SPRD2 §5.6, §7, §9) --------------
+def run_daily_report() -> int:
+    """Org-local 19:00 draft the day's report; 06:00 regenerate a draft if late data
+    arrived; 08:00 notify admins yesterday's report is ready. Idempotent per (org,
+    date): generate upserts one row and never overwrites a final."""
+    from datetime import date as _date
+
+    from sqlalchemy import select as _select
+
+    from app.services.daily_report import DailyReportService
+
+    db = _session()
+    try:
+        made = 0
+        svc = DailyReportService(db)
+        for org in _active_orgs(db):
+            _, _, now_local = org_day_bounds(org.timezone)
+            today: _date = now_local.date()
+            yest = today - timedelta(days=1)
+            if now_local.hour == 19:
+                svc.generate(org, today)
+            elif now_local.hour == 6:
+                svc.generate(org, yest, only_if_draft=True)
+            elif now_local.hour == 8:
+                report = db.scalar(_select(DailyReport).where(
+                    DailyReport.org_id == org.id, DailyReport.for_date == yest)) \
+                    or svc.generate(org, yest)
+                if report is None:
+                    continue
+                risks = len((report.highlights or {}).get("risks", []))
+                body = (f"{org.name} — {yest}: {risks} thing(s) need attention."
+                        if risks else f"{org.name} — {yest}: a calm day, nothing flagged.")
+                admins = db.execute(
+                    _select(Membership.user_id).where(
+                        Membership.org_id == org.id, Membership.status == "active",
+                        Membership.org_role == "admin")).all()
+                for (uid,) in admins:
+                    n = notifications.enqueue(
+                        db, org_id=org.id, user_id=uid, instance_id=None,
+                        notif_type="daily_report", channel="email",
+                        payload={"subject": f"{org.name} daily report", "body": body},
+                        dedupe_key=f"daily_report:{org.id}:{yest}:{uid}")
+                    if n:
+                        made += 1
+        db.commit()
+        logger.info("daily-report job: %d admin notifications", made)
+        return made
+    except Exception:
+        db.rollback()
+        logger.exception("daily-report job failed")
+        return 0
+    finally:
+        db.close()
+
+
+def run_teacher_reminder() -> int:
+    """Org-local 16:00 — nudge each teacher about classes still unmarked/unlogged
+    today (§7). One reminder per teacher per day (dedupe)."""
+    from sqlalchemy import or_ as _or
+    from sqlalchemy import select as _select
+
+    db = _session()
+    try:
+        made = 0
+        for org in _active_orgs(db):
+            _, _, now_local = org_day_bounds(org.timezone)
+            if now_local.hour != 16:
+                continue
+            d = now_local.date()
+            slots = list(db.scalars(_select(TimetableSlot).where(
+                TimetableSlot.org_id == org.id, TimetableSlot.weekday == d.weekday(),
+                TimetableSlot.effective_from <= d,
+                _or(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d))))
+            if not slots:
+                continue
+            teacher_of = dict(db.execute(_select(
+                ClassSubject.id, ClassSubject.teacher_member_id).where(
+                ClassSubject.org_id == org.id)).all())
+            marked = {(mk.class_id, mk.period_no) for mk in db.scalars(_select(AttendanceMark).where(
+                AttendanceMark.org_id == org.id, AttendanceMark.date == d))}
+            logged = set(db.scalars(_select(LessonLog.class_subject_id).where(
+                LessonLog.org_id == org.id, LessonLog.date == d)))
+            # tally per teacher membership
+            pending: dict = {}
+            for s in slots:
+                tmid = teacher_of.get(s.class_subject_id)
+                if tmid is None:
+                    continue
+                unmarked = (s.class_id, s.period_no) not in marked
+                unlogged = s.class_subject_id not in logged
+                if unmarked or unlogged:
+                    pending[tmid] = pending.get(tmid, 0) + 1
+            for tmid, count in pending.items():
+                membership = db.get(Membership, tmid)
+                if membership is None or membership.status != "active":
+                    continue
+                n = notifications.enqueue(
+                    db, org_id=org.id, user_id=membership.user_id, instance_id=None,
+                    notif_type="teacher_reminder", channel="push",
+                    payload={"subject": "Wrap up your day",
+                             "body": f"You have {count} class-period(s) not yet marked or logged."},
+                    dedupe_key=f"teacher_reminder:{membership.user_id}:{d}")
+                if n:
+                    made += 1
+        db.commit()
+        logger.info("teacher-reminder job: %d notifications", made)
+        return made
+    except Exception:
+        db.rollback()
+        logger.exception("teacher-reminder job failed")
+        return 0
+    finally:
+        db.close()
+
+
+def run_saturday_summary() -> int:
+    """Saturday org-local 08:00 — a light weekly note to each student's guardians:
+    homework set this week + absences (§7). Guardian channel is the WhatsApp stub."""
+    from sqlalchemy import func as _func
+    from sqlalchemy import select as _select
+
+    db = _session()
+    try:
+        sent = 0
+        for org in _active_orgs(db):
+            _, _, now_local = org_day_bounds(org.timezone)
+            if now_local.weekday() != 5 or now_local.hour != 8:
+                continue
+            d = now_local.date()
+            week_start = d - timedelta(days=6)
+            students = list(db.scalars(_select(Student).where(
+                Student.org_id == org.id, Student.status == "active",
+                Student.class_id.isnot(None))))
+            for st in students:
+                hw = db.scalar(_select(_func.count(HomeworkAssignment.id))
+                    .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+                    .where(HomeworkAssignment.org_id == org.id,
+                           ClassSubject.class_id == st.class_id,
+                           HomeworkAssignment.date >= week_start,
+                           HomeworkAssignment.date <= d)) or 0
+                absences = db.scalar(_select(_func.count(AttendanceException.id))
+                    .join(AttendanceMark, AttendanceMark.id == AttendanceException.mark_id)
+                    .where(AttendanceMark.org_id == org.id,
+                           AttendanceException.student_id == st.id,
+                           AttendanceException.status == "absent",
+                           AttendanceMark.date >= week_start, AttendanceMark.date <= d)) or 0
+                recipients = list(db.execute(_select(Guardian.phone, Guardian.notify_opt_out)
+                    .where(Guardian.org_id == org.id, Guardian.student_id == st.id)).all())
+                if not recipients:
+                    continue
+                msg = (f"{st.full_name} this week at {org.name}: {hw} homework set, "
+                       f"{absences} day(s) absent.")
+                sent += notify_guardians([(p, o) for p, o in recipients], msg)
+        db.commit()
+        logger.info("saturday-summary job: %d guardian messages", sent)
+        return sent
+    except Exception:
+        db.rollback()
+        logger.exception("saturday-summary job failed")
+        return 0
+    finally:
+        db.close()
+
+
 def run_hourly() -> None:
-    """The hourly tick: materialize, miss-mark, digest, report card, nudge, grace."""
+    """The hourly tick: materialize, miss-mark, digest, report card, nudge, grace,
+    plus V2 daily report, teacher reminder, and Saturday guardian summary."""
     run_materializer()
     run_miss_marker()
     run_digest()
     run_report_card()
     run_nudge_scan()
     run_grace_downgrade()
+    run_daily_report()
+    run_teacher_reminder()
+    run_saturday_summary()

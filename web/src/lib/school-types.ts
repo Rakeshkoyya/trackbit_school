@@ -306,6 +306,55 @@ export interface Checks {
   checks: DailyCheck[];
 }
 
+// ── daily report + student timeline (V2-P4, SPRD2 §5.6/§5.7) ─────────────────
+export interface ReportSection {
+  heading: string;
+  lines: string[];
+}
+
+export interface ReportHighlights {
+  risks: string[];
+  ambiguities: string[];
+  wins: string[];
+}
+
+export interface DailyReport {
+  id: string;
+  for_date: string;
+  generated_at: string;
+  status: string;
+  content_md: string;
+  highlights: ReportHighlights;
+  sections: ReportSection[];
+}
+
+export interface TimelinePeriod {
+  period_no: number;
+  class_subject_id: string;
+  subject_name: string | null;
+  topic: string | null;
+  attendance: "present" | "late" | "absent" | "unmarked";
+  late_minutes: number | null;
+  checks_flagged: string[];
+  homework: string[];
+  gap: boolean;
+}
+
+export interface TimelineSession {
+  session_name: string;
+  status: string;
+  homework_done: boolean | null;
+}
+
+export interface StudentTimeline {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  date: string;
+  periods: TimelinePeriod[];
+  sessions: TimelineSession[];
+}
+
 export interface MeetingRow {
   student_id: string;
   full_name: string;

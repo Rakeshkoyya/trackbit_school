@@ -7,6 +7,7 @@ env (AI_MODEL_DRAFT / AI_MODEL_PARSE).
 """
 
 from app.services.ai.checks import draft_checks
+from app.services.ai.report import report_write
 from app.services.ai.timetable import parse_timetable
 
-__all__ = ["draft_checks", "parse_timetable"]
+__all__ = ["draft_checks", "parse_timetable", "report_write"]

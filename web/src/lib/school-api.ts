@@ -129,6 +129,15 @@ export const schoolApi = {
   },
   sessionRecords: () => api.get<import("@/lib/school-types").SessionRecord[]>("/sessions/records"),
 
+  // daily report + student timeline (V2-P4, SPRD2 §5.6/§5.7)
+  dailyReport: (onDate?: string) =>
+    api.get<import("@/lib/school-types").DailyReport>(`/reports/daily${qs({ on_date: onDate })}`),
+  regenerateReport: (onDate?: string) =>
+    api.post<import("@/lib/school-types").DailyReport>(`/reports/daily/regenerate${qs({ on_date: onDate })}`),
+  studentTimeline: (studentId: string, onDate?: string) =>
+    api.get<import("@/lib/school-types").StudentTimeline>(
+      `/students/${studentId}/timeline${qs({ on_date: onDate })}`),
+
   // director dashboard (M4)
   dashboard: (yearId?: string) =>
     api.get<import("@/lib/school-types").DashboardOverview>(`/dashboard/overview${qs({ year_id: yearId })}`),

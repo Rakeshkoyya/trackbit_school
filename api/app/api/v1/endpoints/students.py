@@ -7,6 +7,7 @@ their own modules, not here.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
@@ -29,11 +30,20 @@ from app.schemas.students import (
     StudentOut,
     StudentUpdate,
 )
+from app.schemas.timeline import StudentTimelineOut
 from app.services import roster_import
 from app.services.roster_import import RosterImporter
 from app.services.students import StudentService
+from app.services.timeline import StudentTimelineService
 
 router = APIRouter()
+
+
+@router.get("/{student_id}/timeline", response_model=StudentTimelineOut)
+def student_timeline(student_id: uuid.UUID, on_date: date | None = None,
+                     m: CurrentMember = Depends(get_current_member), db: Session = Depends(get_db)):
+    """§5.7 — period-by-period what the student did today (computed join, no new tables)."""
+    return StudentTimelineService(db).timeline(m, student_id, on_date)
 
 
 # ── roster xlsx import (SPRD §5.6) ───────────────────────────────────────────

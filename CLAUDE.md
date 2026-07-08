@@ -122,8 +122,26 @@ wiring of jobs, day suggestions, growth profile) are folded into the v2 packets 
   homework picker. `test_recommendations.py` (6 tests: zero-setup+cap, C-band richer check,
   intervention targeting, confirm+exceptions, per-student homework, access). Backend **182
   passing**, ruff clean; web tsc + eslint + `next build` clean.
-- **Next: V2-P4** (Daily report agent + student timeline + cron wiring §5.6/§5.7/§9), then V2-P5
-  (wizard + plan generation) per SPRD2 §10.
+- **V2-P4 (Daily report agent + student timeline + cron wiring) COMPLETE** — SPRD2 §5.6/§5.7/§9.
+  `models/reports.py` (`daily_reports`, one row per org×`for_date`, `content_md` + `highlights`
+  JSON {risks,ambiguities,wins,sections}, status draft|final; migration `f3d4e5f6a7b8`).
+  `DailyReportService`: deterministic day aggregation (attendance/logs/homework/checks/sessions/
+  plan pace/fees) → `report_write` narrative; **ambiguity rules** attendance-without-log ·
+  log-without-attendance · plan-red streak · repeat-absentee-≥3-days; `generate` upserts one row
+  (never overwrites a `final`); reuses services via a synthetic admin context.
+  `services/ai/report.py` env-gated (AI-off still produces the deterministic report).
+  `/reports/daily` (get-or-create) + `/reports/daily/regenerate` (require_admin — includes fees).
+  Student **timeline** (§5.7): `services/timeline.py` — computed join (timetable × attendance ×
+  logs × checks × homework × sessions), **no new capture tables**, absent periods = gaps;
+  `GET /students/{id}/timeline`. **Cron wiring** (§9): `jobs.run_daily_report` (19:00 draft /
+  06:00 regen-draft / 08:00 admin notify), `run_teacher_reminder` (16:00 unmarked/unlogged →
+  teacher), `run_saturday_summary` (Sat 08:00 guardian week note) — all TZ-aware + idempotent,
+  wired into `run_hourly` + `/ops/run/*`. `test_daily_report.py` (7) + `test_timeline.py` (2).
+  Backend **191 passing**, ruff clean. Frontend: Dashboard leads with `ReportView` (risks +
+  expandable sections); student profile gains a Timeline block; `dailyReport`/`studentTimeline`
+  in `school-api`. web tsc + eslint + `next build` clean.
+- **Next: V2-P5** (Wizard + smart ingestion + plan generation §5.1/§5.2) — the final packet
+  per SPRD2 §10.
 
 ## How this repo was bootstrapped (background)
 

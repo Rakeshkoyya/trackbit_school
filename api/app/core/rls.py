@@ -99,6 +99,11 @@ SCHOOL_CHECKS_TABLES = (
     "check_results",
 )
 
+# V2-P4 daily report (SPRD2 §4.4, §5.6) — engaged in migration f3d4e5f6a7b8.
+SCHOOL_REPORT_TABLES = (
+    "daily_reports",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     boards,
     checks,
     classroom,
+    daily_report,
     dashboard,
     fees,
     me,
@@ -44,6 +45,7 @@ api_router.include_router(checks.router, prefix="/checks", tags=["checks"])
 api_router.include_router(classroom.router, prefix="/classroom", tags=["classroom"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(daily_report.router, prefix="/reports", tags=["reports"])
 api_router.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
 api_router.include_router(students.router, prefix="/students", tags=["students"])
 api_router.include_router(fees.router, prefix="/fees", tags=["fees"])
