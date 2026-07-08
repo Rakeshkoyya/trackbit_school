@@ -24,3 +24,6 @@ web/out/
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code local state (incl. git worktrees under .claude/worktrees/)
+.claude/
