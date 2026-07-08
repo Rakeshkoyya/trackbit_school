@@ -15,10 +15,14 @@ from app.models import (
     AcademicYear,
     AssessmentCycle,
     AssessmentScore,
+    AttendanceException,
+    AttendanceMark,
     Board,
     BoardMember,
     CalendarEvent,
+    CheckResult,
     ClassSubject,
+    DailyCheck,
     FeeInstallmentTemplate,
     FeeStructure,
     Guardian,
@@ -46,11 +50,13 @@ from app.models import (
     TaskEvent,
     TaskInstance,
     Term,
+    TimetableSlot,
     Transaction,
     User,
 )
 from app.models import Session as SessionModel
 from app.services.calendar import expand_blocked_dates
+from app.services.daily_report import DailyReportService
 from app.services.fee_math import proportional_installments, q, recompute_student_fee
 from app.services.planner import distribute
 
@@ -300,6 +306,73 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
             homework_done=(status != "absent" and i % 2 == 0)))
 
     db.flush()
+
+    # ── V2 data: timings, timetable, per-period attendance, checks, report ─────
+    # School timings on the year (My Day period card times, Setup wizard step 3).
+    year.periods_per_day = 6
+    year.period_times = [
+        {"start": f"{8 + i:02d}:30", "end": f"{9 + i:02d}:10", "kind": "period"}
+        for i in range(6)
+    ]
+
+    # Timetable — round-robin each class's five subjects across Mon–Fri, periods 1–5,
+    # so My Day, the student timeline, and attendance all render from real slots.
+    subj_order = ["English", "Mathematics", "Science", "Social Studies", "Hindi"]
+    sixa_today_slots: list[TimetableSlot] = []
+    wd_today = today_ist.weekday()
+    for ckey in class_keys:
+        css = [class_subjects[(ckey, s)] for s in subj_order]
+        idx = 0
+        for wd in range(5):  # Mon–Fri
+            for period in range(1, 6):
+                cs = css[idx % len(css)]
+                slot = TimetableSlot(
+                    org_id=org.id, class_id=classes[ckey].id, weekday=wd, period_no=period,
+                    class_subject_id=cs.id, effective_from=year.start_date, effective_to=None)
+                db.add(slot)
+                if ckey == "6-A" and wd == wd_today:
+                    sixa_today_slots.append(slot)
+                idx += 1
+    db.flush()
+
+    # Per-period attendance for today's 6-A periods (capture-by-exception): all
+    # present except one absent + one late on the first period.
+    sixa_students = [s for s in students if s.class_id == classes["6-A"].id]
+    for slot in sixa_today_slots:
+        mark = AttendanceMark(
+            org_id=org.id, class_id=classes["6-A"].id, date=today_ist, period_no=slot.period_no,
+            class_subject_id=slot.class_subject_id, marked_by_member_id=mships[ramesh].id,
+            marked_at=_now())
+        db.add(mark)
+        db.flush()
+        if slot.period_no == 1 and len(sixa_students) >= 2:
+            db.add(AttendanceException(org_id=org.id, mark_id=mark.id,
+                                       student_id=sixa_students[0].id, status="absent"))
+            db.add(AttendanceException(org_id=org.id, mark_id=mark.id,
+                                       student_id=sixa_students[1].id, status="late",
+                                       late_minutes=5))
+            mark.alerted_at = _now()
+
+    # Recommendation checks for 6-A Science today (one class-wide confirmed with an
+    # exception, one richer C-band check) so the My Day checks section renders.
+    chk_all = DailyCheck(org_id=org.id, class_subject_id=sci.id, date=today_ist,
+                         description="Food & Nutrition: 5 practice items reviewed",
+                         source="ai", band_scope="all", confirmed_at=_now(),
+                         confirmed_by=mships[ramesh].id)
+    db.add(chk_all)
+    db.add(DailyCheck(org_id=org.id, class_subject_id=sci.id, date=today_ist,
+                      description="Food & Nutrition: one-on-one — reads the worked example aloud",
+                      source="ai", band_scope="C"))
+    db.flush()
+    if sixa_students:
+        db.add(CheckResult(org_id=org.id, check_id=chk_all.id,
+                           student_id=sixa_students[0].id, status="not_done"))
+    db.flush()
+
+    # The 8 AM daily report — generated from the day we just seeded (leads Dashboard).
+    DailyReportService(db).generate(org, today_ist, include_fees=True)
+    db.flush()
+
     return {"students": len(students), "classes": len(classes), "enrolled": enrolled}
 
 

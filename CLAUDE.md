@@ -71,7 +71,9 @@ Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@
 **All SPRD v1 product phases P0–P3 are complete.** v1 deferred items (fees-mode xlsx import, cron
 wiring of jobs, day suggestions, growth profile) are folded into the v2 packets (SPRD2 §9–§10).
 
-**v2 redesign started (2026-07-07):**
+**v2 redesign (2026-07-07 → 2026-07-08): ALL PACKETS COMPLETE (V2-P0-A … V2-P5).**
+Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; web tsc + eslint +
+`next build` clean. Verified end-to-end (server boots, demo login, all v2 screens populated).
 - **V2-P0-A (roles) COMPLETE** — two roles admin/teacher (SPRD2 §2); migration `e9fab0c1d2e3`
   applied (head); coordinator/office collapsed into admin; seed + all guards + web types/nav/13
   page guards updated. Backend **162 tests passing**, ruff clean; web tsc + eslint + build clean.
@@ -140,8 +142,23 @@ wiring of jobs, day suggestions, growth profile) are folded into the v2 packets 
   Backend **191 passing**, ruff clean. Frontend: Dashboard leads with `ReportView` (risks +
   expandable sections); student profile gains a Timeline block; `dailyReport`/`studentTimeline`
   in `school-api`. web tsc + eslint + `next build` clean.
-- **Next: V2-P5** (Wizard + smart ingestion + plan generation §5.1/§5.2) — the final packet
-  per SPRD2 §10.
+- **V2-P5 (Wizard + smart ingestion + plan generation) COMPLETE** — SPRD2 §5.1/§5.2. **All v2
+  packets done.** `models/onboarding.py` (`onboarding_state`, resumable — no parallel store) +
+  `PlanComment` (teacher change-requests on the plan); migration `f4e5f6a7b8c9`. `WizardService`:
+  9-step resumable state; **progress derived from the real tables** (write-through, always
+  truthful). `services/plan_validate.py`: the 4 deterministic validators V1 capacity · V2
+  coverage · V3 ordering · V4 teacher-load (pure, unit-tested). `PlannerService.generate_plan`
+  (proposer `distribute` + validators; over-capacity → `fits=False`, reported not squeezed) +
+  plan comment add/list/resolve round-trip. Endpoints `/wizard/*`, `/planner/plan/{cs}/generate`,
+  `/planner/plan/{cs}/comments`. `test_plan_generation.py` (7) + `test_wizard.py` (2). Backend
+  **200 passing**, ruff clean. Frontend: `/setup/wizard` — guided 9-step stepper (year · exams ·
+  timings · classes/subjects · syllabus · teachers · students · timetable · generate+lock),
+  resumable, reusing every module API; the final step generates + locks all plans. web tsc +
+  eslint + `next build` clean.
+- **Seed enriched for v2**: the demo org now has school timings, a full **timetable** (75 slots),
+  today's **per-period attendance** (with an absence + late), **daily checks** (confirmed + a
+  C-band check), and a generated **daily report** — so every v2 screen renders with real data.
+  Verified end-to-end: server boots, login works, My Day/timeline/report/wizard all populate.
 
 ## How this repo was bootstrapped (background)
 

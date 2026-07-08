@@ -77,6 +77,22 @@ export const schoolApi = {
     api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/draft`),
   approvePlan: (csId: string) =>
     api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/approve`),
+  generatePlan: (csId: string) =>
+    api.post<import("@/lib/school-types").PlanGenerateResult>(`/planner/plan/${csId}/generate`),
+  planComments: (csId: string, includeResolved = false) =>
+    api.get<import("@/lib/school-types").PlanComment[]>(
+      `/planner/plan/${csId}/comments${qs({ include_resolved: includeResolved ? "true" : undefined })}`),
+  addPlanComment: (csId: string, b: { text: string; topic_id?: string | null }) =>
+    api.post<import("@/lib/school-types").PlanComment>(`/planner/plan/${csId}/comments`, b),
+  resolvePlanComment: (id: string) =>
+    api.post<import("@/lib/school-types").PlanComment>(`/planner/plan/comments/${id}/resolve`),
+
+  // setup wizard (V2-P5, SPRD2 §5.1)
+  wizardState: () => api.get<import("@/lib/school-types").WizardState>("/wizard/state"),
+  wizardAdvance: (b: { to_step: number; payload?: Record<string, unknown> }) =>
+    api.post<import("@/lib/school-types").WizardState>("/wizard/advance", b),
+  wizardComplete: () => api.post<import("@/lib/school-types").WizardState>("/wizard/complete"),
+  wizardReset: () => api.post<import("@/lib/school-types").WizardState>("/wizard/reset"),
   forecast: (classId: string) =>
     api.get<import("@/lib/school-types").Forecast[]>(`/planner/plan/forecast${qs({ class_id: classId })}`),
 

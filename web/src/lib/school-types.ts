@@ -355,6 +355,51 @@ export interface StudentTimeline {
   sessions: TimelineSession[];
 }
 
+// ── setup wizard + plan generation (V2-P5, SPRD2 §5.1/§5.2) ──────────────────
+export interface WizardProgress {
+  has_year: boolean;
+  terms: number;
+  has_timings: boolean;
+  classes: number;
+  subjects: number;
+  class_subjects: number;
+  syllabus_topics: number;
+  teachers: number;
+  students: number;
+  timetable_slots: number;
+  plans_total: number;
+  plans_approved: number;
+}
+
+export interface WizardState {
+  current_step: number;
+  total_steps: number;
+  status: string;
+  payload: Record<string, unknown>;
+  progress: WizardProgress;
+}
+
+export interface PlanViolation {
+  code: "capacity" | "coverage" | "ordering" | "teacher_load";
+  message: string;
+}
+
+export interface PlanGenerateResult {
+  fits: boolean;
+  violations: PlanViolation[];
+  plan: Plan;
+}
+
+export interface PlanComment {
+  id: string;
+  class_subject_id: string;
+  topic_id: string | null;
+  author_name: string | null;
+  text: string;
+  status: string;
+  created_at: string;
+}
+
 export interface MeetingRow {
   student_id: string;
   full_name: string;

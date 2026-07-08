@@ -7,7 +7,7 @@ from baseline + effective periods — never stored as mutated plan rows.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,4 +92,30 @@ class PlanEntry(Base, UUIDPKMixin, CreatedAtMixin):
 
     __table_args__ = (
         UniqueConstraint("class_subject_id", "topic_id", name="uq_plan_entries_class_subject_id"),
+    )
+
+
+class PlanComment(Base, UUIDPKMixin, CreatedAtMixin):
+    """A teacher change-request on a plan (V2-M2, SPRD2 §5.2) — "chapter 4 needs
+    more days". Threaded per class-subject, optionally anchored to a topic. The
+    admin applies the change (re-draft / drag) and resolves it, then re-approves."""
+
+    __tablename__ = "plan_comments"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    class_subject_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("class_subjects.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("syllabus_topics.id", ondelete="SET NULL"), nullable=True
+    )
+    author_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'resolved')", name="plan_comment_status_valid"),
     )

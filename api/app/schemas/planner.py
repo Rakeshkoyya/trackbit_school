@@ -72,3 +72,32 @@ class ForecastOut(BaseModel):
     baseline_finish: date | None = None
     projected_finish: date | None = None
     weeks_behind: int = 0
+
+
+# ── generation pipeline (V2-M2, SPRD2 §5.2) ──────────────────────────────────
+class ViolationOut(BaseModel):
+    code: str  # capacity | coverage | ordering | teacher_load
+    message: str
+
+
+class PlanGenerateOut(BaseModel):
+    """Proposer + deterministic validators. `fits` is False when the syllabus is
+    over capacity — a human decision, surfaced not squeezed."""
+    fits: bool
+    violations: list[ViolationOut]
+    plan: PlanOut
+
+
+class PlanCommentIn(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    topic_id: uuid.UUID | None = None
+
+
+class PlanCommentOut(BaseModel):
+    id: uuid.UUID
+    class_subject_id: uuid.UUID
+    topic_id: uuid.UUID | None
+    author_name: str | None
+    text: str
+    status: str
+    created_at: datetime

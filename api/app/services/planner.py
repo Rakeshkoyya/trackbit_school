@@ -18,22 +18,34 @@ from app.models import (
     AcademicYear,
     CalendarEvent,
     ClassSubject,
+    Membership,
     Plan,
+    PlanComment,
     PlanEntry,
     SchoolClass,
     Subject,
     SyllabusTopic,
     SyllabusUnit,
+    User,
 )
 from app.schemas.planner import (
     ForecastOut,
+    PlanCommentIn,
+    PlanCommentOut,
     PlanEntryOut,
+    PlanGenerateOut,
     PlanOut,
     SplitUnit,
     TopicOut,
     UnitOut,
+    ViolationOut,
 )
 from app.services.calendar import effective_periods, expand_blocked_dates
+from app.services.plan_validate import (
+    validate_capacity,
+    validate_coverage,
+    validate_ordering,
+)
 
 
 def _monday(d: date) -> date:
@@ -247,6 +259,94 @@ class PlannerService:
         plan.approved_at = datetime.now(UTC)
         self.db.flush()
         return self.get_plan(m, cs_id)
+
+    # ── generation pipeline (V2-M2, §5.2): proposer + deterministic validators ─
+    def _total_effective_periods(self, cs: ClassSubject, year: AcademicYear, blocked: set) -> float:
+        total, cur, end, guard = 0.0, _monday(year.start_date), _monday(year.end_date), 0
+        while cur <= end and guard < 500:
+            total += effective_periods(
+                cs.periods_per_week or 1, cur, working_weekdays=year.working_weekdays,
+                blocked=blocked, year_start=year.start_date, year_end=year.end_date)
+            cur += timedelta(days=7)
+            guard += 1
+        return total
+
+    def generate_plan(self, m: CurrentMember, cs_id: uuid.UUID) -> PlanGenerateOut:
+        """Proposer (greedy distribute) → deterministic validators. Persists the draft
+        so the admin can review — an over-capacity syllabus is flagged (fits=False),
+        never silently squeezed. Approval stays a separate, explicit step (P2)."""
+        cs = self._class_subject(m.org_id, cs_id)
+        plan = self.db.scalar(
+            select(Plan).where(Plan.org_id == m.org_id, Plan.class_subject_id == cs_id))
+        if plan and plan.status == "approved":
+            raise ValidationError("Baseline is locked. Un-approving is a separate action.")
+        topics = self._ordered_topics(self._units(m.org_id, cs_id))
+        if not topics:
+            raise ValidationError("Add syllabus topics before generating a plan.")
+        year = self._year_for_cs(cs)
+        blocked = self._blocked(m.org_id, year.id)
+        est = [t.est_periods for t in topics]
+        weeks = distribute(
+            est, periods_per_week=cs.periods_per_week, working_weekdays=year.working_weekdays,
+            blocked=blocked, year_start=year.start_date, year_end=year.end_date)
+
+        violations = [
+            v for v in (
+                validate_capacity(sum(est), self._total_effective_periods(cs, year, blocked)),
+                validate_coverage(weeks, _monday(year.end_date)),
+                validate_ordering(weeks),
+            ) if v is not None
+        ]
+        # Persist the proposer's draft (review surface); never touch an approved baseline.
+        self.db.execute(delete(PlanEntry).where(
+            PlanEntry.org_id == m.org_id, PlanEntry.class_subject_id == cs_id))
+        for topic, wk in zip(topics, weeks, strict=True):
+            self.db.add(PlanEntry(org_id=m.org_id, class_subject_id=cs_id,
+                                  topic_id=topic.id, week_start=wk))
+        if plan is None:
+            self.db.add(Plan(org_id=m.org_id, class_subject_id=cs_id, status="draft"))
+        self.db.flush()
+        return PlanGenerateOut(
+            fits=not any(v.code == "capacity" for v in violations),
+            violations=[ViolationOut(code=v.code, message=v.message) for v in violations],
+            plan=self.get_plan(m, cs_id))
+
+    # ── teacher change-requests (comment threads on the plan) ─────────────────
+    def _comment_out(self, c: PlanComment) -> PlanCommentOut:
+        author = None
+        if c.author_member_id is not None:
+            author = self.db.scalar(
+                select(User.name).join(Membership, Membership.user_id == User.id)
+                .where(Membership.id == c.author_member_id))
+        return PlanCommentOut(
+            id=c.id, class_subject_id=c.class_subject_id, topic_id=c.topic_id,
+            author_name=author, text=c.text, status=c.status, created_at=c.created_at)
+
+    def add_comment(self, m: CurrentMember, cs_id: uuid.UUID, body: PlanCommentIn) -> PlanCommentOut:
+        self._class_subject(m.org_id, cs_id)
+        c = PlanComment(org_id=m.org_id, class_subject_id=cs_id, topic_id=body.topic_id,
+                        author_member_id=m.membership.id, text=body.text)
+        self.db.add(c)
+        self.db.flush()
+        return self._comment_out(c)
+
+    def list_comments(self, m: CurrentMember, cs_id: uuid.UUID,
+                      include_resolved: bool = False) -> list[PlanCommentOut]:
+        self._class_subject(m.org_id, cs_id)
+        q = select(PlanComment).where(
+            PlanComment.org_id == m.org_id, PlanComment.class_subject_id == cs_id)
+        if not include_resolved:
+            q = q.where(PlanComment.status == "open")
+        return [self._comment_out(c) for c in self.db.scalars(q.order_by(PlanComment.created_at))]
+
+    def resolve_comment(self, m: CurrentMember, comment_id: uuid.UUID) -> PlanCommentOut:
+        c = self.db.scalar(
+            select(PlanComment).where(PlanComment.id == comment_id, PlanComment.org_id == m.org_id))
+        if c is None:
+            raise NotFoundError("Comment")
+        c.status = "resolved"
+        self.db.flush()
+        return self._comment_out(c)
 
     # ── forecast (computed) ──────────────────────────────────────────────────
     def forecast(self, m: CurrentMember, class_id: uuid.UUID) -> list[ForecastOut]:

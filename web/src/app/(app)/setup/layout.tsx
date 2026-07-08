@@ -7,6 +7,7 @@ export default function SetupLayout({ children }: { children: React.ReactNode })
     <div>
       <SubTabs
         tabs={[
+          { label: "Wizard", href: "/setup/wizard" },
           { label: "Academics", href: "/setup" },
           { label: "Members", href: "/setup/members" },
           { label: "Settings", href: "/setup/settings" },

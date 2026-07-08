@@ -31,8 +31,9 @@ from app.models.fees import (
     Transaction,
 )
 from app.models.notification import DeviceToken, Notification
+from app.models.onboarding import OnboardingState
 from app.models.org import Membership, Organization
-from app.models.planner import Plan, PlanEntry, SyllabusTopic, SyllabusUnit
+from app.models.planner import Plan, PlanComment, PlanEntry, SyllabusTopic, SyllabusUnit
 from app.models.reports import DailyReport
 from app.models.sessions import (
     Session,
@@ -76,8 +77,10 @@ __all__ = [
     "LessonLog",
     "Membership",
     "Notification",
+    "OnboardingState",
     "Organization",
     "Plan",
+    "PlanComment",
     "PlanEntry",
     "SchoolClass",
     "Session",

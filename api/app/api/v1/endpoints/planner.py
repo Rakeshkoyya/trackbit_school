@@ -14,6 +14,9 @@ from app.core.dependencies import require_academic, require_admin, require_coord
 from app.schemas.common import MessageResponse
 from app.schemas.planner import (
     ForecastOut,
+    PlanCommentIn,
+    PlanCommentOut,
+    PlanGenerateOut,
     PlanOut,
     SplitIn,
     SplitOut,
@@ -85,7 +88,33 @@ def draft_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_
     return PlannerService(db).draft_plan(m, cs_id)
 
 
+@router.post("/plan/{cs_id}/generate", response_model=PlanGenerateOut)
+def generate_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+                  db: Session = Depends(get_db)):
+    """Proposer + deterministic validators (V2-M2 §5.2). Over-capacity is reported."""
+    return PlannerService(db).generate_plan(m, cs_id)
+
+
 @router.post("/plan/{cs_id}/approve", response_model=PlanOut)
 def approve_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                  db: Session = Depends(get_db)):
     return PlannerService(db).approve_plan(m, cs_id)
+
+
+# ── teacher change-requests (comment threads on the plan, §5.2) ───────────────
+@router.get("/plan/{cs_id}/comments", response_model=list[PlanCommentOut])
+def list_comments(cs_id: uuid.UUID, include_resolved: bool = False,
+                  m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    return PlannerService(db).list_comments(m, cs_id, include_resolved)
+
+
+@router.post("/plan/{cs_id}/comments", response_model=PlanCommentOut)
+def add_comment(cs_id: uuid.UUID, body: PlanCommentIn,
+                m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    return PlannerService(db).add_comment(m, cs_id, body)
+
+
+@router.post("/plan/comments/{comment_id}/resolve", response_model=PlanCommentOut)
+def resolve_comment(comment_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+                    db: Session = Depends(get_db)):
+    return PlannerService(db).resolve_comment(m, comment_id)

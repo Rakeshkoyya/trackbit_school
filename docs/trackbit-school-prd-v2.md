@@ -256,7 +256,7 @@ calendar step or V2-P5, low priority) · DB-3 growth profile stays v-next.
 | **V2-P2** ✅ | Attendance + absence alerts + My Day v2 timeline (§5.4, §7) | DONE — capture-by-exception (`attendance_marks`/`_exceptions`, migration `f1b2c3d4e5f6`), first-period absence alerts, My Day period cards; 176 backend tests green incl. period-card e2e |
 | **V2-P3** ✅ | Recommendations + daily checks + per-student homework (§5.5) | DONE — `daily_checks`/`check_results` + per-student homework (migration `f2c3d4e5f6a7`), generate-if-absent from plan×bands with caps, checks on the My Day card; 182 backend tests green |
 | **V2-P4** ✅ | Daily report agent (§5.6) + student timeline (§5.7) + **cron wiring for all jobs** (§9) | DONE — `daily_reports` (migration `f3d4e5f6a7b8`) with 4 ambiguity rules, computed student timeline (no new tables), TZ-aware idempotent jobs (report 19:00/06:00/08:00 · teacher 16:00 · Sat guardian); report leads the dashboard; 191 backend tests green |
-| **V2-P5** | Wizard + smart ingestion + plan generation pipeline (§5.1, §5.2) | fresh org → locked plan, no module screens |
+| **V2-P5** ✅ | Wizard + smart ingestion + plan generation pipeline (§5.1, §5.2) | DONE — resumable 9-step `/setup/wizard` (progress from real tables), 4 deterministic plan validators (V1–V4, unit-tested), over-capacity reported not squeezed, teacher change-request round-trip (migration `f4e5f6a7b8c9`); 200 backend tests green. **All v2 packets complete.** |
 
 Sequencing: P1 before P2 (attendance hangs off periods); wizard last (it writes into
 everything the earlier packets build). Teacher-facing regression gate: after every packet,

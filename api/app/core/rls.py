@@ -104,6 +104,12 @@ SCHOOL_REPORT_TABLES = (
     "daily_reports",
 )
 
+# V2-P5 wizard + plan comments (SPRD2 §4.4, §5.1/§5.2) — engaged in f4e5f6a7b8c9.
+SCHOOL_WIZARD_TABLES = (
+    "onboarding_state",
+    "plan_comments",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",
