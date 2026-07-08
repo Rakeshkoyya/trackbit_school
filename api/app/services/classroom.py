@@ -42,6 +42,7 @@ from app.schemas.classroom import (
     MyDayOut,
     MyDayPeriod,
 )
+from app.services.attendance import AttendanceService
 from app.services.notify_guardian import notify_guardians
 from app.services.timetable import TimetableService
 
@@ -148,17 +149,28 @@ class ClassroomService:
 
         # Today's periods straight from the timetable (V2-P1 §5.4): the teacher's
         # slots for today, enriched with the planned topic / logged state we already
-        # computed per class-subject above.
+        # computed per class-subject above, plus the attendance state (V2-P2 §5.4).
         by_cs = {c.class_subject_id: c for c in classes}
+        day_slots = TimetableService(self.db).teacher_day(m, today)
+        att_service = AttendanceService(self.db)
+        class_ids = list({ts.class_id for ts in day_slots})
+        att = att_service.period_states(m.org_id, class_ids, today)
+        roster_sizes = att_service.roster_sizes(m.org_id, class_ids)
         periods: list[MyDayPeriod] = []
-        for ts in TimetableService(self.db).teacher_day(m, today):
+        for ts in day_slots:
             c = by_cs.get(ts.class_subject_id)
+            state = att.get((ts.class_id, ts.period_no), {})
             periods.append(MyDayPeriod(
                 period_no=ts.period_no, class_subject_id=ts.class_subject_id,
-                class_label=ts.class_label, subject_name=ts.subject_name,
+                class_id=ts.class_id, class_label=ts.class_label, subject_name=ts.subject_name,
                 planned_topic=c.planned_topic if c else None,
                 planned_topic_id=c.planned_topic_id if c else None,
-                logged=c.logged if c else False))
+                logged=c.logged if c else False,
+                attendance_marked=state.get("marked", False),
+                roster_count=state.get("roster_count", roster_sizes.get(ts.class_id, 0)),
+                present_count=state.get("present_count"),
+                absent_count=state.get("absent_count"),
+                late_count=state.get("late_count")))
         periods.sort(key=lambda p: p.period_no)
         return MyDayOut(date=today, classes=classes, periods=periods, homework_pending=pending)
 

@@ -90,6 +90,19 @@ export const schoolApi = {
     api.post<{ id: string }>(`/classroom/homework/${id}/check`, b),
   compliance: () => api.get<import("@/lib/school-types").Compliance>("/classroom/compliance"),
 
+  // attendance (V2-P2, SPRD2 §5.4) — capture-by-exception
+  attendanceRoster: (classId: string, periodNo: number, onDate?: string) =>
+    api.get<import("@/lib/school-types").AttendanceRoster>(
+      `/attendance/roster${qs({ class_id: classId, period_no: String(periodNo), on_date: onDate })}`,
+    ),
+  markAttendance: (b: {
+    class_id: string;
+    period_no: number;
+    class_subject_id?: string | null;
+    date?: string | null;
+    exceptions: { student_id: string; status: "absent" | "late"; late_minutes?: number | null }[];
+  }) => api.post<import("@/lib/school-types").AttendanceMarkResult>("/attendance/mark", b),
+
   // sessions (M2)
   sessions: () => api.get<import("@/lib/school-types").SessionSummary[]>("/sessions"),
   session: (id: string) => api.get<import("@/lib/school-types").SessionDetail>(`/sessions/${id}`),

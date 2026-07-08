@@ -30,14 +30,22 @@ class HomeworkPending(BaseModel):
 
 
 class MyDayPeriod(BaseModel):
-    """One timetabled period today (V2-P1 §5.4) — My Day rendered from the grid."""
+    """One timetabled period today (V2-P1 §5.4) — My Day rendered from the grid,
+    now with the period card's attendance state (V2-P2 §5.4)."""
     period_no: int
     class_subject_id: uuid.UUID
+    class_id: uuid.UUID
     class_label: str
     subject_name: str | None = None
     planned_topic: str | None = None
     planned_topic_id: uuid.UUID | None = None
     logged: bool = False
+    # Attendance step of the card (capture-by-exception).
+    attendance_marked: bool = False
+    roster_count: int = 0
+    present_count: int | None = None
+    absent_count: int | None = None
+    late_count: int | None = None
 
 
 class MyDayOut(BaseModel):

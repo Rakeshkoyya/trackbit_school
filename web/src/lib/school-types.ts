@@ -111,11 +111,17 @@ export interface HomeworkPending {
 export interface MyDayPeriod {
   period_no: number;
   class_subject_id: string;
+  class_id: string;
   class_label: string;
   subject_name: string | null;
   planned_topic: string | null;
   planned_topic_id: string | null;
   logged: boolean;
+  attendance_marked: boolean;
+  roster_count: number;
+  present_count: number | null;
+  absent_count: number | null;
+  late_count: number | null;
 }
 
 export interface MyDay {
@@ -238,6 +244,42 @@ export interface SessionDetail extends SessionSummary {
 }
 
 export type AttendanceStatus = "present" | "late" | "absent";
+
+// ── per-period attendance (V2-P2, SPRD2 §5.4) ────────────────────────────────
+// Exception statuses only — "present" is derived (roster minus exceptions).
+export type AttendanceException = "absent" | "late";
+
+export interface AttendanceRosterRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  status: AttendanceException | null;
+  late_minutes: number | null;
+}
+
+export interface AttendanceRoster {
+  class_id: string;
+  class_label: string;
+  period_no: number;
+  date: string;
+  marked: boolean;
+  roster: AttendanceRosterRow[];
+  present_count: number;
+  absent_count: number;
+  late_count: number;
+}
+
+export interface AttendanceMarkResult {
+  mark_id: string;
+  class_id: string;
+  period_no: number;
+  date: string;
+  roster_count: number;
+  present_count: number;
+  absent_count: number;
+  late_count: number;
+  alerted_count: number;
+}
 
 export interface MeetingRow {
   student_id: string;

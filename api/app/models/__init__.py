@@ -17,6 +17,7 @@ from app.models.assessments import (
     SkillArea,
     StudentBand,
 )
+from app.models.attendance import AttendanceException, AttendanceMark
 from app.models.auth_token import AuthToken
 from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
@@ -48,6 +49,8 @@ __all__ = [
     "AssessmentCycle",
     "AssessmentScore",
     "Attachment",
+    "AttendanceException",
+    "AttendanceMark",
     "AuthToken",
     "Board",
     "BoardCategory",

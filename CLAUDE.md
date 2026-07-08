@@ -94,7 +94,22 @@ wiring of jobs, day suggestions, growth profile) are folded into the v2 packets 
   admin-only). Backend **170 tests passing**, ruff clean. Frontend: Plan → Timetable tab
   (grid editor + import + draft + periods/day for admin, own-week read view for teacher),
   `TimetableGrid`/`TeacherWeekGrid` components, `api.put`; web tsc + eslint + build clean.
-- **Next: V2-P2** (Attendance + My Day v2 §5.4), then V2-P3..P5 per SPRD2 §10.
+- **V2-P2 (Attendance + absence alerts + My Day v2) COMPLETE** — SPRD2 §4.4/§5.4/§7.
+  Capture-by-exception (P1v2): `models/attendance.py` (`attendance_marks` = one row per
+  class-period taken; `attendance_exceptions` = absent|late deviations — **no per-student
+  present rows**); migration `f1b2c3d4e5f6` (head). `AttendanceService`: `roster` (capture
+  sheet), `mark` (idempotent full-replace of the exception set; "all present" = empty
+  exceptions), `period_states`/`roster_sizes` (My Day roll-up). First marked period of the
+  day fires guardian **absence alerts** (§7) via `notify_guardians`, idempotent through
+  `alerted_at`; plain text only, never band info (P4). Endpoints `/attendance/roster` +
+  `/attendance/mark` (require_academic; service checks the teacher teaches the class). My Day
+  v2: period cards read attendance state; `test_attendance.py` (6 tests incl. the §5.4
+  period-card e2e). Backend **176 tests passing**, ruff clean. Frontend: `/my-day` period
+  cards (All-present one-tap + exception sheet cycling present→absent→late, topic log,
+  homework), `attendanceRoster`/`markAttendance` in `school-api`, Badge `danger` tone; web
+  tsc + eslint + `next build` clean.
+- **Next: V2-P3** (Recommendations + daily checks + per-student homework §5.5), then V2-P4/P5
+  per SPRD2 §10.
 
 ## How this repo was bootstrapped (background)
 
