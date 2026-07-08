@@ -65,6 +65,10 @@ class HomeworkAssignment(Base, UUIDPKMixin, CreatedAtMixin):
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL = whole-class homework; set = a per-student addition (V2-P3 §5.4/§5.5).
+    student_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=True
+    )
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Set when guardian notifications were enqueued (the teacher's payback, P3).
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

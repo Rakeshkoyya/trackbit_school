@@ -6,6 +6,7 @@ human-confirm surface before persisting (there is no chat UI). Model ids come fr
 env (AI_MODEL_DRAFT / AI_MODEL_PARSE).
 """
 
+from app.services.ai.checks import draft_checks
 from app.services.ai.timetable import parse_timetable
 
-__all__ = ["parse_timetable"]
+__all__ = ["draft_checks", "parse_timetable"]

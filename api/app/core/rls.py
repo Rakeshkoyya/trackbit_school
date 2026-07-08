@@ -93,6 +93,12 @@ SCHOOL_ATTENDANCE_TABLES = (
     "attendance_exceptions",
 )
 
+# V2-P3 daily checks / recommendations (SPRD2 §4.4, §5.5) — engaged in f2c3d4e5f6a7.
+SCHOOL_CHECKS_TABLES = (
+    "daily_checks",
+    "check_results",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

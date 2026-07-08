@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     auth,
     billing,
     boards,
+    checks,
     classroom,
     dashboard,
     fees,
@@ -39,6 +40,7 @@ api_router.include_router(academics.router, prefix="/academics", tags=["academic
 api_router.include_router(planner.router, prefix="/planner", tags=["planner"])
 api_router.include_router(timetable.router, prefix="/timetable", tags=["timetable"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
+api_router.include_router(checks.router, prefix="/checks", tags=["checks"])
 api_router.include_router(classroom.router, prefix="/classroom", tags=["classroom"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])

@@ -281,6 +281,31 @@ export interface AttendanceMarkResult {
   alerted_count: number;
 }
 
+// ── daily checks / recommendations (V2-P3, SPRD2 §5.5) ───────────────────────
+export interface CheckResult {
+  student_id: string;
+  full_name: string;
+  status: "not_done" | "note";
+  note: string | null;
+}
+
+export interface DailyCheck {
+  id: string;
+  description: string;
+  source: string;
+  band_scope: "all" | "A" | "B" | "C";
+  student_id: string | null;
+  student_name: string | null;
+  confirmed: boolean;
+  results: CheckResult[];
+}
+
+export interface Checks {
+  class_subject_id: string;
+  date: string;
+  checks: DailyCheck[];
+}
+
 export interface MeetingRow {
   student_id: string;
   full_name: string;

@@ -200,25 +200,36 @@ class ClassroomService:
         cs = self._cs(m.org_id, body.class_subject_id)
         self._can_capture(m, cs)
         d = body.date or self._today(m)
+        # A per-student addition must be a student of this class (V2-P3 §5.5).
+        if body.student_id is not None:
+            in_class = self.db.scalar(
+                select(Student.id).where(
+                    Student.id == body.student_id, Student.org_id == m.org_id,
+                    Student.class_id == cs.class_id))
+            if in_class is None:
+                raise NotFoundError("Student")
         hw = HomeworkAssignment(org_id=m.org_id, class_subject_id=cs.id, date=d,
-                                text=body.text, due_date=body.due_date)
+                                text=body.text, due_date=body.due_date, student_id=body.student_id)
         self.db.add(hw)
         self.db.flush()
 
         klass = self.db.get(SchoolClass, cs.class_id)
         subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
-        guardians = list(self.db.execute(
+        # Notify the one student's guardians for a per-student note, else the class.
+        guardian_q = (
             select(Guardian.phone, Guardian.notify_opt_out)
             .join(Student, Student.id == Guardian.student_id)
-            .where(Student.org_id == m.org_id, Student.class_id == cs.class_id)
-        ).all())
+            .where(Student.org_id == m.org_id))
+        guardian_q = (guardian_q.where(Student.id == body.student_id) if body.student_id
+                      else guardian_q.where(Student.class_id == cs.class_id))
+        guardians = list(self.db.execute(guardian_q).all())
         due = f" (due {body.due_date})" if body.due_date else ""
         message = f"Homework for {_label(klass)} {subject}: {body.text}{due}"
         count = notify_guardians([(p, o) for p, o in guardians], message)
         hw.notified_at = datetime.now(UTC)
         self.db.flush()
         return HomeworkOut(id=hw.id, class_subject_id=cs.id, date=d, text=hw.text,
-                           due_date=hw.due_date, notified_count=count)
+                           due_date=hw.due_date, student_id=hw.student_id, notified_count=count)
 
     def check_homework(self, m: CurrentMember, assignment_id: uuid.UUID,
                        body: HomeworkCheckIn) -> HomeworkOut:

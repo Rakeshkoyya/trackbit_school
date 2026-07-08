@@ -84,7 +84,7 @@ export const schoolApi = {
   myDay: () => api.get<import("@/lib/school-types").MyDay>("/classroom/my-day"),
   logLesson: (b: { class_subject_id: string; topic_id?: string | null; coverage: string }) =>
     api.post<{ id: string }>("/classroom/lesson-logs", b),
-  addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null }) =>
+  addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null; student_id?: string | null }) =>
     api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
   checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
     api.post<{ id: string }>(`/classroom/homework/${id}/check`, b),
@@ -102,6 +102,14 @@ export const schoolApi = {
     date?: string | null;
     exceptions: { student_id: string; status: "absent" | "late"; late_minutes?: number | null }[];
   }) => api.post<import("@/lib/school-types").AttendanceMarkResult>("/attendance/mark", b),
+
+  // daily checks / recommendations (V2-P3, SPRD2 §5.5)
+  checks: (classSubjectId: string, onDate?: string) =>
+    api.get<import("@/lib/school-types").Checks>(
+      `/checks${qs({ class_subject_id: classSubjectId, on_date: onDate })}`,
+    ),
+  confirmCheck: (checkId: string, exceptions: { student_id: string; status: "not_done" | "note"; note?: string | null }[]) =>
+    api.post<import("@/lib/school-types").DailyCheck>(`/checks/${checkId}/confirm`, { exceptions }),
 
   // sessions (M2)
   sessions: () => api.get<import("@/lib/school-types").SessionSummary[]>("/sessions"),

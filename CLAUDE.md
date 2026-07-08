@@ -108,8 +108,22 @@ wiring of jobs, day suggestions, growth profile) are folded into the v2 packets 
   cards (All-present one-tap + exception sheet cycling present→absent→late, topic log,
   homework), `attendanceRoster`/`markAttendance` in `school-api`, Badge `danger` tone; web
   tsc + eslint + `next build` clean.
-- **Next: V2-P3** (Recommendations + daily checks + per-student homework §5.5), then V2-P4/P5
-  per SPRD2 §10.
+- **V2-P3 (Recommendations + daily checks + per-student homework) COMPLETE** — SPRD2 §5.5.
+  `models/checks.py` (`daily_checks` = class_subject×date recommendation, band_scope all|A|B|C,
+  optional `student_id` for intervention lines, `confirmed_at`; `check_results` = not_done|note
+  exception rows only); per-student homework via `homework_assignments.student_id`; migration
+  `f2c3d4e5f6a7` (head). `RecommendationsService.ensure` generates-if-absent from planned topic ×
+  band distribution — **zero teacher setup**; volume capped (≤2 class-wide + 1 richer C-band +
+  ≤1 per intervention student); `confirm` = "class did it ✓" + full-replace exception set.
+  `services/ai/checks.py` (env-gated `draft_checks`, deterministic fallback templates, §8).
+  Endpoints `/checks` (get-or-create) + `/checks/{id}/confirm` (require_academic; teacher must
+  teach the class). Per-student homework notifies only that student's guardians (P3). My Day
+  period card gains a Checks section (Class-did-it one-tap + flag-exceptions sheet) + per-student
+  homework picker. `test_recommendations.py` (6 tests: zero-setup+cap, C-band richer check,
+  intervention targeting, confirm+exceptions, per-student homework, access). Backend **182
+  passing**, ruff clean; web tsc + eslint + `next build` clean.
+- **Next: V2-P4** (Daily report agent + student timeline + cron wiring §5.6/§5.7/§9), then V2-P5
+  (wizard + plan generation) per SPRD2 §10.
 
 ## How this repo was bootstrapped (background)
 

@@ -79,6 +79,8 @@ class HomeworkIn(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
     due_date: date | None = None
     date: Date | None = None
+    # Set to target one student (a per-student addition); null = whole class (V2-P3).
+    student_id: uuid.UUID | None = None
 
 
 class HomeworkOut(BaseModel):
@@ -87,6 +89,7 @@ class HomeworkOut(BaseModel):
     date: date
     text: str
     due_date: date | None
+    student_id: uuid.UUID | None = None
     notified_count: int  # guardians notified (the teacher's payback, P3)
 
 

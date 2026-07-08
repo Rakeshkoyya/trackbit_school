@@ -21,6 +21,7 @@ from app.models.attendance import AttendanceException, AttendanceMark
 from app.models.auth_token import AuthToken
 from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
+from app.models.checks import CheckResult, DailyCheck
 from app.models.classroom import HomeworkAssignment, HomeworkCheck, LessonLog
 from app.models.fees import (
     FeeInstallmentTemplate,
@@ -56,7 +57,9 @@ __all__ = [
     "BoardCategory",
     "BoardMember",
     "CalendarEvent",
+    "CheckResult",
     "ClassSubject",
+    "DailyCheck",
     "DeviceToken",
     "EVENT_TYPES",
     "FeeInstallmentTemplate",
