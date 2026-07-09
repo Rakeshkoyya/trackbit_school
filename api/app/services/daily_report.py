@@ -24,8 +24,8 @@ from app.core.context import CurrentMember
 from app.models import (
     AcademicYear,
     AttendanceException,
-    AttendanceMark,
     CheckResult,
+    ClassPeriod,
     ClassSubject,
     DailyCheck,
     DailyReport,
@@ -108,9 +108,13 @@ class DailyReportService:
         class_labels = self._class_labels(org_id)
         slots = self._today_slots(org_id, d)
 
+        # Only ATTENDANCE-MARKED periods count as marked; a period opened but
+        # never submitted is not a capture (V2-P6).
         marks = list(self.db.scalars(
-            select(AttendanceMark).where(AttendanceMark.org_id == org_id, AttendanceMark.date == d)
-            .options(selectinload(AttendanceMark.exceptions))))
+            select(ClassPeriod).where(
+                ClassPeriod.org_id == org_id, ClassPeriod.date == d,
+                ClassPeriod.attendance_marked_at.is_not(None))
+            .options(selectinload(ClassPeriod.exceptions))))
         marked_keys = {(mk.class_id, mk.period_no) for mk in marks}
         marked_cs: set[uuid.UUID] = {
             s.class_subject_id for s in slots if (s.class_id, s.period_no) in marked_keys}
@@ -204,13 +208,13 @@ class DailyReportService:
         # ── repeat absentees (≥3 of last 5 days) ──
         win_start = d - timedelta(days=ABSENTEE_WINDOW_DAYS - 1)
         repeat = self.db.execute(
-            select(Student.full_name, func.count(func.distinct(AttendanceMark.date)).label("days"))
+            select(Student.full_name, func.count(func.distinct(ClassPeriod.date)).label("days"))
             .join(AttendanceException, AttendanceException.student_id == Student.id)
-            .join(AttendanceMark, AttendanceMark.id == AttendanceException.mark_id)
+            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
             .where(Student.org_id == org_id, AttendanceException.status == "absent",
-                   AttendanceMark.date >= win_start, AttendanceMark.date <= d)
+                   ClassPeriod.date >= win_start, ClassPeriod.date <= d)
             .group_by(Student.id, Student.full_name)
-            .having(func.count(func.distinct(AttendanceMark.date)) >= ABSENTEE_THRESHOLD)
+            .having(func.count(func.distinct(ClassPeriod.date)) >= ABSENTEE_THRESHOLD)
         ).all()
         repeat_absentees = [f"{name} absent {days} of last {ABSENTEE_WINDOW_DAYS} days"
                             for name, days in repeat]

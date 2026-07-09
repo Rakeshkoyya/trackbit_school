@@ -17,7 +17,7 @@ from app.core.database import SessionLocal
 from app.core.timeutil import org_day_bounds
 from app.models import (
     AttendanceException,
-    AttendanceMark,
+    ClassPeriod,
     ClassSubject,
     DailyReport,
     Guardian,
@@ -392,8 +392,9 @@ def run_teacher_reminder() -> int:
             teacher_of = dict(db.execute(_select(
                 ClassSubject.id, ClassSubject.teacher_member_id).where(
                 ClassSubject.org_id == org.id)).all())
-            marked = {(mk.class_id, mk.period_no) for mk in db.scalars(_select(AttendanceMark).where(
-                AttendanceMark.org_id == org.id, AttendanceMark.date == d))}
+            marked = {(p.class_id, p.period_no) for p in db.scalars(_select(ClassPeriod).where(
+                ClassPeriod.org_id == org.id, ClassPeriod.date == d,
+                ClassPeriod.attendance_marked_at.is_not(None)))}
             logged = set(db.scalars(_select(LessonLog.class_subject_id).where(
                 LessonLog.org_id == org.id, LessonLog.date == d)))
             # tally per teacher membership
@@ -455,11 +456,11 @@ def run_saturday_summary() -> int:
                            HomeworkAssignment.date >= week_start,
                            HomeworkAssignment.date <= d)) or 0
                 absences = db.scalar(_select(_func.count(AttendanceException.id))
-                    .join(AttendanceMark, AttendanceMark.id == AttendanceException.mark_id)
-                    .where(AttendanceMark.org_id == org.id,
+                    .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+                    .where(ClassPeriod.org_id == org.id,
                            AttendanceException.student_id == st.id,
                            AttendanceException.status == "absent",
-                           AttendanceMark.date >= week_start, AttendanceMark.date <= d)) or 0
+                           ClassPeriod.date >= week_start, ClassPeriod.date <= d)) or 0
                 recipients = list(db.execute(_select(Guardian.phone, Guardian.notify_opt_out)
                     .where(Guardian.org_id == org.id, Guardian.student_id == st.id)).all())
                 if not recipients:

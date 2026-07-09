@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError
 from app.models import (
-    AttendanceMark,
     CheckResult,
+    ClassPeriod,
     ClassSubject,
     DailyCheck,
     HomeworkAssignment,
@@ -86,10 +86,12 @@ class StudentTimelineService:
             .where(LessonLog.org_id == org_id, LessonLog.date == d,
                    LessonLog.class_subject_id.in_(cs_ids))).all())
         # attendance marks for the class today, keyed by period
-        marks = {mk.period_no: mk for mk in self.db.scalars(
-            select(AttendanceMark).where(
-                AttendanceMark.org_id == org_id, AttendanceMark.class_id == student.class_id,
-                AttendanceMark.date == d).options(selectinload(AttendanceMark.exceptions)))}
+        marks = {p.period_no: p for p in self.db.scalars(
+            select(ClassPeriod).where(
+                ClassPeriod.org_id == org_id, ClassPeriod.class_id == student.class_id,
+                ClassPeriod.date == d,
+                ClassPeriod.attendance_marked_at.is_not(None))
+            .options(selectinload(ClassPeriod.exceptions)))}
         # checks this student was flagged not-done on
         flagged: dict[uuid.UUID, list[str]] = {}
         for csid, desc in self.db.execute(

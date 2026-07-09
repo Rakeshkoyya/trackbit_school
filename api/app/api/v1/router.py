@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     me,
     ops,
     org,
+    periods,
     planner,
     push,
     recurring,
@@ -43,6 +44,7 @@ api_router.include_router(planner.router, prefix="/planner", tags=["planner"])
 api_router.include_router(timetable.router, prefix="/timetable", tags=["timetable"])
 api_router.include_router(wizard.router, prefix="/wizard", tags=["wizard"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
+api_router.include_router(periods.router, prefix="/periods", tags=["periods"])
 api_router.include_router(checks.router, prefix="/checks", tags=["checks"])
 api_router.include_router(classroom.router, prefix="/classroom", tags=["classroom"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["sessions"])

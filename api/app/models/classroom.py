@@ -13,9 +13,10 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -40,6 +41,13 @@ class LessonLog(Base, UUIDPKMixin, CreatedAtMixin):
         nullable=False, index=True,
     )
     date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Which occurrence of the period this log belongs to (V2-P6). NULL for a log
+    # captured outside a period card — a quick log with no attendance taken, or a
+    # row that predates the class_periods anchor.
+    period_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("class_periods.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
     )
@@ -50,7 +58,15 @@ class LessonLog(Base, UUIDPKMixin, CreatedAtMixin):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("class_subject_id", "date", "topic_id", name="uq_lesson_logs_class_subject_id"),
+        # Period-scoped logs dedupe per (period, topic) — which is what lets a class
+        # with two Maths periods on one day record a different topic in each. Logs
+        # with no period fall back to the old (class_subject, date, topic) key.
+        # Both are partial so the two regimes can't collide. (NULLs compare distinct
+        # in a unique index, so topic_id=NULL dedup stays app-enforced, as before.)
+        Index("uq_lesson_logs_period_topic", "period_id", "topic_id", unique=True,
+              postgresql_where=text("period_id IS NOT NULL")),
+        Index("uq_lesson_logs_cs_date_topic", "class_subject_id", "date", "topic_id", unique=True,
+              postgresql_where=text("period_id IS NULL")),
         CheckConstraint("coverage IN ('full', 'partial')", name="coverage_valid"),
     )
 

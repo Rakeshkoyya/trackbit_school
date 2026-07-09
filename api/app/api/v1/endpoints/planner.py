@@ -12,6 +12,7 @@ from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import require_academic, require_admin, require_coordinator_up
 from app.schemas.common import MessageResponse
+from app.schemas.periods import TopicProgressRow
 from app.schemas.planner import (
     ForecastOut,
     PlanCommentIn,
@@ -86,6 +87,14 @@ def plan_forecast(class_id: uuid.UUID, m: CurrentMember = Depends(require_academ
 def draft_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
                db: Session = Depends(get_db)):
     return PlannerService(db).draft_plan(m, cs_id)
+
+
+@router.get("/plan/{cs_id}/progress", response_model=list[TopicProgressRow])
+def topic_progress(cs_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """Chapter/topic progress computed from lesson logs (P2) — what the period card
+    shows as done / in progress / pending."""
+    return PlannerService(db).topic_progress(m, cs_id)
 
 
 @router.post("/plan/{cs_id}/generate", response_model=PlanGenerateOut)

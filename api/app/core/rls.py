@@ -88,8 +88,11 @@ SCHOOL_TIMETABLE_TABLES = (
 )
 
 # V2-P2 attendance (SPRD2 §4.4, §5.4) — engaged in migration f1b2c3d4e5f6.
+# V2-P6 renamed `attendance_marks` → `class_periods` (migration f5a6b7c8d9e0). The
+# rename preserves the table OID, so its RLS policy and grants carry over; the
+# migration re-runs enable_rls_sql on the new name anyway (idempotent).
 SCHOOL_ATTENDANCE_TABLES = (
-    "attendance_marks",
+    "class_periods",
     "attendance_exceptions",
 )
 

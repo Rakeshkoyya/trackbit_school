@@ -9,13 +9,14 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
     AcademicYear,
+    ClassPeriod,
     ClassSubject,
     Guardian,
     HomeworkAssignment,
@@ -27,6 +28,8 @@ from app.models import (
     Student,
     Subject,
     SyllabusTopic,
+    SyllabusUnit,
+    TimetableSlot,
     User,
 )
 from app.schemas.classroom import (
@@ -42,8 +45,15 @@ from app.schemas.classroom import (
     MyDayOut,
     MyDayPeriod,
 )
+from app.schemas.periods import (
+    PeriodCardOut,
+    PeriodHomeworkOut,
+    PeriodPlanOut,
+)
 from app.services.attendance import AttendanceService
 from app.services.notify_guardian import notify_guardians
+from app.services.periods import assert_can_take_class, find_period, get_or_create_period
+from app.services.planner import PlannerService
 from app.services.timetable import TimetableService
 
 
@@ -147,39 +157,159 @@ class ClassroomService:
                         assignment_id=hw.id, class_label=_label(klass),
                         subject_name=sname, text=hw.text))
 
-        # Today's periods straight from the timetable (V2-P1 §5.4): the teacher's
-        # slots for today, enriched with the planned topic / logged state we already
-        # computed per class-subject above, plus the attendance state (V2-P2 §5.4).
-        by_cs = {c.class_subject_id: c for c in classes}
+        # Today's periods straight from the timetable (V2-P1 §5.4), each resolved on
+        # its OWN period row (V2-P6) — two Maths periods on one day are independent
+        # cards with independent topics, not two views of one class-subject.
         day_slots = TimetableService(self.db).teacher_day(m, today)
         att_service = AttendanceService(self.db)
         class_ids = list({ts.class_id for ts in day_slots})
         att = att_service.period_states(m.org_id, class_ids, today)
         roster_sizes = att_service.roster_sizes(m.org_id, class_ids)
+
+        period_ids = [s["period_id"] for s in att.values() if s.get("period_id")]
+        logs_by_period = {
+            log.period_id: log for log in self.db.scalars(
+                select(LessonLog).where(
+                    LessonLog.org_id == m.org_id, LessonLog.period_id.in_(period_ids)))
+        } if period_ids else {}
+
+        hw_cs = set(self.db.scalars(
+            select(HomeworkAssignment.class_subject_id).where(
+                HomeworkAssignment.org_id == m.org_id, HomeworkAssignment.date == today)))
+
+        assignment = self._assign_topics(
+            m.org_id, monday, day_slots,
+            {(ts.class_id, ts.period_no): att.get((ts.class_id, ts.period_no), {}).get("period_id")
+             for ts in day_slots},
+            logs_by_period)
+
         periods: list[MyDayPeriod] = []
         for ts in day_slots:
-            c = by_cs.get(ts.class_subject_id)
             state = att.get((ts.class_id, ts.period_no), {})
+            topic_id, topic_title, _unit, logged = assignment[(ts.class_id, ts.period_no)]
             periods.append(MyDayPeriod(
                 period_no=ts.period_no, class_subject_id=ts.class_subject_id,
                 class_id=ts.class_id, class_label=ts.class_label, subject_name=ts.subject_name,
-                planned_topic=c.planned_topic if c else None,
-                planned_topic_id=c.planned_topic_id if c else None,
-                logged=c.logged if c else False,
+                planned_topic=topic_title, planned_topic_id=topic_id, logged=logged,
+                period_id=state.get("period_id"),
+                status=state.get("status", "held"),
+                opened=state.get("period_id") is not None,
+                closed=state.get("closed", False),
                 attendance_marked=state.get("marked", False),
                 roster_count=state.get("roster_count", roster_sizes.get(ts.class_id, 0)),
                 present_count=state.get("present_count"),
                 absent_count=state.get("absent_count"),
-                late_count=state.get("late_count")))
+                late_count=state.get("late_count"),
+                homework_set=ts.class_subject_id in hw_cs))
         periods.sort(key=lambda p: p.period_no)
         return MyDayOut(date=today, classes=classes, periods=periods, homework_pending=pending)
 
+    # ── per-period topic resolution (V2-P6) ──────────────────────────────────
+    def _week_topics(self, org_id: uuid.UUID, cs_id: uuid.UUID, monday: date):
+        """This week's planned topics for a class-subject, in syllabus order."""
+        return self.db.execute(
+            select(SyllabusTopic.id, SyllabusTopic.title, SyllabusUnit.title)
+            .join(SyllabusUnit, SyllabusUnit.id == SyllabusTopic.unit_id)
+            .join(PlanEntry, PlanEntry.topic_id == SyllabusTopic.id)
+            .where(PlanEntry.org_id == org_id, PlanEntry.class_subject_id == cs_id,
+                   PlanEntry.week_start == monday)
+            .order_by(SyllabusUnit.position, SyllabusTopic.position)
+        ).all()
+
+    def _assign_topics(self, org_id: uuid.UUID, monday: date, slots, period_ids, logs_by_period):
+        """(class_id, period_no) → (topic_id, topic_title, unit_title, logged).
+
+        A period that already has a lesson log shows what was actually taught. The
+        rest consume this week's remaining planned topics in period order, so a
+        second period of the same subject gets the NEXT topic, not a repeat of the
+        first. Topics logged on any earlier date are already excluded."""
+        out: dict[tuple[uuid.UUID, int], tuple] = {}
+        by_cs: dict[uuid.UUID, list] = {}
+        for s in slots:
+            by_cs.setdefault(s.class_subject_id, []).append(s)
+
+        for cs_id, cs_slots in by_cs.items():
+            logged_ids = set(self.db.scalars(
+                select(LessonLog.topic_id).where(
+                    LessonLog.org_id == org_id, LessonLog.class_subject_id == cs_id,
+                    LessonLog.topic_id.is_not(None))))
+            titles = {tid: (title, unit) for tid, title, unit in
+                      self._week_topics(org_id, cs_id, monday)}
+            remaining = [(tid, t, u) for tid, (t, u) in titles.items() if tid not in logged_ids]
+            cursor = 0
+            for s in sorted(cs_slots, key=lambda x: x.period_no):
+                pid = period_ids.get((s.class_id, s.period_no))
+                log = logs_by_period.get(pid) if pid else None
+                if log is not None:
+                    title, unit = titles.get(log.topic_id, (None, None))
+                    if title is None and log.topic_id is not None:
+                        title = self.db.scalar(
+                            select(SyllabusTopic.title).where(SyllabusTopic.id == log.topic_id))
+                    out[(s.class_id, s.period_no)] = (log.topic_id, title, unit, True)
+                    continue
+                if cursor < len(remaining):
+                    tid, title, unit = remaining[cursor]
+                    cursor += 1
+                    out[(s.class_id, s.period_no)] = (tid, title, unit, False)
+                else:
+                    # Week's plan exhausted — the card shows no suggestion rather
+                    # than re-proposing a topic the class already covered.
+                    out[(s.class_id, s.period_no)] = (None, None, None, False)
+        return out
+
     # ── quick log (CL-2) ─────────────────────────────────────────────────────
+    def _slots_for_cs(self, org_id: uuid.UUID, cs_id: uuid.UUID, d: date) -> list[TimetableSlot]:
+        """That class-subject's timetabled periods on `d`, per the grid effective then."""
+        return list(self.db.scalars(
+            select(TimetableSlot).where(
+                TimetableSlot.org_id == org_id, TimetableSlot.class_subject_id == cs_id,
+                TimetableSlot.weekday == d.weekday(), TimetableSlot.effective_from <= d,
+                or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d))
+            .order_by(TimetableSlot.period_no)))
+
+    def _resolve_log_period(
+        self, m: CurrentMember, cs: ClassSubject, d: date, body: LessonLogIn,
+    ) -> ClassPeriod | None:
+        """Which period occurrence does this log belong to?
+
+        Explicit `period_id` or `period_no` wins. Otherwise fall back to the grid:
+        attach to the earliest of today's slots for this class-subject that has no
+        log yet — so a plain quick log still lands on a period, and a teacher
+        quick-logging a double period fills period 1 then period 2. With no slot at
+        all (nothing timetabled) the log stays period-less, as it did before V2-P6."""
+        if body.period_id is not None:
+            period = self.db.scalar(select(ClassPeriod).where(
+                ClassPeriod.id == body.period_id, ClassPeriod.org_id == m.org_id))
+            if period is None:
+                raise NotFoundError("Period")
+            return period
+        if body.period_no is not None:
+            return get_or_create_period(self.db, m, cs.class_id, d, body.period_no, cs.id)
+
+        slots = self._slots_for_cs(m.org_id, cs.id, d)
+        if not slots:
+            return None
+        taken = set(self.db.scalars(
+            select(ClassPeriod.period_no)
+            .join(LessonLog, LessonLog.period_id == ClassPeriod.id)
+            .where(ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == cs.class_id,
+                   ClassPeriod.date == d)))
+        for s in slots:
+            if s.period_no not in taken:
+                return get_or_create_period(self.db, m, cs.class_id, d, s.period_no, cs.id)
+        return get_or_create_period(self.db, m, cs.class_id, d, slots[-1].period_no, cs.id)
+
     def log(self, m: CurrentMember, body: LessonLogIn) -> LessonLogOut:
         cs = self._cs(m.org_id, body.class_subject_id)
         self._can_capture(m, cs)
         d = body.date or self._today(m)
-        cond = [LessonLog.class_subject_id == cs.id, LessonLog.date == d]
+        period = self._resolve_log_period(m, cs, d, body)
+
+        # Dedupe within the period when there is one, else within the day (the
+        # pre-V2-P6 key). Mirrors the two partial unique indexes on lesson_logs.
+        cond = ([LessonLog.period_id == period.id] if period is not None
+                else [LessonLog.class_subject_id == cs.id, LessonLog.date == d,
+                      LessonLog.period_id.is_(None)])
         cond.append(LessonLog.topic_id.is_(None) if body.topic_id is None
                     else LessonLog.topic_id == body.topic_id)
         existing = self.db.scalar(select(LessonLog).where(*cond))
@@ -190,10 +320,84 @@ class ClassroomService:
             self.db.flush()
             return LessonLogOut.model_validate(existing)
         log = LessonLog(org_id=m.org_id, class_subject_id=cs.id, date=d, member_id=m.membership.id,
-                        topic_id=body.topic_id, coverage=body.coverage, note=body.note)
+                        topic_id=body.topic_id, coverage=body.coverage, note=body.note,
+                        period_id=period.id if period is not None else None)
         self.db.add(log)
         self.db.flush()
         return LessonLogOut.model_validate(log)
+
+    # ── the period card (V2-P6) ──────────────────────────────────────────────
+    def period_card(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
+                    on_date: date | None = None) -> PeriodCardOut:
+        """Everything the period-detail page needs, in one call. Purely a read —
+        the period row is created by "Start attendance", not by opening the page."""
+        assert_can_take_class(self.db, m, class_id, None)
+        d = on_date or self._today(m)
+        monday = d - timedelta(days=d.weekday())
+        period = find_period(self.db, m.org_id, class_id, d, period_no)
+
+        cs_id = period.class_subject_id if period else None
+        if cs_id is None:
+            cs_id = self.db.scalar(
+                select(TimetableSlot.class_subject_id).where(
+                    TimetableSlot.org_id == m.org_id, TimetableSlot.class_id == class_id,
+                    TimetableSlot.weekday == d.weekday(), TimetableSlot.period_no == period_no,
+                    TimetableSlot.effective_from <= d,
+                    or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d)))
+
+        sheet = AttendanceService(self.db).roster(m, class_id, period_no, d)
+        subject_name = self.db.scalar(
+            select(Subject.name).join(ClassSubject, ClassSubject.subject_id == Subject.id)
+            .where(ClassSubject.id == cs_id)) if cs_id else None
+
+        plan = PeriodPlanOut()
+        homework: list[PeriodHomeworkOut] = []
+        if cs_id is not None:
+            slots = self._slots_for_cs(m.org_id, cs_id, d)
+            period_ids = {
+                (p.class_id, p.period_no): p.id for p in self.db.scalars(
+                    select(ClassPeriod).where(
+                        ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == class_id,
+                        ClassPeriod.date == d))}
+            logs_by_period = {
+                log.period_id: log for log in self.db.scalars(
+                    select(LessonLog).where(
+                        LessonLog.org_id == m.org_id, LessonLog.class_subject_id == cs_id,
+                        LessonLog.date == d, LessonLog.period_id.is_not(None)))}
+            assignment = self._assign_topics(m.org_id, monday, slots, period_ids, logs_by_period)
+            topic_id, title, unit, logged = assignment.get(
+                (class_id, period_no), (None, None, None, False))
+            log = logs_by_period.get(period.id) if period else None
+            plan = PeriodPlanOut(
+                planned_topic_id=None if logged else topic_id,
+                planned_topic_title=None if logged else title,
+                planned_unit_title=None if logged else unit,
+                logged_topic_id=log.topic_id if log else None,
+                logged_coverage=log.coverage if log else None,
+                progress=PlannerService(self.db).topic_progress(m, cs_id))
+            homework = [
+                PeriodHomeworkOut(id=h.id, text=h.text, student_id=h.student_id,
+                                  due_date=h.due_date)
+                for h in self.db.scalars(
+                    select(HomeworkAssignment).where(
+                        HomeworkAssignment.org_id == m.org_id,
+                        HomeworkAssignment.class_subject_id == cs_id,
+                        HomeworkAssignment.date == d).order_by(HomeworkAssignment.created_at))]
+
+        return PeriodCardOut(
+            class_id=class_id, class_label=sheet.class_label, period_no=period_no, date=d,
+            class_subject_id=cs_id, subject_name=subject_name,
+            period_id=period.id if period else None,
+            status=period.status if period else "held",
+            not_held_reason=period.not_held_reason if period else None,
+            opened=period is not None,
+            closed=period is not None and period.closed_at is not None,
+            attendance_marked=sheet.marked, roster=sheet.roster,
+            roster_count=len(sheet.roster),
+            present_count=sheet.present_count if sheet.marked else None,
+            absent_count=sheet.absent_count if sheet.marked else None,
+            late_count=sheet.late_count if sheet.marked else None,
+            plan=plan, homework=homework)
 
     # ── homework (CL-2) + guardian notify (P3) ───────────────────────────────
     def add_homework(self, m: CurrentMember, body: HomeworkIn) -> HomeworkOut:

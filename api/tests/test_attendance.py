@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from app.models import AttendanceException, AttendanceMark, Membership
+from app.models import AttendanceException, ClassPeriod, Membership
 from tests.conftest import AdminSession
 
 
@@ -53,10 +53,13 @@ def _add_student(client, h, class_id, name, *, guardian_phone=None, opt_out=Fals
 
 
 def _marks(class_id):
+    """Periods whose attendance was actually submitted (an opened-but-unmarked
+    period is not a capture)."""
     db = AdminSession()
     try:
-        return db.query(AttendanceMark).filter(
-            AttendanceMark.class_id == uuid.UUID(class_id)).count()
+        return db.query(ClassPeriod).filter(
+            ClassPeriod.class_id == uuid.UUID(class_id),
+            ClassPeriod.attendance_marked_at.is_not(None)).count()
     finally:
         db.close()
 
@@ -65,8 +68,8 @@ def _exceptions(class_id):
     db = AdminSession()
     try:
         return (db.query(AttendanceException)
-                .join(AttendanceMark, AttendanceMark.id == AttendanceException.mark_id)
-                .filter(AttendanceMark.class_id == uuid.UUID(class_id)).count())
+                .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+                .filter(ClassPeriod.class_id == uuid.UUID(class_id)).count())
     finally:
         db.close()
 

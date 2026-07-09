@@ -18,6 +18,7 @@ from app.models import (
     AcademicYear,
     CalendarEvent,
     ClassSubject,
+    LessonLog,
     Membership,
     Plan,
     PlanComment,
@@ -28,6 +29,7 @@ from app.models import (
     SyllabusUnit,
     User,
 )
+from app.schemas.periods import TopicProgressRow
 from app.schemas.planner import (
     ForecastOut,
     PlanCommentIn,
@@ -310,6 +312,32 @@ class PlannerService:
             fits=not any(v.code == "capacity" for v in violations),
             violations=[ViolationOut(code=v.code, message=v.message) for v in violations],
             plan=self.get_plan(m, cs_id))
+
+    # ── topic progress (V2-P6): plan is baseline, logs are actual (P2) ───────
+    def topic_progress(self, m: CurrentMember, cs_id: uuid.UUID) -> list[TopicProgressRow]:
+        """Every syllabus topic with how far the class actually got.
+
+        Derived from lesson_logs, never stored: a topic with any full-coverage log
+        is done; one with only partial logs is in progress; the rest are pending."""
+        self._class_subject(m.org_id, cs_id)
+        units = self._units(m.org_id, cs_id)
+        coverages: dict[uuid.UUID, set[str]] = {}
+        for topic_id, coverage in self.db.execute(
+            select(LessonLog.topic_id, LessonLog.coverage).where(
+                LessonLog.org_id == m.org_id, LessonLog.class_subject_id == cs_id,
+                LessonLog.topic_id.is_not(None))
+        ).all():
+            coverages.setdefault(topic_id, set()).add(coverage)
+
+        out: list[TopicProgressRow] = []
+        for unit in units:
+            for topic in sorted(unit.topics, key=lambda t: t.position):
+                seen = coverages.get(topic.id, set())
+                status = "done" if "full" in seen else "in_progress" if seen else "pending"
+                out.append(TopicProgressRow(
+                    topic_id=topic.id, topic_title=topic.title, unit_title=unit.title,
+                    est_periods=topic.est_periods, status=status))
+        return out
 
     # ── teacher change-requests (comment threads on the plan) ─────────────────
     def _comment_out(self, c: PlanComment) -> PlanCommentOut:

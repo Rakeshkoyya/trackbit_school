@@ -17,7 +17,6 @@ from app.models.assessments import (
     SkillArea,
     StudentBand,
 )
-from app.models.attendance import AttendanceException, AttendanceMark
 from app.models.auth_token import AuthToken
 from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
@@ -33,6 +32,7 @@ from app.models.fees import (
 from app.models.notification import DeviceToken, Notification
 from app.models.onboarding import OnboardingState
 from app.models.org import Membership, Organization
+from app.models.periods import AttendanceException, ClassPeriod
 from app.models.planner import Plan, PlanComment, PlanEntry, SyllabusTopic, SyllabusUnit
 from app.models.reports import DailyReport
 from app.models.sessions import (
@@ -53,13 +53,13 @@ __all__ = [
     "AssessmentScore",
     "Attachment",
     "AttendanceException",
-    "AttendanceMark",
     "AuthToken",
     "Board",
     "BoardCategory",
     "BoardMember",
     "CalendarEvent",
     "CheckResult",
+    "ClassPeriod",
     "ClassSubject",
     "DailyCheck",
     "DailyReport",

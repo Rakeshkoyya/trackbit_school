@@ -16,11 +16,11 @@ from app.models import (
     AssessmentCycle,
     AssessmentScore,
     AttendanceException,
-    AttendanceMark,
     Board,
     BoardMember,
     CalendarEvent,
     CheckResult,
+    ClassPeriod,
     ClassSubject,
     DailyCheck,
     FeeInstallmentTemplate,
@@ -189,8 +189,9 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     # data: today's class logged, and yesterday's homework awaiting a completion count.
     today_ist = datetime.now(IST).date()
     math = class_subjects[("6-A", "Mathematics")]
-    db.add(LessonLog(org_id=org.id, class_subject_id=math.id, date=today_ist,
-                     member_id=mships[ramesh].id, coverage="full"))
+    demo_log = LessonLog(org_id=org.id, class_subject_id=math.id, date=today_ist,
+                         member_id=mships[ramesh].id, coverage="full")
+    db.add(demo_log)
     db.add(HomeworkAssignment(org_id=org.id, class_subject_id=math.id,
                               date=today_ist - timedelta(days=1), text="Exercise 4.2, sums 1–10",
                               due_date=today_ist + timedelta(days=1), notified_at=_now()))
@@ -338,20 +339,31 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     # Per-period attendance for today's 6-A periods (capture-by-exception): all
     # present except one absent + one late on the first period.
     sixa_students = [s for s in students if s.class_id == classes["6-A"].id]
+    sixa_periods: dict[int, ClassPeriod] = {}
     for slot in sixa_today_slots:
-        mark = AttendanceMark(
+        period = ClassPeriod(
             org_id=org.id, class_id=classes["6-A"].id, date=today_ist, period_no=slot.period_no,
             class_subject_id=slot.class_subject_id, marked_by_member_id=mships[ramesh].id,
-            marked_at=_now())
-        db.add(mark)
+            teacher_member_id=mships[ramesh].id, opened_at=_now(), status="held",
+            attendance_marked_at=_now())
+        db.add(period)
         db.flush()
+        sixa_periods[slot.period_no] = period
         if slot.period_no == 1 and len(sixa_students) >= 2:
-            db.add(AttendanceException(org_id=org.id, mark_id=mark.id,
+            db.add(AttendanceException(org_id=org.id, period_id=period.id,
                                        student_id=sixa_students[0].id, status="absent"))
-            db.add(AttendanceException(org_id=org.id, mark_id=mark.id,
+            db.add(AttendanceException(org_id=org.id, period_id=period.id,
                                        student_id=sixa_students[1].id, status="late",
                                        late_minutes=5))
-            mark.alerted_at = _now()
+            period.alerted_at = _now()
+    db.flush()
+
+    # Anchor today's demo lesson log to the period it was actually taught in, so
+    # My Day's period card shows it as logged (V2-P6).
+    math_period = next((p for p in sixa_periods.values() if p.class_subject_id == math.id), None)
+    if math_period is not None:
+        demo_log.period_id = math_period.id
+        db.flush()
 
     # Recommendation checks for 6-A Science today (one class-wide confirmed with an
     # exception, one richer C-band check) so the My Day checks section renders.

@@ -43,6 +43,8 @@ class AttendanceRosterOut(BaseModel):
     class_label: str
     period_no: int
     date: date
+    # NULL until the period is opened (open-on-action, V2-P6).
+    period_id: uuid.UUID | None = None
     marked: bool
     roster: list[AttendanceRosterRow]
     present_count: int
@@ -51,6 +53,9 @@ class AttendanceRosterOut(BaseModel):
 
 
 class AttendanceMarkOut(BaseModel):
+    period_id: uuid.UUID
+    # Deprecated alias for period_id, kept so existing callers keep working
+    # across the V2-P6 rename. Prefer period_id.
     mark_id: uuid.UUID
     class_id: uuid.UUID
     period_no: int

@@ -9,12 +9,18 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-from app.core.rls import SCHOOL_ATTENDANCE_TABLES, disable_rls_sql, enable_rls_sql
+from app.core.rls import disable_rls_sql, enable_rls_sql
 
 revision: str = "f1b2c3d4e5f6"
 down_revision: str | None = "f0a1b2c3d4e5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+# Pinned to the names that exist *at this revision*. `attendance_marks` is renamed
+# to `class_periods` in f5a6b7c8d9e0, so importing the live SCHOOL_ATTENDANCE_TABLES
+# tuple here would make a fresh `upgrade head` enable RLS on a table that does not
+# exist yet (see the warning in app/core/rls.py).
+_TABLES = ("attendance_marks", "attendance_exceptions")
 
 
 def upgrade() -> None:
@@ -59,12 +65,12 @@ def upgrade() -> None:
     op.create_index(op.f("ix_attendance_exceptions_org_id"), "attendance_exceptions", ["org_id"])
     op.create_index(op.f("ix_attendance_exceptions_mark_id"), "attendance_exceptions", ["mark_id"])
 
-    for stmt in enable_rls_sql(SCHOOL_ATTENDANCE_TABLES):
+    for stmt in enable_rls_sql(_TABLES):
         op.execute(stmt)
 
 
 def downgrade() -> None:
-    for stmt in disable_rls_sql(SCHOOL_ATTENDANCE_TABLES):
+    for stmt in disable_rls_sql(_TABLES):
         op.execute(stmt)
     op.drop_table("attendance_exceptions")
     op.drop_table("attendance_marks")
