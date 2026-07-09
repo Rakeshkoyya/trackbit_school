@@ -34,6 +34,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ExamPortions } from "@/components/wizard/exam-portions";
 import { Dropzone, GapQuestions, MappingPreview } from "@/components/wizard/import-panel";
 import { Aside, Stat, StepFrame, StepRail } from "@/components/wizard/shell";
 import { CalendarLegend, YearCalendar, type PaintKind, type PaintedRange } from "@/components/wizard/year-calendar";
@@ -836,6 +837,11 @@ function CalendarStep() {
     queryFn: () => schoolApi.calendarSummary(year!.id),
     enabled: !!year,
   });
+  const { data: classes } = useQuery({
+    queryKey: ["classes", year?.id],
+    queryFn: () => schoolApi.classes(year!.id),
+    enabled: !!year,
+  });
   const [kind, setKind] = useState<PaintKind>("exam_block");
   const [title, setTitle] = useState("Term 1 Exam");
 
@@ -921,9 +927,13 @@ function CalendarStep() {
           <Input id="etitle" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <p className="text-xs text-muted-foreground">
-          Now drag across the calendar. Every exam you mark can later be tied to the chapters it
-          examines, so the planner can warn you if the syllabus won&apos;t finish in time.
+          Now drag across the calendar.
         </p>
+
+        <ExamPortions
+          exams={(summary?.events ?? []).filter((e) => e.type === "exam_block")}
+          classes={classes ?? []}
+        />
 
         <div className="max-h-64 space-y-1.5 overflow-auto pr-1">
           <AnimatePresence initial={false}>
