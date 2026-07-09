@@ -39,7 +39,26 @@ export interface CalendarEvent {
   start_date: string;
   end_date: string;
   affects_teaching: boolean;
+  /** Periods this event eats, e.g. [1,2,3]. null = the whole day (V2-P7). */
+  blocks_periods: number[] | null;
   notes: string | null;
+}
+
+export interface CalendarEventInput {
+  academic_year_id: string;
+  type: CalendarEventType;
+  title: string;
+  start_date: string;
+  end_date: string;
+  affects_teaching?: boolean;
+  blocks_periods?: number[] | null;
+}
+
+export interface ExamPortion {
+  id: string;
+  exam_event_id: string;
+  class_subject_id: string;
+  upto_topic_id: string;
 }
 
 export interface CalendarSummary {
@@ -369,9 +388,13 @@ export interface WizardProgress {
   timetable_slots: number;
   plans_total: number;
   plans_approved: number;
+  calendar_events: number;
+  exams: number;
+  exam_portions: number;
 }
 
 export interface WizardState {
+  steps: WizardStep[];
   current_step: number;
   total_steps: number;
   status: string;
@@ -659,4 +682,76 @@ export interface FeeSummary {
   collected_fee: string;
   pending_installments: number;
   overdue_amount: string;
+}
+
+
+// ── document ingestion (V2-P7, SPRD2 §5.1) ───────────────────────────────────
+/** A gap a deterministic validator found; the model only phrased the question. */
+export interface GapQuestion {
+  field: string;
+  label: string;
+  question: string;
+  options: string[];
+  skippable: boolean;
+  source: string;
+}
+
+export interface AnalyzeResult {
+  columns: string[];
+  mapping: Record<string, string>;
+  rows: Record<string, unknown>[];
+  row_count: number;
+  unmapped_columns: string[];
+  missing_required: string[];
+  low_confidence: string[];
+  questions: GapQuestion[];
+  source: string;
+}
+
+export interface StaffCommitResult {
+  created: { name: string; username: string; password: string; user_id: string }[];
+  created_count: number;
+  skipped: number;
+  assigned: number;
+  errors: { row?: number; reason?: string }[];
+  /** Assignment hints we refused to guess at. */
+  unresolved: { teacher: string; tokens: string[] }[];
+}
+
+export interface SyllabusTopicDraft {
+  title: string;
+  est_periods: number;
+}
+
+export interface SyllabusUnitDraft {
+  title: string;
+  topics: SyllabusTopicDraft[];
+}
+
+export interface SyllabusAnalyzeResult extends AnalyzeResult {
+  mode: "grid" | "text";
+  units: SyllabusUnitDraft[];
+  unit_count: number;
+  topic_count: number;
+}
+
+export interface SyllabusCommitResult {
+  units_created: number;
+  topics_created: number;
+  replaced: boolean;
+}
+
+export interface TopicProgressRow {
+  topic_id: string;
+  topic_title: string;
+  unit_title: string;
+  est_periods: number;
+  status: "done" | "in_progress" | "pending";
+}
+
+export interface WizardStep {
+  key: string;
+  title: string;
+  index: number;
+  complete: boolean;
 }

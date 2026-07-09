@@ -93,8 +93,9 @@ class WizardService:
             "year": p.has_year,
             "timings": p.has_timings,
             "classes": p.classes > 0,
-            "subjects": p.class_subjects > 0,
-            "staff": p.teachers > 0,
+            "subjects": p.subjects > 0,
+            # The step covers teachers AND what each one teaches, so both must land.
+            "staff": p.teachers > 0 and p.class_subjects > 0,
             "syllabus": p.syllabus_topics > 0,
             # Exams are optional for a school that doesn't run them; any calendar
             # entry counts as having visited the step.

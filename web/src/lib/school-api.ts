@@ -58,6 +58,18 @@ export const schoolApi = {
     affects_teaching?: boolean;
   }) => api.post<CalendarEvent>("/academics/calendar/events", b),
   deleteEvent: (id: string) => api.del<{ message: string }>(`/academics/calendar/events/${id}`),
+  /** One round trip for a drag-selected range (V2-P7). */
+  createEvents: (events: import("@/lib/school-types").CalendarEventInput[]) =>
+    api.post<CalendarEvent[]>("/academics/calendar/events/bulk", { events }),
+
+  // exam portions (V2-P7): what each exam actually examines
+  examPortions: (csId?: string) =>
+    api.get<import("@/lib/school-types").ExamPortion[]>(
+      `/academics/exam-portions${qs({ class_subject_id: csId })}`),
+  setExamPortion: (b: { exam_event_id: string; class_subject_id: string; upto_topic_id: string }) =>
+    api.post<import("@/lib/school-types").ExamPortion>("/academics/exam-portions", b),
+  deleteExamPortion: (id: string) =>
+    api.del<{ message: string }>(`/academics/exam-portions/${id}`),
 
   classSubjects: (classId: string) =>
     api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
@@ -86,6 +98,42 @@ export const schoolApi = {
     api.post<import("@/lib/school-types").PlanComment>(`/planner/plan/${csId}/comments`, b),
   resolvePlanComment: (id: string) =>
     api.post<import("@/lib/school-types").PlanComment>(`/planner/plan/comments/${id}/resolve`),
+
+  // ── document ingestion (V2-P7, SPRD2 §5.1) ────────────────────────────────
+  /** Staff sheet -> proposed mapping + the gaps a human must close. */
+  staffImportAnalyze: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<import("@/lib/school-types").AnalyzeResult>(
+      "/org/members/import/analyze", form);
+  },
+  staffImportCommit: (b: {
+    mapping: Record<string, string>;
+    rows: Record<string, unknown>[];
+    academic_year_id?: string | null;
+    default_password?: string | null;
+  }) => api.post<import("@/lib/school-types").StaffCommitResult>(
+    "/org/members/import/commit", b),
+
+  syllabusImportAnalyze: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<import("@/lib/school-types").SyllabusAnalyzeResult>(
+      "/planner/syllabus/import/analyze", form);
+  },
+  syllabusImportText: (text: string) =>
+    api.post<import("@/lib/school-types").SyllabusAnalyzeResult>(
+      "/planner/syllabus/import/text", { text }),
+  syllabusImportCommit: (b: {
+    class_subject_id: string;
+    units: import("@/lib/school-types").SyllabusUnitDraft[];
+    replace?: boolean;
+  }) => api.post<import("@/lib/school-types").SyllabusCommitResult>(
+    "/planner/syllabus/import/commit", b),
+
+  topicProgress: (csId: string) =>
+    api.get<import("@/lib/school-types").TopicProgressRow[]>(
+      `/planner/plan/${csId}/progress`),
 
   // setup wizard (V2-P5, SPRD2 §5.1)
   wizardState: () => api.get<import("@/lib/school-types").WizardState>("/wizard/state"),

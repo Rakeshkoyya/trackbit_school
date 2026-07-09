@@ -5,9 +5,11 @@ Step order is a real dependency chain, not a preference (reordered in V2-P7):
   1  year + terms      everything hangs off the academic year
   2  timings           periods_per_day bounds the timetable grid
   3  classes           a class needs a year
-  4  subjects          class_subjects need class + subject, and carry the teacher
-                       and the weekly period budget
-  5  staff             teachers must exist before they can be assigned
+  4  subjects          the school's subject list
+  5  staff             teachers, then class_subjects — the join row carries the
+                       teacher and the weekly period budget, so the teacher must
+                       exist first. (A staff sheet's "6-A Mathematics" hints can
+                       only resolve once classes and subjects are both in.)
   6  syllabus          syllabus_units hang off class_subject_id — so this CANNOT
                        come before classes and subjects, whatever the setup
                        narrative suggests
@@ -29,8 +31,8 @@ STEPS: list[tuple[str, str]] = [
     ("year", "Academic year"),
     ("timings", "School timings"),
     ("classes", "Classes"),
-    ("subjects", "Subjects & teachers"),
-    ("staff", "Teaching staff"),
+    ("subjects", "Subjects"),
+    ("staff", "Teachers & assignments"),
     ("syllabus", "Syllabus & lesson plan"),
     ("calendar", "Calendar, holidays & exams"),
     ("students", "Students"),

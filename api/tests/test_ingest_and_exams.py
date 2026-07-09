@@ -372,3 +372,5 @@ def test_wizard_steps_are_derived_from_real_data(client, cleanup):
     by_key2 = {s["key"]: s["complete"] for s in state2["steps"]}
     assert by_key2["classes"] is True and by_key2["subjects"] is True
     assert by_key2["syllabus"] is False
+    # The class-subject exists but no teacher does, so the staff step is not done.
+    assert by_key2["staff"] is False

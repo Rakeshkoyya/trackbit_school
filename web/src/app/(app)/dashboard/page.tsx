@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { SetupGate } from "@/components/school/setup-gate";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -158,6 +159,7 @@ function InsightsInner() {
 
   return (
     <div>
+      <SetupGate />
       <div className="mb-6 flex items-center justify-between">
         <PageHeader title="Dashboard" subtitle="Is the school teaching well, right now?" />
         <div className="flex items-center gap-2">
