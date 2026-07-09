@@ -4,19 +4,20 @@ The proposer (greedy `distribute`, or a model draft) suggests a placement; these
 pure functions decide whether it is acceptable. A syllabus that cannot fit is a
 human decision ("trim topics or add periods"), reported — never silently squeezed.
 
-  V1 capacity     Σ est_periods ≤ effective periods available
-  V2 coverage     every topic placed within the year (none spills past year end)
-  V3 ordering     unit/topic order preserved (weeks non-decreasing)
-  V4 teacher load no week where a teacher's planned periods exceed her slots
+  V1 capacity      Σ est_periods ≤ effective periods available
+  V2 coverage      every topic placed within the year (none spills past year end)
+  V3 ordering      unit/topic order preserved (weeks non-decreasing)
+  V4 teacher load  no week where a teacher's planned periods exceed her slots
+  V5 exam coverage every topic in an exam's portion is taught before the exam starts
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 
 @dataclass
 class Violation:
-    code: str  # capacity | coverage | ordering | teacher_load
+    code: str  # capacity | coverage | ordering | teacher_load | exam_coverage
     message: str
 
 
@@ -44,6 +45,29 @@ def validate_ordering(placements: list[date]) -> Violation | None:
         if b < a:
             return Violation("ordering", "Topic order is not preserved in the schedule.")
     return None
+
+
+def validate_exam_coverage(
+    exam_title: str, exam_start: date, portion: list[tuple[str, date]],
+) -> Violation | None:
+    """The validator that earns the whole planner its keep.
+
+    `portion` is [(topic_title, planned_week_start)] for every topic the exam
+    examines. A topic is safe only if its whole planned WEEK ends before the exam
+    starts — a topic scheduled for the week the exam begins in has not been taught
+    yet when the paper is written."""
+    late = [(title, wk) for title, wk in portion if wk + timedelta(days=6) >= exam_start]
+    if not late:
+        return None
+    first = min(late, key=lambda x: x[1])[0]
+    if len(late) == 1:
+        detail = f'"{first}" is'
+    else:
+        detail = f'{len(late)} topics starting with "{first}" are'
+    return Violation(
+        "exam_coverage",
+        f"{exam_title} starts {exam_start}, but {detail} not planned to finish "
+        f"before it — trim the portion, add periods, or move the exam.")
 
 
 def validate_teacher_load(

@@ -28,10 +28,17 @@ from app.schemas.academics import (
     YearOut,
     YearUpdate,
 )
-from app.schemas.calendar import CalendarEventCreate, CalendarEventOut, CalendarSummary
+from app.schemas.calendar import (
+    CalendarBulkIn,
+    CalendarEventCreate,
+    CalendarEventOut,
+    CalendarSummary,
+    ExamPortionIn,
+    ExamPortionOut,
+)
 from app.schemas.common import MessageResponse
 from app.services.academics import AcademicService
-from app.services.calendar import CalendarService
+from app.services.calendar import CalendarService, ExamPortionService
 
 router = APIRouter()
 
@@ -193,3 +200,32 @@ def delete_event(event_id: uuid.UUID, m: CurrentMember = Depends(require_coordin
                  db: Session = Depends(get_db)):
     CalendarService(db).delete_event(m, event_id)
     return MessageResponse(message="Event removed.")
+
+
+@router.post("/calendar/events/bulk", response_model=list[CalendarEventOut])
+def create_calendar_events(body: CalendarBulkIn, m: CurrentMember = Depends(require_coordinator_up),
+                           db: Session = Depends(get_db)):
+    """One round trip for a drag-selected range (V2-P7)."""
+    return CalendarService(db).create_events(m, body.events)
+
+
+# ── exam portions (V2-P7): what each exam actually examines ──────────────────
+@router.get("/exam-portions", response_model=list[ExamPortionOut])
+def list_exam_portions(class_subject_id: uuid.UUID | None = None,
+                       m: CurrentMember = Depends(require_academic),
+                       db: Session = Depends(get_db)):
+    return ExamPortionService(db).list(m, class_subject_id)
+
+
+@router.post("/exam-portions", response_model=ExamPortionOut)
+def set_exam_portion(body: ExamPortionIn, m: CurrentMember = Depends(require_coordinator_up),
+                     db: Session = Depends(get_db)):
+    """Idempotent per (exam, class-subject) — re-posting moves the cut point."""
+    return ExamPortionService(db).set(m, body)
+
+
+@router.delete("/exam-portions/{portion_id}", response_model=MessageResponse)
+def delete_exam_portion(portion_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+                        db: Session = Depends(get_db)):
+    ExamPortionService(db).delete(m, portion_id)
+    return MessageResponse(message="Portion removed.")

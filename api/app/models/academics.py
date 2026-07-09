@@ -161,6 +161,11 @@ class CalendarEvent(Base, UUIDPKMixin, CreatedAtMixin):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     affects_teaching: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    # Which periods this event eats, e.g. [1, 2, 3] for a morning exam. NULL means
+    # the whole day (the common case). A day with blocks_periods set is a PARTIAL
+    # day: it still teaches, just fewer periods — the effective-days engine prorates
+    # it rather than removing it (V2-P7).
+    blocks_periods: Mapped[list[int] | None] = mapped_column(JSONB, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (

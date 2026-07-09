@@ -1,8 +1,42 @@
-"""Setup wizard schemas (V2-M1, SPRD2 §5.1)."""
+"""Setup wizard schemas (V2-M1, SPRD2 §5.1).
+
+Step order is a real dependency chain, not a preference (reordered in V2-P7):
+
+  1  year + terms      everything hangs off the academic year
+  2  timings           periods_per_day bounds the timetable grid
+  3  classes           a class needs a year
+  4  subjects          class_subjects need class + subject, and carry the teacher
+                       and the weekly period budget
+  5  staff             teachers must exist before they can be assigned
+  6  syllabus          syllabus_units hang off class_subject_id — so this CANNOT
+                       come before classes and subjects, whatever the setup
+                       narrative suggests
+  7  calendar + exams  exam portions point at syllabus topics, so exams follow
+                       syllabus; that ordering is what unlocks the V5
+                       exam-coverage validator ("this chapter won't be taught
+                       before the exam that examines it")
+  8  students          independent of the plan, but needed before the year runs
+  9  timetable         needs classes, class_subjects and timings
+  10 generate + lock   needs all of the above
+"""
 
 from pydantic import BaseModel, Field
 
-TOTAL_STEPS = 9
+TOTAL_STEPS = 10
+
+# The stepper is rendered from this, so the order lives in exactly one place.
+STEPS: list[tuple[str, str]] = [
+    ("year", "Academic year"),
+    ("timings", "School timings"),
+    ("classes", "Classes"),
+    ("subjects", "Subjects & teachers"),
+    ("staff", "Teaching staff"),
+    ("syllabus", "Syllabus & lesson plan"),
+    ("calendar", "Calendar, holidays & exams"),
+    ("students", "Students"),
+    ("timetable", "Timetable"),
+    ("generate", "Generate & lock"),
+]
 
 
 class WizardProgress(BaseModel):
@@ -20,6 +54,17 @@ class WizardProgress(BaseModel):
     timetable_slots: int
     plans_total: int
     plans_approved: int
+    # V2-P7: the calendar/exam step.
+    calendar_events: int = 0
+    exams: int = 0
+    exam_portions: int = 0
+
+
+class WizardStepOut(BaseModel):
+    key: str
+    title: str
+    index: int  # 1-based
+    complete: bool
 
 
 class WizardStateOut(BaseModel):
@@ -28,6 +73,7 @@ class WizardStateOut(BaseModel):
     status: str
     payload: dict
     progress: WizardProgress
+    steps: list[WizardStepOut] = []
 
 
 class WizardAdvanceIn(BaseModel):

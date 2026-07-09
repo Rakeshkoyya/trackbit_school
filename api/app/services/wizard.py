@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.models import (
     AcademicYear,
+    CalendarEvent,
     ClassSubject,
+    ExamPortion,
     Membership,
     OnboardingState,
     Plan,
@@ -26,7 +28,13 @@ from app.models import (
     Term,
     TimetableSlot,
 )
-from app.schemas.wizard import WizardAdvanceIn, WizardProgress, WizardStateOut
+from app.schemas.wizard import (
+    STEPS,
+    WizardAdvanceIn,
+    WizardProgress,
+    WizardStateOut,
+    WizardStepOut,
+)
 
 
 class WizardService:
@@ -57,7 +65,12 @@ class WizardService:
         plans_total = len(cs_ids)
         plans_approved = self.db.scalar(select(func.count(Plan.id)).where(
             Plan.org_id == org, Plan.status == "approved")) or 0
+        exams = self._count(
+            CalendarEvent, CalendarEvent.org_id == org, CalendarEvent.type == "exam_block")
         return WizardProgress(
+            calendar_events=self._count(CalendarEvent, CalendarEvent.org_id == org),
+            exams=exams,
+            exam_portions=self._count(ExamPortion, ExamPortion.org_id == org),
             has_year=bool(years),
             terms=self._count(Term, Term.org_id == org),
             has_timings=has_timings,
@@ -73,10 +86,34 @@ class WizardService:
             plans_total=plans_total,
             plans_approved=plans_approved)
 
+    def _complete(self, key: str, p: WizardProgress) -> bool:
+        """Whether a step's real data exists. Derived, never stored — an admin who
+        deletes every class must see the Classes step go incomplete again."""
+        return {
+            "year": p.has_year,
+            "timings": p.has_timings,
+            "classes": p.classes > 0,
+            "subjects": p.class_subjects > 0,
+            "staff": p.teachers > 0,
+            "syllabus": p.syllabus_topics > 0,
+            # Exams are optional for a school that doesn't run them; any calendar
+            # entry counts as having visited the step.
+            "calendar": p.calendar_events > 0,
+            "students": p.students > 0,
+            "timetable": p.timetable_slots > 0,
+            "generate": p.plans_total > 0 and p.plans_approved == p.plans_total,
+        }.get(key, False)
+
     def _out(self, st: OnboardingState, m: CurrentMember) -> WizardStateOut:
+        progress = self._progress(m)
         return WizardStateOut(
             current_step=st.current_step, status=st.status, payload=st.payload or {},
-            progress=self._progress(m))
+            progress=progress,
+            steps=[
+                WizardStepOut(key=key, title=title, index=i + 1,
+                              complete=self._complete(key, progress))
+                for i, (key, title) in enumerate(STEPS)
+            ])
 
     def state(self, m: CurrentMember) -> WizardStateOut:
         return self._out(self._state(m), m)

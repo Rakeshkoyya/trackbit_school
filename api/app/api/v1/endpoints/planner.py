@@ -5,13 +5,19 @@ Reads: academic staff. Structural writes: coordinator/director. Plan approval
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import require_academic, require_admin, require_coordinator_up
 from app.schemas.common import MessageResponse
+from app.schemas.ingest import (
+    SyllabusAnalyzeOut,
+    SyllabusCommitIn,
+    SyllabusCommitOut,
+    SyllabusTextIn,
+)
 from app.schemas.periods import TopicProgressRow
 from app.schemas.planner import (
     ForecastOut,
@@ -27,6 +33,7 @@ from app.schemas.planner import (
     UnitOut,
 )
 from app.services.planner import PlannerService
+from app.services.syllabus_import import SyllabusImporter, analyze_file, analyze_text
 
 router = APIRouter()
 
@@ -68,6 +75,30 @@ def delete_topic(topic_id: uuid.UUID, m: CurrentMember = Depends(require_coordin
 def split_syllabus(body: SplitIn, _: CurrentMember = Depends(require_coordinator_up),
                    db: Session = Depends(get_db)):
     return SplitOut(units=PlannerService(db).split_text(body.text))
+
+
+# ── syllabus document import (V2-P7, SPRD2 §5.1) ─────────────────────────────
+@router.post("/syllabus/import/analyze", response_model=SyllabusAnalyzeOut)
+async def syllabus_import_analyze(file: UploadFile = File(...),
+                                  _: CurrentMember = Depends(require_coordinator_up)):
+    """xlsx/csv grid, or a typed-out list — both come back as an editable draft."""
+    return analyze_file(await file.read())
+
+
+@router.post("/syllabus/import/text", response_model=SyllabusAnalyzeOut)
+def syllabus_import_text(body: SyllabusTextIn,
+                         _: CurrentMember = Depends(require_coordinator_up)):
+    """Paste path. Same draft shape as the file path, so the UI has one review screen."""
+    return analyze_text(body.text)
+
+
+@router.post("/syllabus/import/commit", response_model=SyllabusCommitOut)
+def syllabus_import_commit(body: SyllabusCommitIn,
+                           m: CurrentMember = Depends(require_coordinator_up),
+                           db: Session = Depends(get_db)):
+    return SyllabusImporter(db).commit(
+        m, class_subject_id=body.class_subject_id,
+        units=[u.model_dump() for u in body.units], replace=body.replace)
 
 
 # ── plan ─────────────────────────────────────────────────────────────────────

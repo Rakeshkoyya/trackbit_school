@@ -18,6 +18,7 @@ from app.models import (
     AcademicYear,
     CalendarEvent,
     ClassSubject,
+    ExamPortion,
     LessonLog,
     Membership,
     Plan,
@@ -42,10 +43,17 @@ from app.schemas.planner import (
     UnitOut,
     ViolationOut,
 )
-from app.services.calendar import effective_periods, expand_blocked_dates
+from app.services.calendar import (
+    effective_periods,
+    event_rows,
+    expand_blocked_dates,
+    expand_partial_blocks,
+)
 from app.services.plan_validate import (
+    Violation,
     validate_capacity,
     validate_coverage,
+    validate_exam_coverage,
     validate_ordering,
 )
 
@@ -56,7 +64,7 @@ def _monday(d: date) -> date:
 
 def distribute(
     topic_periods: list[int], *, periods_per_week: int, working_weekdays, blocked: set,
-    year_start: date, year_end: date,
+    year_start: date, year_end: date, partial: dict | None = None, periods_per_day: int = 8,
 ) -> list[date]:
     """Greedily place each topic (by est_periods) into successive teaching weeks,
     respecting each week's effective period budget. Returns a week_start per topic.
@@ -67,7 +75,8 @@ def distribute(
     def cap(week: date) -> float:
         return effective_periods(
             periods_per_week or 1, week, working_weekdays=working_weekdays, blocked=blocked,
-            year_start=year_start, year_end=year_end,
+            year_start=year_start, year_end=year_end, partial=partial,
+            periods_per_day=periods_per_day,
         )
 
     capacity = cap(cur)
@@ -185,12 +194,14 @@ class PlannerService:
         return year
 
     def _blocked(self, org_id: uuid.UUID, year_id: uuid.UUID) -> set:
-        events = self.db.scalars(
+        return self._calendar(org_id, year_id)[0]
+
+    def _calendar(self, org_id: uuid.UUID, year_id: uuid.UUID) -> tuple[set, dict]:
+        """(fully blocked dates, date -> periods lost to partial-day events)."""
+        rows = event_rows(self.db.scalars(
             select(CalendarEvent).where(
-                CalendarEvent.org_id == org_id, CalendarEvent.academic_year_id == year_id
-            )
-        )
-        return expand_blocked_dates([(e.start_date, e.end_date, e.affects_teaching) for e in events])
+                CalendarEvent.org_id == org_id, CalendarEvent.academic_year_id == year_id)))
+        return expand_blocked_dates(rows), expand_partial_blocks(rows)
 
     def get_plan(self, m: CurrentMember, cs_id: uuid.UUID) -> PlanOut:
         self._class_subject(m.org_id, cs_id)  # same-org guard
@@ -233,9 +244,11 @@ class PlannerService:
         if not topics:
             raise ValidationError("Add syllabus topics before drafting a plan.")
         year = self._year_for_cs(cs)
+        blocked, partial = self._calendar(m.org_id, year.id)
         weeks = distribute(
             [t.est_periods for t in topics], periods_per_week=cs.periods_per_week,
-            working_weekdays=year.working_weekdays, blocked=self._blocked(m.org_id, year.id),
+            working_weekdays=year.working_weekdays, blocked=blocked, partial=partial,
+            periods_per_day=year.periods_per_day,
             year_start=year.start_date, year_end=year.end_date,
         )
         # Replace any existing (draft) entries — never mutate an approved baseline.
@@ -263,12 +276,14 @@ class PlannerService:
         return self.get_plan(m, cs_id)
 
     # ── generation pipeline (V2-M2, §5.2): proposer + deterministic validators ─
-    def _total_effective_periods(self, cs: ClassSubject, year: AcademicYear, blocked: set) -> float:
+    def _total_effective_periods(self, cs: ClassSubject, year: AcademicYear, blocked: set,
+                                 partial: dict | None = None) -> float:
         total, cur, end, guard = 0.0, _monday(year.start_date), _monday(year.end_date), 0
         while cur <= end and guard < 500:
             total += effective_periods(
                 cs.periods_per_week or 1, cur, working_weekdays=year.working_weekdays,
-                blocked=blocked, year_start=year.start_date, year_end=year.end_date)
+                blocked=blocked, partial=partial, periods_per_day=year.periods_per_day,
+                year_start=year.start_date, year_end=year.end_date)
             cur += timedelta(days=7)
             guard += 1
         return total
@@ -286,19 +301,22 @@ class PlannerService:
         if not topics:
             raise ValidationError("Add syllabus topics before generating a plan.")
         year = self._year_for_cs(cs)
-        blocked = self._blocked(m.org_id, year.id)
+        blocked, partial = self._calendar(m.org_id, year.id)
         est = [t.est_periods for t in topics]
         weeks = distribute(
             est, periods_per_week=cs.periods_per_week, working_weekdays=year.working_weekdays,
-            blocked=blocked, year_start=year.start_date, year_end=year.end_date)
+            blocked=blocked, partial=partial, periods_per_day=year.periods_per_day,
+            year_start=year.start_date, year_end=year.end_date)
 
         violations = [
             v for v in (
-                validate_capacity(sum(est), self._total_effective_periods(cs, year, blocked)),
+                validate_capacity(
+                    sum(est), self._total_effective_periods(cs, year, blocked, partial)),
                 validate_coverage(weeks, _monday(year.end_date)),
                 validate_ordering(weeks),
             ) if v is not None
         ]
+        violations.extend(self._exam_violations(m.org_id, cs_id, topics, weeks))
         # Persist the proposer's draft (review surface); never touch an approved baseline.
         self.db.execute(delete(PlanEntry).where(
             PlanEntry.org_id == m.org_id, PlanEntry.class_subject_id == cs_id))
@@ -312,6 +330,30 @@ class PlannerService:
             fits=not any(v.code == "capacity" for v in violations),
             violations=[ViolationOut(code=v.code, message=v.message) for v in violations],
             plan=self.get_plan(m, cs_id))
+
+    def _exam_violations(self, org_id: uuid.UUID, cs_id: uuid.UUID,
+                         topics: list[SyllabusTopic], weeks: list[date]) -> list[Violation]:
+        """V5: for each exam with a portion on this class-subject, is every topic in
+        the portion planned to FINISH before the exam starts? The portion is every
+        topic up to and including `upto_topic_id` in syllabus order (V2-P7)."""
+        portions = self.db.execute(
+            select(ExamPortion.upto_topic_id, CalendarEvent.title, CalendarEvent.start_date)
+            .join(CalendarEvent, CalendarEvent.id == ExamPortion.exam_event_id)
+            .where(ExamPortion.org_id == org_id, ExamPortion.class_subject_id == cs_id)
+        ).all()
+        if not portions:
+            return []
+        index = {t.id: i for i, t in enumerate(topics)}
+        out: list[Violation] = []
+        for upto_topic_id, exam_title, exam_start in portions:
+            cut = index.get(upto_topic_id)
+            if cut is None:
+                continue  # the portion's topic was deleted from the syllabus
+            portion = [(topics[i].title, weeks[i]) for i in range(cut + 1)]
+            v = validate_exam_coverage(exam_title, exam_start, portion)
+            if v is not None:
+                out.append(v)
+        return out
 
     # ── topic progress (V2-P6): plan is baseline, logs are actual (P2) ───────
     def topic_progress(self, m: CurrentMember, cs_id: uuid.UUID) -> list[TopicProgressRow]:
@@ -401,9 +443,11 @@ class PlannerService:
                 continue
             year = self.db.get(AcademicYear, klass.academic_year_id)
             baseline_finish = max(e.week_start for e in entries)
+            blocked, partial = self._calendar(m.org_id, year.id)
             projected = distribute(
                 [t.est_periods for t in topics], periods_per_week=cs.periods_per_week,
-                working_weekdays=year.working_weekdays, blocked=self._blocked(m.org_id, year.id),
+                working_weekdays=year.working_weekdays, blocked=blocked, partial=partial,
+                periods_per_day=year.periods_per_day,
                 year_start=year.start_date, year_end=year.end_date,
             )
             projected_finish = max(projected)

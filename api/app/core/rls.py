@@ -96,6 +96,11 @@ SCHOOL_ATTENDANCE_TABLES = (
     "attendance_exceptions",
 )
 
+# V2-P7 exam portions (SPRD2 §5.2) — engaged in migration f6b7c8d9e0f1.
+SCHOOL_EXAM_TABLES = (
+    "exam_portions",
+)
+
 # V2-P3 daily checks / recommendations (SPRD2 §4.4, §5.5) — engaged in f2c3d4e5f6a7.
 SCHOOL_CHECKS_TABLES = (
     "daily_checks",

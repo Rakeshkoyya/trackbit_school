@@ -22,6 +22,7 @@ from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
 from app.models.checks import CheckResult, DailyCheck
 from app.models.classroom import HomeworkAssignment, HomeworkCheck, LessonLog
+from app.models.exams import ExamPortion
 from app.models.fees import (
     FeeInstallmentTemplate,
     FeeStructure,
@@ -65,6 +66,7 @@ __all__ = [
     "DailyReport",
     "DeviceToken",
     "EVENT_TYPES",
+    "ExamPortion",
     "FeeInstallmentTemplate",
     "FeeStructure",
     "Guardian",

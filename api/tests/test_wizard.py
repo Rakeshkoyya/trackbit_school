@@ -20,7 +20,7 @@ def test_wizard_state_progress_and_resume(client, cleanup):
     assert st.status_code == 200, st.text
     body = st.json()
     assert body["current_step"] == 1 and body["status"] == "in_progress"
-    assert body["total_steps"] == 9
+    assert body["total_steps"] == 10  # V2-P7 reorder: syllabus before exams
     assert body["progress"]["has_year"] is False and body["progress"]["classes"] == 0
 
     # write-through step 1: create a year via the real endpoint → progress reflects it

@@ -2,13 +2,14 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import get_current_member, require_admin
 from app.core.rate_limit import limiter
+from app.schemas.ingest import AnalyzeOut, StaffCommitIn, StaffCommitOut
 from app.schemas.org import (
     AdminResetPasswordRequest,
     AdminResetPasswordResponse,
@@ -25,12 +26,30 @@ from app.schemas.org import (
     UsernameAvailabilityResponse,
 )
 from app.schemas.report import NudgeResponse, OrgDashboardResponse
+from app.services import staff_import
 from app.services.member import MemberService
 from app.services.nudge import NudgeService
 from app.services.org import OrgService
 from app.services.reports import ReportService
+from app.services.staff_import import StaffImporter
 
 router = APIRouter()
+
+
+# ── staff document import (V2-P7, SPRD2 §5.1) ────────────────────────────────
+@router.post("/members/import/analyze", response_model=AnalyzeOut)
+async def staff_import_analyze(file: UploadFile = File(...),
+                               _: CurrentMember = Depends(require_admin)):
+    """Parse a staff sheet: proposed mapping + the gaps a human must close."""
+    return staff_import.analyze(await file.read())
+
+
+@router.post("/members/import/commit", response_model=StaffCommitOut)
+def staff_import_commit(body: StaffCommitIn, m: CurrentMember = Depends(require_admin),
+                        db: Session = Depends(get_db)):
+    return StaffImporter(db).commit(
+        m, mapping=body.mapping, rows=body.rows, academic_year_id=body.academic_year_id,
+        default_password=body.default_password)
 
 
 @router.get("/settings", response_model=OrgSettingsOut)
