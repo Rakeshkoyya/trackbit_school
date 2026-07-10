@@ -1080,7 +1080,7 @@ function StudentsStep() {
 
   const analyze = useMutation({
     mutationFn: (f: File) => schoolApi.importRosterAnalyze(f),
-    onSuccess: (r) => setAnalysis(r as unknown as AnalyzeResult),
+    onSuccess: setAnalysis,
     onError: (e) => showApiError(e, "Could not read that file"),
   });
   const commit = useMutation({
@@ -1125,6 +1125,22 @@ function StudentsStep() {
               section: "Section",
               father_phone: "Father's phone",
               mother_phone: "Mother's phone",
+            }}
+          />
+          <GapQuestions
+            analysis={analysis}
+            onAnswer={(field, column) => {
+              setAnalysis((a) => {
+                if (!a) return a;
+                const mapping = { ...a.mapping };
+                if (column) mapping[field] = column;
+                return {
+                  ...a,
+                  mapping,
+                  missing_required: a.missing_required.filter((f) => f !== field),
+                  questions: a.questions.filter((q) => q.field !== field),
+                };
+              });
             }}
           />
           <div className="flex gap-2">

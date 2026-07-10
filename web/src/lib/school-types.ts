@@ -605,12 +605,10 @@ export interface StudentDetail extends StudentListItem {
   guardians: Guardian[];
 }
 
-export interface RosterAnalyze {
-  columns: string[];
-  mapping: Record<string, string>;
-  rows: Record<string, unknown>[];
-  row_count: number;
-}
+/** The roster importer shares the one ingest envelope (see AnalyzeResult) — same
+ *  gap-question flow as staff and syllabus. It used to return only the first four
+ *  fields, which crashed the import panel when it read `.length` on the rest. */
+export type RosterAnalyze = AnalyzeResult;
 
 export interface RosterCommitResult {
   created: number;

@@ -16,12 +16,23 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.models import Guardian, SchoolClass, Student, StudentCategory
+from app.services.ai.extract import phrase_gap_question
 
 # Unified student roster target fields the importer can populate.
 TARGET_FIELDS = [
     "full_name", "admission_no", "roll_no", "class_name", "section", "category",
     "father_name", "father_phone", "mother_name", "mother_phone", "phone",
 ]
+
+# Without these two, commit() rejects the row (no name / no admission no), so they
+# are the only gaps worth stopping the admin for. The rest degrade quietly.
+REQUIRED_FIELDS = ("full_name", "admission_no")
+
+# Shown in the gap question when a required column can't be found.
+FIELD_LABELS: dict[str, str] = {
+    "full_name": "name", "admission_no": "admission number", "roll_no": "roll number",
+    "class_name": "class", "section": "section", "category": "category",
+}
 
 FIELD_HINTS: dict[str, list[str]] = {
     "full_name": ["student name", "name", "student", "full name", "child name"],
@@ -86,14 +97,32 @@ def heuristic_mapping(columns: list[str]) -> dict[str, str]:
 
 def analyze(data: bytes) -> dict[str, Any]:
     columns, rows = read_first_sheet(data)
+    mapping = heuristic_mapping(columns)
+    # Same envelope as the staff and syllabus importers (see services/ingest.py), so
+    # the one import panel can render all three. The mapping stays roster's own tuned
+    # heuristic; only the surrounding gap fields are added. A required column we could
+    # not place becomes a tap-to-answer question rather than a wall of per-row errors
+    # at commit — and their absence used to crash the panel, which read `.length` on
+    # fields this endpoint never returned.
+    used = set(mapping.values())
+    unmapped = [c for c in columns if c not in used]
+    missing = [f for f in REQUIRED_FIELDS if f not in mapping]
+    questions = [
+        phrase_gap_question("students", f, FIELD_LABELS.get(f, f), unmapped) for f in missing
+    ]
     # Return ALL rows (not just a preview): the flow is stateless, so the client
     # holds the parsed rows and sends them back to /commit with the confirmed
     # mapping. Fine for roster sizes (hundreds); no server-side file cache.
     return {
         "columns": columns,
-        "mapping": heuristic_mapping(columns),
+        "mapping": mapping,
         "rows": rows,
         "row_count": len(rows),
+        "unmapped_columns": unmapped,
+        "missing_required": missing,
+        "low_confidence": [],
+        "questions": questions,
+        "source": "heuristic",
     }
 
 

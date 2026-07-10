@@ -4,6 +4,8 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.ingest import AnalyzeOut
+
 
 # ── Fee category ─────────────────────────────────────────────────────────────
 class CategoryCreate(BaseModel):
@@ -82,11 +84,9 @@ class StudentDetailOut(StudentOut):
 
 
 # ── roster xlsx import (SPRD §5.6, students mode) ────────────────────────────
-class RosterAnalyzeOut(BaseModel):
-    columns: list[str]
-    mapping: dict[str, str]  # target field -> source column (heuristic suggestion)
-    rows: list[dict]  # all parsed rows (client re-sends these to /commit)
-    row_count: int
+class RosterAnalyzeOut(AnalyzeOut):
+    """Same envelope as staff/syllabus (services/ingest.py). `mapping` is roster's own
+    tuned heuristic; `questions` cover only the fields commit() would reject a row for."""
 
 
 class RosterCommitIn(BaseModel):

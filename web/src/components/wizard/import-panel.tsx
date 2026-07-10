@@ -91,7 +91,7 @@ export function GapQuestions({
   analysis: AnalyzeResult;
   onAnswer: (field: string, column: string | null) => void;
 }) {
-  if (!analysis.questions.length) return null;
+  if (!analysis.questions?.length) return null;
   return (
     <div className="space-y-3 rounded-xl border border-border bg-warning-soft/50 p-3">
       <div className="flex items-center gap-2 text-sm font-medium text-warning">
@@ -151,7 +151,7 @@ export function MappingPreview({
           </li>
         ))}
       </ul>
-      {analysis.low_confidence.length ? (
+      {analysis.low_confidence?.length ? (
         <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
           Not sure about {analysis.low_confidence.map((f) => labels[f] ?? f).join(", ")} — worth a
           glance.
