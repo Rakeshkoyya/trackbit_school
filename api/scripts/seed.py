@@ -34,6 +34,7 @@ from app.models import (
     Membership,
     Organization,
     Plan,
+    PlanApproval,
     PlanEntry,
     SchoolClass,
     SessionAttendance,
@@ -104,11 +105,9 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     db.flush()
     term1 = Term(org_id=org.id, academic_year_id=year.id, name="Term 1",
                  start_date=date(2026, 4, 1), end_date=date(2026, 9, 30))
-    db.add_all([
-        term1,
-        Term(org_id=org.id, academic_year_id=year.id, name="Term 2",
-             start_date=date(2026, 10, 1), end_date=date(2027, 3, 31)),
-    ])
+    term2 = Term(org_id=org.id, academic_year_id=year.id, name="Term 2",
+                 start_date=date(2026, 10, 1), end_date=date(2027, 3, 31))
+    db.add_all([term1, term2])
     db.flush()
 
     subjects = {}
@@ -179,11 +178,49 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     db.flush()
     weeks = distribute([t.est_periods for t in all_topics], periods_per_week=5,
                        working_weekdays=year.working_weekdays, blocked=blocked,
-                       year_start=year.start_date, year_end=year.end_date)
+                       window_start=year.start_date, window_end=year.end_date)
     db.add(Plan(org_id=org.id, class_subject_id=sci.id, status="approved",
                 approved_by=kc.id, approved_at=_now()))
+    # `plans.status` is a cache over the append-only log — seed both or the planner
+    # will read this "approved" plan as unlocked.
+    db.add(PlanApproval(org_id=org.id, class_subject_id=sci.id, term_id=None,
+                        action="approve", actor_user_id=kc.id))
     for topic, wk in zip(all_topics, weeks, strict=True):
         db.add(PlanEntry(org_id=org.id, class_subject_id=sci.id, topic_id=topic.id, week_start=wk))
+
+    # 6-A Mathematics is the term-wise story (V2-P11): the whole year's chapters are
+    # known in April, but only Term 1 has been sized. Term 2's chapters sit unsized,
+    # so the plan reads "partial" and the forecast refuses to guess a finish date.
+    math_cs = class_subjects[("6-A", "Mathematics")]
+    term_syllabus = [
+        (term1, "Knowing Our Numbers", ["Comparing numbers", "Estimation", "Roman numerals"], 3),
+        (term1, "Whole Numbers", ["Number line", "Properties"], 4),
+        (term2, "Integers", ["Negative numbers", "Adding integers"], None),
+        (term2, "Fractions", ["Types of fractions", "Equivalent fractions"], None),
+    ]
+    t1_topics: list[SyllabusTopic] = []
+    for upos, (term, utitle, ttitles, est) in enumerate(term_syllabus):
+        unit = SyllabusUnit(org_id=org.id, class_subject_id=math_cs.id, position=upos,
+                            title=utitle, term_id=term.id)
+        db.add(unit)
+        db.flush()
+        for tpos, tt in enumerate(ttitles):
+            topic = SyllabusTopic(org_id=org.id, unit_id=unit.id, position=tpos, title=tt,
+                                  est_periods=est)
+            db.add(topic)
+            if term is term1:
+                t1_topics.append(topic)
+    db.flush()
+    t1_weeks = distribute([t.est_periods for t in t1_topics], periods_per_week=6,
+                          working_weekdays=year.working_weekdays, blocked=blocked,
+                          window_start=term1.start_date, window_end=term1.end_date)
+    db.add(Plan(org_id=org.id, class_subject_id=math_cs.id, status="partial",
+                approved_by=kc.id, approved_at=_now()))
+    db.add(PlanApproval(org_id=org.id, class_subject_id=math_cs.id, term_id=term1.id,
+                        action="approve", actor_user_id=kc.id))
+    for topic, wk in zip(t1_topics, t1_weeks, strict=True):
+        db.add(PlanEntry(org_id=org.id, class_subject_id=math_cs.id, topic_id=topic.id,
+                         week_start=wk))
 
     # A day of classroom capture for Ramesh (6-A Math) so My Day + compliance have
     # data: today's class logged, and yesterday's homework awaiting a completion count.

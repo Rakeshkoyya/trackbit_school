@@ -312,7 +312,8 @@ Sorting materials (4)
     commit = client.post("/api/v1/planner/syllabus/import/commit", headers=h, json={
         "class_subject_id": cs["id"], "units": body["units"]})
     assert commit.status_code == 200, commit.text
-    assert commit.json() == {"units_created": 2, "topics_created": 3, "replaced": False}
+    assert commit.json() == {"units_created": 2, "topics_created": 3, "replaced": False,
+                             "unsized_topics": 0, "unresolved_terms": []}
 
     syllabus = client.get(
         f"/api/v1/planner/syllabus?class_subject_id={cs['id']}", headers=h).json()
@@ -333,8 +334,9 @@ def test_syllabus_import_from_grid_with_merged_chapter_cells(client, cleanup):
     assert body["missing_required"] == []
     assert [u["title"] for u in body["units"]] == ["Food", "Materials"]
     assert len(body["units"][0]["topics"]) == 2
-    # A missing period estimate defaults to 1 rather than being invented.
-    assert body["units"][1]["topics"][0]["est_periods"] == 1
+    # A missing period estimate stays unsized rather than being invented as 1 — an
+    # unplanned chapter must not be indistinguishable from a one-period chapter.
+    assert body["units"][1]["topics"][0]["est_periods"] is None
 
     client.post("/api/v1/planner/syllabus/import/commit", headers=h, json={
         "class_subject_id": cs["id"], "units": body["units"]})

@@ -67,6 +67,11 @@ SCHOOL_SYLLABUS_TABLES = (
     "plan_entries",
 )
 
+# V2-P11 term-scoped planning — engaged in migration f7c8d9e0f1a2.
+SCHOOL_PLAN_APPROVAL_TABLES = (
+    "plan_approvals",
+)
+
 # P1-D/E classroom capture (SPRD §4.4) — engaged in migration d6c7d8e9fab0.
 SCHOOL_CLASSROOM_TABLES = (
     "lesson_logs",

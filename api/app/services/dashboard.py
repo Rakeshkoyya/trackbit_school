@@ -103,6 +103,17 @@ class DashboardService:
                     title=f"{r.class_label} {r.subject_name} is {r.weeks_behind}w behind plan",
                     detail=(f"Projected finish {r.projected_finish} vs baseline {r.baseline_finish}. "
                             f"Plan a catch-up before the next test.")))
+            elif r.status == "unplanned":
+                # No finish date can be computed, so this row has no RAG colour. Without
+                # an alert it would simply drop off the board — an unplanned subject is
+                # exactly what the director needs told, not hidden.
+                alerts.append(Alert(
+                    id=f"unplanned:{r.class_subject_id}", type="pace", severity="amber",
+                    class_subject_id=r.class_subject_id,
+                    title=f"{r.class_label} {r.subject_name} has {r.unestimated_topics} "
+                          f"chapter(s) with no period estimate",
+                    detail=("They are not scheduled, so there is no finish date. "
+                            "Set periods for the term's chapters, then generate the plan.")))
         # today's logging compliance
         comp = ClassroomService(self.db).compliance(m)
         unlogged = comp.total - comp.logged_count

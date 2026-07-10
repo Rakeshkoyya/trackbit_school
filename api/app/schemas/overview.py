@@ -57,9 +57,9 @@ class SubjectRow(BaseModel):
     est_periods: int
     topics_taught: int
 
-    plan_status: str  # none | draft | approved
+    plan_status: str  # none | draft | partial | approved
     plan_approved_at: datetime | None = None
-    forecast: str  # none | green | amber | red
+    forecast: str  # none | green | amber | red | unplanned
     weeks_behind: int | None = None
     baseline_finish: date | None = None
     projected_finish: date | None = None

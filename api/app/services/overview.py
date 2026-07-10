@@ -56,7 +56,10 @@ from app.services.planner import PlannerService
 
 # Severity, worst last. "none" (no plan drafted) outranks green — an unplanned
 # subject is a real gap — but a red one is louder still, because it has a date on it.
-_RAG_ORDER = {"green": 0, "none": 1, "amber": 2, "red": 3}
+# `unplanned` outranks amber: a subject two weeks behind is a known problem, one with
+# unsized chapters is an unknown. It sits below red, which is a plan actively failing.
+# The default of 3 for an unrecognised status keeps a new status loud, not silent.
+_RAG_ORDER = {"green": 0, "none": 1, "amber": 2, "unplanned": 3, "red": 4}
 
 
 def _label(k: SchoolClass) -> str:

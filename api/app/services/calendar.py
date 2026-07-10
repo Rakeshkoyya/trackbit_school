@@ -94,27 +94,40 @@ def effective_periods(
 ) -> float:
     """Periods a class-subject can actually teach in the week beginning
     ``week_start`` — periods_per_week scaled by (available working days / working
-    days that week within the year). 0 for a fully-blocked (e.g. exam) week.
+    days in the week). 0 for a fully-blocked (e.g. exam) week.
 
     A partial day contributes a fraction: an event eating 3 of 8 periods leaves
     5/8 of that day (V2-P7). A partial block that somehow names every period is
-    clamped to 0, never negative."""
+    clamped to 0, never negative.
+
+    The denominator is the week's working days, NOT just the ones inside
+    [year_start, year_end]. Those differ only for a week straddling a window edge,
+    and there the distinction decides the answer: the week Term 2 opens on a
+    Thursday has 3 teaching days, not 6, so it must yield half a week's periods.
+    Normalising by the in-window days instead returns a full week and lets the
+    planner cram six periods of topics into three days. For every week that lies
+    wholly inside the window — which is every week the whole-year planner sees
+    except the year's first and last — the two denominators are equal."""
     ww = set(working_weekdays)
     week_end = week_start + timedelta(days=6)
     partial = partial or {}
-    nominal = 0
+    week_working = 0
+    in_window = 0
     available = 0.0
     for d in _daterange(week_start, week_end):
-        if d < year_start or d > year_end or d.weekday() not in ww:
+        if d.weekday() not in ww:
             continue
-        nominal += 1
+        week_working += 1
+        if d < year_start or d > year_end:
+            continue
+        in_window += 1
         if d in blocked:
             continue
         lost = len(partial.get(d, ()))
         available += max(0.0, 1.0 - lost / max(periods_per_day, 1))
-    if nominal == 0:
+    if in_window == 0 or week_working == 0:
         return 0.0
-    return round(periods_per_week * available / nominal, 2)
+    return round(periods_per_week * available / week_working, 2)
 
 
 class CalendarService:

@@ -5,10 +5,11 @@ pure functions decide whether it is acceptable. A syllabus that cannot fit is a
 human decision ("trim topics or add periods"), reported — never silently squeezed.
 
   V1 capacity      Σ est_periods ≤ effective periods available
-  V2 coverage      every topic placed within the year (none spills past year end)
+  V2 coverage      every topic placed within the window (none spills past its end)
   V3 ordering      unit/topic order preserved (weeks non-decreasing)
   V4 teacher load  no week where a teacher's planned periods exceed her slots
   V5 exam coverage every topic in an exam's portion is taught before the exam starts
+  V6 unsized       no topic left without a period estimate
 """
 
 from dataclasses import dataclass
@@ -17,26 +18,43 @@ from datetime import date, timedelta
 
 @dataclass
 class Violation:
-    code: str  # capacity | coverage | ordering | teacher_load | exam_coverage
+    code: str  # capacity | coverage | ordering | teacher_load | exam_coverage | unsized
     message: str
 
 
-def validate_capacity(total_est_periods: int, total_effective_periods: float) -> Violation | None:
+def validate_capacity(total_est_periods: int, total_effective_periods: float,
+                      window: str = "this year") -> Violation | None:
     if total_est_periods > total_effective_periods:
         return Violation(
             "capacity",
             f"Syllabus needs {total_est_periods} periods but only about "
-            f"{int(total_effective_periods)} teaching periods exist this year — "
+            f"{int(total_effective_periods)} teaching periods exist {window} — "
             f"trim topics or add periods.")
     return None
 
 
-def validate_coverage(placements: list[date], year_end_monday: date) -> Violation | None:
-    overflow = [w for w in placements if w > year_end_monday]
+def validate_unsized(unsized_titles: list[str]) -> Violation | None:
+    """V6. An unsized topic cannot be scheduled, so it is not in the plan at all —
+    and a plan that quietly omits a third of the syllabus must not report `fits`.
+    This is the validator that stops the forecast going green on an unplanned year."""
+    if not unsized_titles:
+        return None
+    first = unsized_titles[0]
+    detail = f'"{first}"' if len(unsized_titles) == 1 else \
+        f'{len(unsized_titles)} topics, starting with "{first}",'
+    return Violation(
+        "unsized",
+        f"{detail} have no period estimate yet, so they are not scheduled. "
+        f"Set the periods for each chapter to plan them.")
+
+
+def validate_coverage(placements: list[date], window_end_monday: date) -> Violation | None:
+    overflow = [w for w in placements if w > window_end_monday]
     if overflow:
         return Violation(
             "coverage",
-            f"{len(overflow)} topic(s) spill past the year end — they won't be covered.")
+            f"{len(overflow)} topic(s) spill past the end of the planning window — "
+            f"they won't be covered.")
     return None
 
 

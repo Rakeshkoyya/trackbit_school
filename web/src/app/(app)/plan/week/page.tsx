@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { ClassSelect, PlanView, RAG, SubjectSelect, useClassSubjectPick, weekLabel } from "@/components/school/plan-shared";
+import { ClassSelect, forecastLabel, PlanView, RAG, SubjectSelect, useClassSubjectPick, weekLabel } from "@/components/school/plan-shared";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -36,11 +36,15 @@ function WeekPlanInner() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">{f.subject_name}</p>
               <p className="text-xs text-muted-foreground">
-                {f.baseline_finish ? `baseline ${weekLabel(f.baseline_finish)}` : "no plan"}
-                {f.projected_finish && f.weeks_behind > 0 ? ` · projected ${weekLabel(f.projected_finish)} (${f.weeks_behind}w behind)` : ""}
+                {f.status === "unplanned"
+                  ? "no finish date — size the remaining chapters to forecast"
+                  : <>
+                      {f.baseline_finish ? `baseline ${weekLabel(f.baseline_finish)}` : "no plan"}
+                      {f.projected_finish && f.weeks_behind > 0 ? ` · projected ${weekLabel(f.projected_finish)} (${f.weeks_behind}w behind)` : ""}
+                    </>}
               </p>
             </div>
-            <Badge tone={RAG[f.status]}>{f.status === "none" ? "no plan" : f.status}</Badge>
+            <Badge tone={RAG[f.status]}>{forecastLabel(f.status, f.unestimated_topics)}</Badge>
           </div>
         ))}
       </div>

@@ -77,20 +77,31 @@ export const schoolApi = {
   // planner: syllabus + plan + forecast (M1)
   syllabus: (csId: string) =>
     api.get<import("@/lib/school-types").SyllabusUnit[]>(`/planner/syllabus${qs({ class_subject_id: csId })}`),
-  addUnit: (b: { class_subject_id: string; title: string }) =>
+  addUnit: (b: { class_subject_id: string; title: string; term_id?: string | null }) =>
     api.post<import("@/lib/school-types").SyllabusUnit>("/planner/syllabus/units", b),
-  addTopic: (b: { unit_id: string; title: string; est_periods?: number }) =>
+  addTopic: (b: { unit_id: string; title: string; est_periods?: number | null }) =>
     api.post<import("@/lib/school-types").SyllabusTopic>("/planner/syllabus/topics", b),
+  /** Size (or un-size) a chapter when its term begins. Refused once that term is locked. */
+  setTopicEstimate: (topicId: string, estPeriods: number | null) =>
+    api.put<import("@/lib/school-types").SyllabusTopic>(
+      `/planner/syllabus/topics/${topicId}/estimate`, { est_periods: estPeriods }),
   deleteUnit: (id: string) => api.del<{ message: string }>(`/planner/syllabus/units/${id}`),
   deleteTopic: (id: string) => api.del<{ message: string }>(`/planner/syllabus/topics/${id}`),
   plan: (csId: string) =>
     api.get<import("@/lib/school-types").Plan>(`/planner/plan${qs({ class_subject_id: csId })}`),
-  draftPlan: (csId: string) =>
-    api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/draft`),
-  approvePlan: (csId: string) =>
-    api.post<import("@/lib/school-types").Plan>(`/planner/plan/${csId}/approve`),
-  generatePlan: (csId: string) =>
-    api.post<import("@/lib/school-types").PlanGenerateResult>(`/planner/plan/${csId}/generate`),
+  // `termId` scopes the action to one term; omit it to act on the whole year.
+  draftPlan: (csId: string, termId?: string | null) =>
+    api.post<import("@/lib/school-types").Plan>(
+      `/planner/plan/${csId}/draft${qs({ term_id: termId ?? undefined })}`),
+  approvePlan: (csId: string, termId?: string | null) =>
+    api.post<import("@/lib/school-types").Plan>(
+      `/planner/plan/${csId}/approve${qs({ term_id: termId ?? undefined })}`),
+  unapprovePlan: (csId: string, termId?: string | null) =>
+    api.post<import("@/lib/school-types").Plan>(
+      `/planner/plan/${csId}/unapprove${qs({ term_id: termId ?? undefined })}`),
+  generatePlan: (csId: string, termId?: string | null) =>
+    api.post<import("@/lib/school-types").PlanGenerateResult>(
+      `/planner/plan/${csId}/generate${qs({ term_id: termId ?? undefined })}`),
   planComments: (csId: string, includeResolved = false) =>
     api.get<import("@/lib/school-types").PlanComment[]>(
       `/planner/plan/${csId}/comments${qs({ include_resolved: includeResolved ? "true" : undefined })}`),

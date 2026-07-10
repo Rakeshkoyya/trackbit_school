@@ -41,6 +41,7 @@ const RAG_TONE: Record<Rag, "success" | "neutral" | "warning" | "danger"> = {
   none: "neutral",
   amber: "warning",
   red: "danger",
+  unplanned: "warning",
 };
 
 const fmt = (d: string | null) =>
@@ -220,6 +221,8 @@ function ClassInner({ classId }: { classId: string }) {
                       <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                         <CheckCircle2 className="h-3 w-3" /> locked
                       </span>
+                    ) : s.plan_status === "partial" ? (
+                      <span className="text-[11px] text-muted-foreground">some terms locked</span>
                     ) : (
                       <span className="text-[11px] text-muted-foreground">{s.plan_status}</span>
                     )}
@@ -228,7 +231,10 @@ function ClassInner({ classId }: { classId: string }) {
                 <td className="px-4 py-3 text-right">
                   {canEdit ? (
                     <div className="flex justify-end gap-1.5">
-                      {s.plan_status !== "approved" ? (
+                      {/* Whole-year generate/approve can't act on a term-planned
+                          subject — the server refuses to rewrite a locked term. Send
+                          them to Week plan, which has the per-term controls. */}
+                      {s.plan_status !== "approved" && s.plan_status !== "partial" ? (
                         <>
                           <Button
                             size="sm"

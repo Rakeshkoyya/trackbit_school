@@ -1,17 +1,25 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
+
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { ClassSelect, SubjectSelect, SyllabusEditor, useClassSubjectPick } from "@/components/school/plan-shared";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { PageHeader } from "@/components/ui/page-header";
 import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
+import { schoolApi } from "@/lib/school-api";
 
 function SyllabusInner() {
   const { me } = useAuth();
   const canEdit = me?.org_role === "admin";
   const { yearId } = useYear();
   const { classes, classId, setClassId, subjects, csId, setCsId } = useClassSubjectPick(yearId);
+  // All the year's terms, not just those that already have chapters — a new chapter
+  // has to be assignable to an empty term.
+  const { data: terms = [] } = useQuery({
+    queryKey: ["terms", yearId], queryFn: () => schoolApi.terms(yearId!), enabled: !!yearId,
+  });
 
   return (
     <div>
@@ -29,7 +37,7 @@ function SyllabusInner() {
             <h2 className="text-sm font-semibold">Subject</h2>
             <SubjectSelect subjects={subjects} csId={csId} onChange={setCsId} />
           </div>
-          <SyllabusEditor csId={csId} canEdit={canEdit} />
+          <SyllabusEditor csId={csId} canEdit={canEdit} terms={terms} />
         </>
       ) : (
         <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">

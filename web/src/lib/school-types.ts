@@ -73,7 +73,8 @@ export interface CalendarSummary {
 export interface SyllabusTopic {
   id: string;
   title: string;
-  est_periods: number;
+  /** null = not sized yet, so not scheduled. Distinct from 1. */
+  est_periods: number | null;
   position: number;
 }
 
@@ -81,6 +82,8 @@ export interface SyllabusUnit {
   id: string;
   title: string;
   position: number;
+  /** null = not scoped to a term (whole-year chapter). */
+  term_id: string | null;
   topics: SyllabusTopic[];
 }
 
@@ -91,11 +94,24 @@ export interface PlanEntry {
   week_start: string;
 }
 
+/** One planning window. term_id === null is the untermed bucket. */
+export interface PlanTerm {
+  term_id: string | null;
+  name: string;
+  start_date: string;
+  end_date: string;
+  topic_count: number;
+  unestimated_topics: number;
+  approved: boolean;
+}
+
 export interface Plan {
   class_subject_id: string;
-  status: "draft" | "approved" | "none";
+  status: "draft" | "partial" | "approved" | "none";
   approved_at: string | null;
   total_est_periods: number;
+  unestimated_topics: number;
+  terms: PlanTerm[];
   entries: PlanEntry[];
 }
 
@@ -103,11 +119,13 @@ export interface Forecast {
   class_subject_id: string;
   subject_name: string;
   class_label: string;
-  status: "green" | "amber" | "red" | "none";
+  /** `unplanned` = chapters remain unsized, so no finish date can be computed. */
+  status: "green" | "amber" | "red" | "none" | "unplanned";
   total_topics: number;
   baseline_finish: string | null;
   projected_finish: string | null;
   weeks_behind: number;
+  unestimated_topics: number;
 }
 
 export interface MyDayClass {
@@ -403,7 +421,7 @@ export interface WizardState {
 }
 
 export interface PlanViolation {
-  code: "capacity" | "coverage" | "ordering" | "teacher_load";
+  code: "capacity" | "coverage" | "ordering" | "teacher_load" | "exam_coverage" | "unsized";
   message: string;
 }
 
@@ -720,11 +738,14 @@ export interface StaffCommitResult {
 
 export interface SyllabusTopicDraft {
   title: string;
-  est_periods: number;
+  /** null when the document didn't state a number — imported unsized, not as 1. */
+  est_periods: number | null;
 }
 
 export interface SyllabusUnitDraft {
   title: string;
+  /** Term name as written in the sheet; resolved to a term on commit. */
+  term?: string | null;
   topics: SyllabusTopicDraft[];
 }
 
@@ -739,6 +760,9 @@ export interface SyllabusCommitResult {
   units_created: number;
   topics_created: number;
   replaced: boolean;
+  unsized_topics: number;
+  /** Term names in the sheet that matched no term of this class's academic year. */
+  unresolved_terms: string[];
 }
 
 export interface TopicProgressRow {
@@ -770,7 +794,8 @@ export interface YearFacts {
   exams_without_portions: number;
 }
 
-export type Rag = "green" | "none" | "amber" | "red";
+/** `unplanned` is not a RAG colour: chapters are unsized, so no finish date exists. */
+export type Rag = "green" | "none" | "amber" | "red" | "unplanned";
 
 export interface ClassRow {
   class_id: string;
@@ -805,7 +830,7 @@ export interface SubjectRow {
   topics: number;
   est_periods: number;
   topics_taught: number;
-  plan_status: "none" | "draft" | "approved";
+  plan_status: "none" | "draft" | "partial" | "approved";
   plan_approved_at: string | null;
   forecast: Rag;
   weeks_behind: number | null;

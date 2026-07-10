@@ -11,7 +11,8 @@ class TopicOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     title: str
-    est_periods: int
+    # None = not sized yet, so not scheduled. Distinct from 1 (see SyllabusTopic).
+    est_periods: int | None = None
     position: int
 
 
@@ -20,18 +21,25 @@ class UnitOut(BaseModel):
     id: uuid.UUID
     title: str
     position: int
+    term_id: uuid.UUID | None = None
     topics: list[TopicOut] = Field(default_factory=list)
 
 
 class UnitCreate(BaseModel):
     class_subject_id: uuid.UUID
     title: str = Field(min_length=1, max_length=200)
+    term_id: uuid.UUID | None = None
 
 
 class TopicCreate(BaseModel):
     unit_id: uuid.UUID
     title: str = Field(min_length=1, max_length=200)
-    est_periods: int = Field(default=1, ge=1, le=40)
+    # Defaults to unsized: recording a chapter is not the same as estimating it.
+    est_periods: int | None = Field(default=None, ge=1, le=40)
+
+
+class TopicEstimateIn(BaseModel):
+    est_periods: int | None = Field(default=None, ge=1, le=40)
 
 
 class SplitIn(BaseModel):
@@ -55,11 +63,27 @@ class PlanEntryOut(BaseModel):
     week_start: date
 
 
+class PlanTermOut(BaseModel):
+    """One planning window. `term_id=None` is the untermed bucket — the whole year
+    for a school that doesn't use terms."""
+    term_id: uuid.UUID | None
+    name: str
+    start_date: date
+    end_date: date
+    topic_count: int
+    unestimated_topics: int
+    approved: bool
+
+
 class PlanOut(BaseModel):
     class_subject_id: uuid.UUID
-    status: str  # draft | approved | none
+    status: str  # none | draft | partial | approved
     approved_at: datetime | None = None
     total_est_periods: int
+    # Chapters recorded but not yet sized. > 0 means the plan is incomplete by
+    # design, not broken — the later terms haven't been planned yet.
+    unestimated_topics: int = 0
+    terms: list[PlanTermOut] = Field(default_factory=list)
     entries: list[PlanEntryOut]
 
 
@@ -67,16 +91,19 @@ class ForecastOut(BaseModel):
     class_subject_id: uuid.UUID
     subject_name: str
     class_label: str
-    status: str  # rag: green | amber | red | none
+    # rag: green | amber | red | none | unplanned
+    # `unplanned` = chapters remain unsized, so no finish date can be computed.
+    status: str
     total_topics: int
     baseline_finish: date | None = None
     projected_finish: date | None = None
     weeks_behind: int = 0
+    unestimated_topics: int = 0
 
 
 # ── generation pipeline (V2-M2, SPRD2 §5.2) ──────────────────────────────────
 class ViolationOut(BaseModel):
-    code: str  # capacity | coverage | ordering | teacher_load
+    code: str  # capacity | coverage | ordering | teacher_load | exam_coverage | unsized
     message: str
 
 

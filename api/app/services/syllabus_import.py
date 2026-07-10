@@ -10,8 +10,12 @@ which the admin edits before commit. Nothing persists until they confirm — the
 never writes to `syllabus_units` (SPRD2 §8).
 
 `est_periods` is the number the whole plan hangs off, so when a document doesn't
-state it we default to 1 and say so, rather than inventing a plausible-looking
-estimate the admin won't think to check.
+state it we leave it **NULL** — "not sized yet" — rather than inventing a
+plausible-looking estimate the admin won't think to check. A school that hands us
+the year's chapters but only sizes Term 1 is the normal case, not an error.
+
+A `Term` column, when present, files each chapter under a term so the term can be
+planned and locked on its own (V2-P11).
 """
 
 import uuid
@@ -22,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError, ValidationError
-from app.models import ClassSubject, SyllabusTopic, SyllabusUnit
+from app.models import ClassSubject, SchoolClass, SyllabusTopic, SyllabusUnit, Term
 from app.services.ai.client import is_visual
 from app.services.ai.extract import ocr_document, split_syllabus_text
 from app.services.ingest import FieldSpec, build_analysis
@@ -37,6 +41,7 @@ SPECS = [
     FieldSpec("est_periods", ["periods", "no of periods", "period", "days", "no of days",
                               "duration"],
               label="estimated periods"),
+    FieldSpec("term", ["term", "semester", "part"], label="term this chapter belongs to"),
 ]
 
 
@@ -90,11 +95,15 @@ def analyze_file(data: bytes, filename: str = "syllabus.xlsx") -> dict[str, Any]
 
 
 def rows_to_units(mapping: dict[str, str], rows: list[dict]) -> list[dict]:
-    """Flat (chapter, topic, periods) rows → nested units, preserving sheet order.
+    """Flat (term, chapter, topic, periods) rows → nested units, preserving sheet order.
     A blank chapter cell continues the previous chapter, which is how humans write
-    these sheets (merged cells export as blanks)."""
+    these sheets (merged cells export as blanks); a blank term does the same.
+
+    A blank period cell means **not sized yet** (`est_periods: None`), which is the
+    honest reading of a Term-2 chapter in April. It is not 1."""
     units: list[dict] = []
-    current: str | None = None
+    current: tuple[str | None, str] | None = None  # (term, chapter)
+    current_term: str | None = None
 
     def cell(row: dict, field: str) -> str | None:
         col = mapping.get(field)
@@ -102,18 +111,24 @@ def rows_to_units(mapping: dict[str, str], rows: list[dict]) -> list[dict]:
         return v.strip() if isinstance(v, str) and v.strip() else None
 
     for row in rows:
-        unit_title = cell(row, "unit_title") or current
+        term = cell(row, "term") or current_term
+        unit_title = cell(row, "unit_title") or (current[1] if current else None)
         topic_title = cell(row, "topic_title")
         if not unit_title or not topic_title:
             continue
-        if unit_title != current:
-            units.append({"title": unit_title, "topics": []})
-            current = unit_title
+        current_term = term
+        # Key on (term, chapter): the same chapter name may legitimately appear in
+        # two terms, and merging them would fuse two planning windows into one.
+        key = (term, unit_title)
+        if key != current:
+            units.append({"title": unit_title, "term": term, "topics": []})
+            current = key
         est_raw = cell(row, "est_periods")
+        est: int | None
         try:
-            est = max(1, int(float(est_raw))) if est_raw else 1
+            est = max(1, int(float(est_raw))) if est_raw else None
         except ValueError:
-            est = 1
+            est = None
         units[-1]["topics"].append({"title": topic_title, "est_periods": est})
     return [u for u in units if u["topics"]]
 
@@ -121,6 +136,16 @@ def rows_to_units(mapping: dict[str, str], rows: list[dict]) -> list[dict]:
 class SyllabusImporter:
     def __init__(self, db: Session):
         self.db = db
+
+    def _term_map(self, org_id: uuid.UUID, cs: ClassSubject) -> dict[str, uuid.UUID]:
+        """Terms of the class's academic year, keyed by lowercased name. A sheet that
+        says "Term 1" only matches a term the school actually created."""
+        klass = self.db.get(SchoolClass, cs.class_id)
+        if klass is None:
+            return {}
+        return {t.name.strip().lower(): t.id for t in self.db.scalars(
+            select(Term).where(Term.org_id == org_id,
+                               Term.academic_year_id == klass.academic_year_id))}
 
     def commit(self, m: CurrentMember, *, class_subject_id: uuid.UUID, units: list[dict],
                replace: bool = False) -> dict[str, Any]:
@@ -142,14 +167,23 @@ class SyllabusImporter:
         else:
             position = len(existing)
 
-        units_created = topics_created = 0
+        terms = self._term_map(m.org_id, cs)
+        units_created = topics_created = unsized = 0
+        # A term name we don't recognise leaves the chapter untermed rather than
+        # inventing a term — the admin sees which names failed and fixes them.
+        unresolved_terms: list[str] = []
         for u in units:
             title = (u.get("title") or "").strip()
             topics = u.get("topics") or []
             if not title or not topics:
                 continue
+            raw_term = (u.get("term") or "").strip()
+            term_id = terms.get(raw_term.lower()) if raw_term else None
+            if raw_term and term_id is None and raw_term not in unresolved_terms:
+                unresolved_terms.append(raw_term)
+
             unit = SyllabusUnit(org_id=m.org_id, class_subject_id=class_subject_id,
-                                title=title, position=position)
+                                title=title, term_id=term_id, position=position)
             self.db.add(unit)
             self.db.flush()
             position += 1
@@ -158,11 +192,15 @@ class SyllabusImporter:
                 t_title = (t.get("title") or "").strip()
                 if not t_title:
                     continue
-                est = t.get("est_periods") or 1
+                raw_est = t.get("est_periods")
+                est = max(1, int(raw_est)) if raw_est else None
+                if est is None:
+                    unsized += 1
                 self.db.add(SyllabusTopic(
                     org_id=m.org_id, unit_id=unit.id, title=t_title,
-                    est_periods=max(1, int(est)), position=i))
+                    est_periods=est, position=i))
                 topics_created += 1
         self.db.flush()
         return {"units_created": units_created, "topics_created": topics_created,
-                "replaced": replace}
+                "replaced": replace, "unsized_topics": unsized,
+                "unresolved_terms": unresolved_terms}

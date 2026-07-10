@@ -23,7 +23,12 @@ def _org_fk() -> Mapped[uuid.UUID]:
 
 
 class SyllabusUnit(Base, UUIDPKMixin, CreatedAtMixin):
-    """A chapter within a class-subject's syllabus."""
+    """A chapter within a class-subject's syllabus.
+
+    `term_id` is how a school says "this chapter belongs to Term 2". It is NULLABLE
+    on purpose: a school that plans the whole year in one go never sets it, and
+    every pre-term-planning row keeps working untouched. NULL means "not scoped to
+    a term", never "Term 1"."""
 
     __tablename__ = "syllabus_units"
 
@@ -31,6 +36,11 @@ class SyllabusUnit(Base, UUIDPKMixin, CreatedAtMixin):
     class_subject_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("class_subjects.id", ondelete="CASCADE"),
         nullable=False, index=True,
+    )
+    # Dropping a term must not delete the chapter — it un-scopes it (SET NULL).
+    term_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("terms.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     title: Mapped[str] = mapped_column(Text, nullable=False)
@@ -50,13 +60,28 @@ class SyllabusTopic(Base, UUIDPKMixin, CreatedAtMixin):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    est_periods: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # NULL = "nobody has sized this chapter yet", which is the normal state of a
+    # later term's syllabus in April. It is NOT the same as 1, and the difference
+    # is load-bearing: `distribute` refuses to place an unsized topic and the
+    # forecast refuses to go green while any remain. A NOT NULL DEFAULT 1 here
+    # made an unplanned year look finished.
+    est_periods: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     unit: Mapped["SyllabusUnit"] = relationship(back_populates="topics")
 
 
 class Plan(Base, UUIDPKMixin, CreatedAtMixin):
-    """One plan per class-subject. Approving it locks the baseline (P2)."""
+    """One plan per class-subject. Approving it locks the baseline (P2).
+
+    `status` / `approved_at` are a DERIVED CACHE of `plan_approvals`, recomputed on
+    every approve/unapprove. The append-only table is the record of who did what
+    (law 3); these columns exist so `overview.py` and `wizard.py` can ask "is this
+    plan locked?" without replaying events. Never write them outside
+    `PlannerService._recompute_plan_status`.
+
+    status: none | draft | partial | approved
+      partial = some terms approved, others still open for planning.
+    """
 
     __tablename__ = "plans"
 
@@ -75,8 +100,45 @@ class Plan(Base, UUIDPKMixin, CreatedAtMixin):
     )
 
 
+class PlanApproval(Base, UUIDPKMixin, CreatedAtMixin):
+    """Append-only log of baseline locks and unlocks, per (class-subject, term).
+
+    Law 3: undo is a compensating row, never an UPDATE or a DELETE. Un-approving
+    Term 1 appends `action='revoke'`; the current state of a term is the action on
+    its most recent row. That history is the answer to "who unlocked the plan the
+    week before the exam", which a mutable `revoked_at` column would erase.
+
+    `term_id IS NULL` is the whole-year approval — what a school that never uses
+    terms gets, and what `approve_plan(term_id=None)` writes.
+    """
+
+    __tablename__ = "plan_approvals"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    class_subject_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("class_subjects.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    term_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("terms.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)  # approve | revoke
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("action IN ('approve', 'revoke')", name="plan_approval_action_valid"),
+    )
+
+
 class PlanEntry(Base, UUIDPKMixin, CreatedAtMixin):
-    """A topic scheduled into a week (Monday date). The approved set is the baseline."""
+    """A topic scheduled into a week (Monday date). The approved set is the baseline.
+
+    An unsized topic (`est_periods IS NULL`) has NO row here — you cannot schedule
+    what nobody has estimated. Re-planning a term deletes and rebuilds only the
+    entries whose topic sits in that term, so an approved Term 1 is never touched
+    by a Term 2 re-draft (P2)."""
 
     __tablename__ = "plan_entries"
 

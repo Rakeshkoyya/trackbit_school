@@ -28,6 +28,7 @@ from app.schemas.planner import (
     SplitIn,
     SplitOut,
     TopicCreate,
+    TopicEstimateIn,
     TopicOut,
     UnitCreate,
     UnitOut,
@@ -48,13 +49,21 @@ def get_syllabus(class_subject_id: uuid.UUID, m: CurrentMember = Depends(require
 @router.post("/syllabus/units", response_model=UnitOut)
 def add_unit(body: UnitCreate, m: CurrentMember = Depends(require_coordinator_up),
              db: Session = Depends(get_db)):
-    return PlannerService(db).add_unit(m, body.class_subject_id, body.title)
+    return PlannerService(db).add_unit(m, body.class_subject_id, body.title, body.term_id)
 
 
 @router.post("/syllabus/topics", response_model=TopicOut)
 def add_topic(body: TopicCreate, m: CurrentMember = Depends(require_coordinator_up),
               db: Session = Depends(get_db)):
     return PlannerService(db).add_topic(m, body.unit_id, body.title, body.est_periods)
+
+
+@router.put("/syllabus/topics/{topic_id}/estimate", response_model=TopicOut)
+def set_topic_estimate(topic_id: uuid.UUID, body: TopicEstimateIn,
+                       m: CurrentMember = Depends(require_coordinator_up),
+                       db: Session = Depends(get_db)):
+    """Size a chapter when its term begins — the whole point of term-wise planning."""
+    return PlannerService(db).set_topic_estimate(m, topic_id, body.est_periods)
 
 
 @router.delete("/syllabus/units/{unit_id}", response_model=MessageResponse)
@@ -116,9 +125,11 @@ def plan_forecast(class_id: uuid.UUID, m: CurrentMember = Depends(require_academ
 
 
 @router.post("/plan/{cs_id}/draft", response_model=PlanOut)
-def draft_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+def draft_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
+               m: CurrentMember = Depends(require_coordinator_up),
                db: Session = Depends(get_db)):
-    return PlannerService(db).draft_plan(m, cs_id)
+    """`term_id` scopes the draft to one term; omit it to plan the whole year."""
+    return PlannerService(db).draft_plan(m, cs_id, term_id)
 
 
 @router.get("/plan/{cs_id}/progress", response_model=list[TopicProgressRow])
@@ -130,16 +141,29 @@ def topic_progress(cs_id: uuid.UUID, m: CurrentMember = Depends(require_academic
 
 
 @router.post("/plan/{cs_id}/generate", response_model=PlanGenerateOut)
-def generate_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+def generate_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
+                  m: CurrentMember = Depends(require_coordinator_up),
                   db: Session = Depends(get_db)):
-    """Proposer + deterministic validators (V2-M2 §5.2). Over-capacity is reported."""
-    return PlannerService(db).generate_plan(m, cs_id)
+    """Proposer + deterministic validators (V2-M2 §5.2). Over-capacity is reported.
+    `term_id` scopes generation to one term, leaving other terms' baselines alone."""
+    return PlannerService(db).generate_plan(m, cs_id, term_id)
 
 
 @router.post("/plan/{cs_id}/approve", response_model=PlanOut)
-def approve_plan(cs_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+def approve_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
+                 m: CurrentMember = Depends(require_admin),
                  db: Session = Depends(get_db)):
-    return PlannerService(db).approve_plan(m, cs_id)
+    """Lock a baseline (P2). `term_id` locks just that term; omit it to lock the year."""
+    return PlannerService(db).approve_plan(m, cs_id, term_id)
+
+
+@router.post("/plan/{cs_id}/unapprove", response_model=PlanOut)
+def unapprove_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
+                   m: CurrentMember = Depends(require_admin),
+                   db: Session = Depends(get_db)):
+    """Unlock a baseline so it can be re-planned. Appends a compensating row to
+    `plan_approvals` — the approval history is never rewritten (law 3)."""
+    return PlannerService(db).unapprove_plan(m, cs_id, term_id)
 
 
 # ── teacher change-requests (comment threads on the plan, §5.2) ───────────────

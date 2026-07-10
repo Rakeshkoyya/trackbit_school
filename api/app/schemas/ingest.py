@@ -91,3 +91,8 @@ class SyllabusCommitOut(BaseModel):
     units_created: int
     topics_created: int
     replaced: bool
+    # Chapters imported without a period estimate — they are recorded but not
+    # schedulable until someone sizes them.
+    unsized_topics: int = 0
+    # Term names in the sheet that matched no term of this class's academic year.
+    unresolved_terms: list[str] = Field(default_factory=list)

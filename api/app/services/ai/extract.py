@@ -148,7 +148,10 @@ def ocr_document(filename: str, data: bytes) -> str | None:
 def _split_syllabus_heuristic(text: str) -> list[dict]:
     """A line that looks like a heading — "Unit 2", "Chapter 4: Plants", ALL CAPS, or
     trailing ':' — opens a chapter; everything under it is a topic. A trailing "(3)"
-    or "- 3 periods" on a topic line is read as its period estimate."""
+    or "- 3 periods" on a topic line is read as its period estimate.
+
+    A topic line with no number is left UNSIZED (`est_periods=None`), not 1: the
+    document did not say, and guessing 1 is what made an unplanned year look green."""
     units: list[dict] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -166,7 +169,7 @@ def _split_syllabus_heuristic(text: str) -> list[dict]:
         if not units:
             units.append({"title": "Chapter 1", "topics": []})
 
-        est = 1
+        est = None
         m = re.search(r"[(\-–]\s*(\d+)\s*(?:periods?|prds?|p)?\s*\)?\s*$", line, re.I)
         if m:
             est = max(1, int(m.group(1)))
@@ -194,10 +197,16 @@ def _clean_units(raw: Any) -> list[dict]:
             t_title = str(t.get("title") or "").strip()
             if not t_title:
                 continue
-            try:
-                est = max(1, int(t.get("est_periods") or 1))
-            except (TypeError, ValueError):
-                est = 1
+            # No estimate stays None ("not sized yet"). Coercing it to 1 would let an
+            # unplanned chapter masquerade as a one-period chapter in the forecast.
+            raw_est = t.get("est_periods")
+            if raw_est is None or raw_est == "":
+                est = None
+            else:
+                try:
+                    est = max(1, int(raw_est))
+                except (TypeError, ValueError):
+                    est = None
             topics.append({"title": t_title, "est_periods": est})
         if topics:
             units.append({"title": title, "topics": topics})

@@ -32,12 +32,14 @@ const RAG_TONE: Record<Rag, "success" | "neutral" | "warning" | "danger"> = {
   none: "neutral",
   amber: "warning",
   red: "danger",
+  unplanned: "warning",
 };
 const RAG_LABEL: Record<Rag, string> = {
   green: "on track",
   none: "no plan",
   amber: "slipping",
   red: "behind",
+  unplanned: "not sized",
 };
 
 function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {

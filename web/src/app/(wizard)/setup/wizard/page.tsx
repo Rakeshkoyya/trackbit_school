@@ -687,7 +687,7 @@ function SyllabusStep() {
     onError: (e) => showApiError(e, "Could not save the syllabus"),
   });
 
-  const setEst = (ui: number, ti: number, v: number) =>
+  const setEst = (ui: number, ti: number, v: number | null) =>
     setDraft((d) => {
       if (!d) return d;
       const units: SyllabusUnitDraft[] = d.units.map((u, i) =>
@@ -696,7 +696,10 @@ function SyllabusStep() {
       return { ...d, units };
     });
 
-  const totalPeriods = draft?.units.reduce((a, u) => a + u.topics.reduce((b, t) => b + t.est_periods, 0), 0) ?? 0;
+  // Unsized topics contribute nothing to the total and are counted separately —
+  // "80 periods" over a syllabus with 12 unsized chapters is not a real number.
+  const totalPeriods = draft?.units.reduce((a, u) => a + u.topics.reduce((b, t) => b + (t.est_periods ?? 0), 0), 0) ?? 0;
+  const unsizedCount = draft?.units.reduce((a, u) => a + u.topics.filter((t) => t.est_periods === null).length, 0) ?? 0;
 
   return (
     <StepFrame
@@ -704,7 +707,7 @@ function SyllabusStep() {
       title="What's the syllabus?"
       blurb="Per class-subject. Import a sheet, paste the chapter list, or type it — whichever is quickest."
       aside={
-        <Aside title={draft ? `Draft · ${totalPeriods} periods` : "Nothing loaded"}>
+        <Aside title={draft ? `Draft · ${totalPeriods} periods${unsizedCount ? ` · ${unsizedCount} unsized` : ""}` : "Nothing loaded"}>
           {draft ? (
             <div className="max-h-[70vh] space-y-2 overflow-auto pr-1">
               {draft.units.map((u, ui) => (
@@ -723,10 +726,13 @@ function SyllabusStep() {
                         <input
                           type="number"
                           min={1}
+                          placeholder="—"
                           aria-label={`Periods for ${t.title}`}
-                          value={t.est_periods}
-                          onChange={(e) => setEst(ui, ti, Math.max(1, Number(e.target.value)))}
-                          className="h-7 w-14 rounded-md border border-input bg-background px-1.5 text-center text-xs tabular-nums"
+                          // "" keeps the input controlled while the topic is unsized;
+                          // clearing it sets est_periods back to null rather than 1.
+                          value={t.est_periods ?? ""}
+                          onChange={(e) => setEst(ui, ti, e.target.value === "" ? null : Math.max(1, Number(e.target.value)))}
+                          className={`h-7 w-14 rounded-md border bg-background px-1.5 text-center text-xs tabular-nums ${t.est_periods === null ? "border-warning" : "border-input"}`}
                         />
                       </li>
                     ))}
@@ -1080,7 +1086,7 @@ function TimetableStep() {
 }
 
 // ── 10. generate ──────────────────────────────────────────────────────────────
-type GenRow = { label: string; fits: boolean; violations: { code: string; message: string }[] };
+type GenRow = { csId: string; label: string; fits: boolean; violations: { code: string; message: string }[] };
 
 function GenerateStep({ onDone }: { onDone: () => void }) {
   const invalidate = useInvalidate();
@@ -1101,9 +1107,9 @@ function GenerateStep({ onDone }: { onDone: () => void }) {
           const label = `${c.name}${c.section ? `-${c.section}` : ""} ${cs.subject_name}`;
           try {
             const g = await schoolApi.generatePlan(cs.id);
-            out.push({ label, fits: g.fits, violations: g.violations });
+            out.push({ csId: cs.id, label, fits: g.fits, violations: g.violations });
           } catch {
-            out.push({ label, fits: false, violations: [{ code: "error", message: "Could not generate — check the syllabus." }] });
+            out.push({ csId: cs.id, label, fits: false, violations: [{ code: "error", message: "Could not generate — check the syllabus." }] });
           }
         }
       }
@@ -1116,17 +1122,22 @@ function GenerateStep({ onDone }: { onDone: () => void }) {
     onError: (e) => showApiError(e, "Generation failed"),
   });
 
+  // Lock only what actually fits. A class-subject whose syllabus still has unsized
+  // chapters cannot be approved (the server refuses), and a school that plans term
+  // by term will always have some — so the wizard finishes with the rest locked
+  // rather than failing outright on the first one.
   const approve = useMutation({
     mutationFn: async () => {
-      for (const c of classes ?? []) {
-        const css = await schoolApi.classSubjects(c.id);
-        for (const cs of css) await schoolApi.approvePlan(cs.id);
-      }
+      const lockable = rows.filter((r) => r.fits);
+      for (const r of lockable) await schoolApi.approvePlan(r.csId);
+      return { locked: lockable.length, skipped: rows.length - lockable.length };
     },
-    onSuccess: async () => {
+    onSuccess: async ({ locked, skipped }) => {
       await schoolApi.wizardComplete();
       invalidate("plan");
-      toast.success("Plans approved and locked");
+      toast.success(skipped
+        ? `${locked} plan(s) locked · ${skipped} left open — size their chapters, then approve from Plan → Week plan`
+        : "Plans approved and locked");
       onDone();
     },
     onError: (e) => showApiError(e, "Could not approve the plans"),
@@ -1134,6 +1145,7 @@ function GenerateStep({ onDone }: { onDone: () => void }) {
 
   const clean = rows.length > 0 && rows.every((r) => r.fits && !r.violations.length);
   const problems = rows.filter((r) => r.violations.length);
+  const lockableCount = rows.filter((r) => r.fits).length;
 
   return (
     <StepFrame
@@ -1194,11 +1206,17 @@ function GenerateStep({ onDone }: { onDone: () => void }) {
           ) : null}
           <Button variant={clean ? "primary" : "outline"} onClick={() => approve.mutate()} disabled={approve.isPending}>
             {approve.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Approve &amp; lock {problems.length ? "anyway" : "the year"}
+            {lockableCount === 0
+              ? "Finish without locking"
+              : `Approve & lock ${lockableCount} plan${lockableCount === 1 ? "" : "s"}`}
           </Button>
           <p className="text-xs text-muted-foreground">
             Locking makes the plan the baseline. Actual progress is measured against it from your
             teachers&apos; daily logs — the plan itself never silently changes.
+            {rows.length - lockableCount > 0 ? (
+              <> Subjects with chapters that have no period estimate stay open — plan them from
+              Plan → Week plan when their term begins.</>
+            ) : null}
           </p>
         </div>
       ) : null}
