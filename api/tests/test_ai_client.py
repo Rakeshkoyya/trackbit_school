@@ -6,6 +6,8 @@ improve on the deterministic heuristic, and can never break it. Every failure mo
 column — must land on the heuristic result with no exception escaping.
 """
 
+import json
+
 import httpx
 import pytest
 
@@ -222,3 +224,140 @@ def test_syllabus_split_falls_back_when_ai_returns_nothing_usable(ai_on, monkeyp
 def test_syllabus_split_offline_uses_the_heuristic(ai_off):
     units = split_syllabus_text("Chapter 2: Materials\nSorting - 4 periods")
     assert units == [{"title": "Materials", "topics": [{"title": "Sorting", "est_periods": 4}]}]
+
+
+# ── vision: images and PDFs go to the multimodal model ───────────────────────
+def test_is_visual_classifies_formats():
+    from app.services.ai.client import is_visual
+    assert is_visual("timetable.png") and is_visual("syllabus.pdf") and is_visual("s.JPEG")
+    assert not is_visual("roster.xlsx") and not is_visual("notes.txt")
+
+
+def test_image_attachment_is_sent_as_a_data_uri(ai_on, monkeypatch):
+    from app.services.ai.client import _user_content
+    parts = _user_content("read this", ("t.png", b"\x89PNG..."))
+    assert parts[0] == {"type": "text", "text": "read this"}
+    assert parts[1]["type"] == "image_url"
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_pdf_attachment_is_sent_as_a_file_part(ai_on):
+    from app.services.ai.client import _user_content
+    parts = _user_content("read this", ("syl.pdf", b"%PDF-1.4"))
+    assert parts[1]["type"] == "file"
+    assert parts[1]["file"]["filename"] == "syl.pdf"
+    assert parts[1]["file"]["file_data"].startswith("data:application/pdf;base64,")
+
+
+def test_no_attachment_sends_a_plain_string(ai_on):
+    """Text-only models (deepseek) reject the content-parts list form."""
+    from app.services.ai.client import _user_content
+    assert _user_content("hello", None) == "hello"
+
+
+def test_unsupported_attachment_returns_none_not_an_exception(ai_on, monkeypatch):
+    def _explode(*_a, **_kw):
+        raise AssertionError("must not call the API for a format no model can read")
+    monkeypatch.setattr(ai_client.httpx, "post", _explode)
+    assert chat_json("s", "u", attachment=("roster.xlsx", b"PK\x03\x04")) is None
+
+
+def test_vision_calls_get_the_longer_timeout(ai_on, monkeypatch):
+    seen = {}
+
+    def _post(url, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(settings, "AI_TIMEOUT_SECONDS", 20.0, raising=False)
+    monkeypatch.setattr(settings, "AI_VISION_TIMEOUT_SECONDS", 90.0, raising=False)
+    monkeypatch.setattr(ai_client.httpx, "post", _post)
+
+    chat_json("s", "u")
+    assert seen["timeout"] == 20.0
+    chat_json("s", "u", attachment=("x.png", b"\x89PNG"))
+    assert seen["timeout"] == 90.0, "OCR would time out on the text budget"
+
+
+# Built with json.dumps, never a hand-written literal: a raw newline inside a JSON
+# string is invalid JSON, and the client would (correctly) discard the whole reply.
+OCR_TEXT = "Chapter 1: Food\nSources of food (3)"
+OCR_REPLY = json.dumps({"text": OCR_TEXT})
+SPLIT_REPLY = json.dumps(
+    {"units": [{"title": "Food", "topics": [{"title": "Sources of food", "est_periods": 3}]}]})
+
+
+def test_ocr_document_returns_transcribed_text(ai_on, monkeypatch):
+    from app.services.ai.extract import ocr_document
+    monkeypatch.setattr(ai_client.httpx, "post", _reply(OCR_REPLY))
+    assert ocr_document("syl.pdf", b"%PDF") == OCR_TEXT
+
+
+def test_ocr_document_is_none_for_a_spreadsheet(ai_on):
+    from app.services.ai.extract import ocr_document
+    assert ocr_document("syl.xlsx", b"PK") is None
+
+
+def test_ocr_document_is_none_when_ai_is_off(ai_off):
+    from app.services.ai.extract import ocr_document
+    assert ocr_document("syl.pdf", b"%PDF") is None
+
+
+def test_unreadable_scan_raises_rather_than_faking_an_empty_syllabus(ai_on, monkeypatch):
+    """An empty draft would read as "your syllabus has no chapters" — a different,
+    and much more confusing, problem than "we couldn't read your file"."""
+    from app.core.exceptions import ValidationError
+    from app.services.syllabus_import import analyze_file
+    monkeypatch.setattr(ai_client.httpx, "post", _reply("{}"))
+    with pytest.raises(ValidationError):
+        analyze_file(b"%PDF-1.4", "scan.pdf")
+
+
+def test_pdf_import_flows_ocr_into_the_text_splitter(ai_on, monkeypatch):
+    from app.services.syllabus_import import analyze_file
+    calls = []
+
+    def _post(url, **kwargs):
+        calls.append(kwargs["json"]["model"])
+        content = OCR_REPLY if len(calls) == 1 else SPLIT_REPLY
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(settings, "AI_MODEL_PARSE", "google/gemini-2.5-flash-lite", raising=False)
+    monkeypatch.setattr(settings, "AI_MODEL_DRAFT", "deepseek/deepseek-v4-flash", raising=False)
+    monkeypatch.setattr(ai_client.httpx, "post", _post)
+
+    out = analyze_file(b"%PDF-1.4", "scan.pdf")
+    assert out["source"] == "ai-ocr" and out["mode"] == "text"
+    assert out["units"][0]["title"] == "Food"
+    assert out["units"][0]["topics"][0]["est_periods"] == 3
+    # OCR must use the multimodal model; structuring uses the reasoning model.
+    assert calls == ["google/gemini-2.5-flash-lite", "deepseek/deepseek-v4-flash"]
+
+
+def test_null_content_does_not_crash(ai_on, monkeypatch):
+    """Seen live from deepseek-v4-flash: HTTP 200, `content: null`. Before the
+    guard this raised AttributeError inside _extract_json and took the whole
+    import request down with a 500."""
+    def _post(url, **kwargs):
+        return httpx.Response(200, request=httpx.Request("POST", url), json={
+            "choices": [{"finish_reason": "stop", "message": {"content": None}}]})
+    monkeypatch.setattr(ai_client.httpx, "post", _post)
+    assert chat_json("s", "u") is None
+
+
+def test_reasoning_field_is_used_when_content_is_empty(ai_on, monkeypatch):
+    """Reasoning models can spend the budget thinking and leave `content` empty
+    while the JSON sits in `reasoning`. Take it rather than lose the call."""
+    def _post(url, **kwargs):
+        return httpx.Response(200, request=httpx.Request("POST", url), json={
+            "choices": [{"message": {"content": "", "reasoning": '{"ok": true}'}}]})
+    monkeypatch.setattr(ai_client.httpx, "post", _post)
+    assert chat_json("s", "u") == {"ok": True}
+
+
+def test_extract_json_tolerates_non_string_content():
+    assert _extract_json(None) is None
+    assert _extract_json([{"type": "text"}]) is None
+    assert _extract_json(42) is None

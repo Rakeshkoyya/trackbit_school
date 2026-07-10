@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models import ClassSubject, SyllabusTopic, SyllabusUnit
-from app.services.ai.extract import split_syllabus_text
+from app.services.ai.client import is_visual
+from app.services.ai.extract import ocr_document, split_syllabus_text
 from app.services.ingest import FieldSpec, build_analysis
 from app.services.roster_import import read_first_sheet
 
@@ -52,10 +53,26 @@ def analyze_text(text: str) -> dict[str, Any]:
     }
 
 
-def analyze_file(data: bytes) -> dict[str, Any]:
-    """Grid path. If the sheet has no recognisable topic column, fall back to
-    reading the first column as free text — a lot of "syllabus.xlsx" files are
-    really just a typed-out list."""
+def analyze_file(data: bytes, filename: str = "syllabus.xlsx") -> dict[str, Any]:
+    """Three shapes, one draft.
+
+    A PDF or a photo goes to the multimodal model for transcription, then down the
+    text path. A spreadsheet is parsed locally. If the sheet has no recognisable
+    topic column, fall back to reading the first column as free text — a lot of
+    "syllabus.xlsx" files are really just a typed-out list."""
+    if is_visual(filename):
+        text = ocr_document(filename, data)
+        if not text:
+            # Be honest: we could not read it. Returning an empty draft would look
+            # like "your syllabus has no chapters", which is a different problem.
+            raise ValidationError(
+                "Couldn't read that file. Scans and photos need the AI key configured — "
+                "otherwise export it as .xlsx, or paste the chapter list as text.")
+        out = analyze_text(text)
+        out["mode"] = "text"
+        out["source"] = "ai-ocr"
+        return out
+
     columns, rows = read_first_sheet(data)
     analysis = build_analysis("syllabus", columns, rows, SPECS)
     if "topic_title" not in analysis.mapping and columns:

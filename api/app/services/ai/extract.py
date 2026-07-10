@@ -21,7 +21,7 @@ import re
 from typing import Any
 
 from app.core.config import settings
-from app.services.ai.client import chat_json
+from app.services.ai.client import chat_json, is_visual
 
 # Deterministic phrasings used when no key is configured.
 _TEMPLATES: dict[str, str] = {
@@ -49,6 +49,13 @@ _SPLIT_SYSTEM = (
     "Preserve the document's order. est_periods is the number of class periods a topic "
     "needs; use the document's own number when it states one, otherwise 1. Never invent "
     "chapters or topics that are not in the text."
+)
+
+_OCR_SYSTEM = (
+    "You read a scanned or photographed school syllabus. Transcribe it faithfully as plain "
+    "text, preserving the chapter/topic hierarchy and any period or day counts exactly as "
+    "printed. Reply with ONLY {\"text\": \"...\"}. Do not summarise, reorder, translate, or "
+    "add anything that is not in the document. If a line is illegible, write [illegible]."
 )
 
 
@@ -118,6 +125,26 @@ def phrase_gap_question(kind: str, field: str, label: str, unmapped_columns: lis
     }
 
 
+def ocr_document(filename: str, data: bytes) -> str | None:
+    """Scanned syllabus / photo of a printed one → plain text.
+
+    Uses AI_MODEL_PARSE, which must be multimodal (gemini-2.5-flash-lite accepts
+    image and PDF; deepseek does not). Returns None when AI is off, the format
+    isn't one a model can read, or the call fails — the caller then has nothing to
+    parse, and must say so rather than pretend it read an empty document."""
+    if not settings.ai_configured or not is_visual(filename):
+        return None
+    result = chat_json(
+        _OCR_SYSTEM,
+        "Transcribe this syllabus document.",
+        model=settings.AI_MODEL_PARSE,
+        max_tokens=8000,
+        attachment=(filename, data),
+    )
+    text = (result or {}).get("text")
+    return text.strip() if isinstance(text, str) and text.strip() else None
+
+
 def _split_syllabus_heuristic(text: str) -> list[dict]:
     """A line that looks like a heading — "Unit 2", "Chapter 4: Plants", ALL CAPS, or
     trailing ':' — opens a chapter; everything under it is a topic. A trailing "(3)"
@@ -184,6 +211,7 @@ def split_syllabus_text(text: str) -> list[dict]:
     numbered in Roman numerals, topics on the same line, no punctuation. It is only
     trusted when it returns something well-formed; otherwise the heuristic wins."""
     if settings.ai_configured and text.strip():
+        # Reasoning job -> DRAFT. Structure, not transcription.
         result = chat_json(_SPLIT_SYSTEM, text[:20000], model=settings.AI_MODEL_DRAFT,
                            max_tokens=4000)
         units = _clean_units((result or {}).get("units"))

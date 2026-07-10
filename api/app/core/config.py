@@ -124,13 +124,22 @@ class Settings(BaseSettings):
     # openrouter.ai leaderboards and in your usage dashboard).
     OPENROUTER_SITE_URL: str = ""
     OPENROUTER_APP_NAME: str = "TrackBit School"
-    # `draft` = generative work (question phrasing, syllabus splitting).
-    # `parse` = structured extraction (column mapping). Same endpoint either way.
-    AI_MODEL_DRAFT: str = "anthropic/claude-opus-4.8"
-    AI_MODEL_PARSE: str = "anthropic/claude-sonnet-5"
+    # Two models, split by job — not by price.
+    #   DRAFT  reasoning and generation: syllabus splitting, question phrasing,
+    #          plan drafting. Text in, text out.
+    #   PARSE  extraction, INCLUDING from images and PDFs: column mapping, timetable
+    #          photos, scanned syllabi. This one MUST be multimodal — a text-only
+    #          model here silently degrades every OCR path to the heuristic.
+    # `deepseek/deepseek-v4-flash` is text-only; `google/gemini-2.5-flash-lite`
+    # accepts image + file. Swapping them would break document ingestion.
+    AI_MODEL_DRAFT: str = "deepseek/deepseek-v4-flash"
+    AI_MODEL_PARSE: str = "google/gemini-2.5-flash-lite"
     # Ingestion runs while an admin waits on a spinner. Fail fast and fall back to
     # the heuristic rather than hanging the setup wizard on a slow model.
     AI_TIMEOUT_SECONDS: float = 20.0
+    # OCR on a scanned syllabus or a timetable photo takes far longer than a text
+    # completion; 20s would time out on every one of them and silently fall back.
+    AI_VISION_TIMEOUT_SECONDS: float = 90.0
     AI_MAX_RETRIES: int = 1
 
     @property

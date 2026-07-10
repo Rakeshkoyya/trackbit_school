@@ -11,14 +11,21 @@ runs. AI can improve on the deterministic result; it can never break it.
 """
 
 from app.services.ai.checks import draft_checks
-from app.services.ai.client import chat_json
-from app.services.ai.extract import phrase_gap_question, split_syllabus_text, suggest_mapping
+from app.services.ai.client import chat_json, is_visual
+from app.services.ai.extract import (
+    ocr_document,
+    phrase_gap_question,
+    split_syllabus_text,
+    suggest_mapping,
+)
 from app.services.ai.report import report_write
 from app.services.ai.timetable import parse_timetable
 
 __all__ = [
     "chat_json",
     "draft_checks",
+    "is_visual",
+    "ocr_document",
     "parse_timetable",
     "phrase_gap_question",
     "report_write",

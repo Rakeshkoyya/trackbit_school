@@ -22,10 +22,13 @@ export function Dropzone({
   onFile,
   busy,
   hint,
+  accept = ".xlsx,.xls,.csv",
 }: {
   onFile: (f: File) => void;
   busy?: boolean;
   hint: string;
+  /** Widen for surfaces that can OCR — e.g. the syllabus takes PDFs and photos. */
+  accept?: string;
 }) {
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -51,7 +54,7 @@ export function Dropzone({
       <input
         ref={input}
         type="file"
-        accept=".xlsx,.xls,.csv"
+        accept={accept}
         className="sr-only"
         onChange={(e) => {
           const f = e.target.files?.[0];

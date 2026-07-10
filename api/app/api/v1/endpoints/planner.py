@@ -81,8 +81,9 @@ def split_syllabus(body: SplitIn, _: CurrentMember = Depends(require_coordinator
 @router.post("/syllabus/import/analyze", response_model=SyllabusAnalyzeOut)
 async def syllabus_import_analyze(file: UploadFile = File(...),
                                   _: CurrentMember = Depends(require_coordinator_up)):
-    """xlsx/csv grid, or a typed-out list — both come back as an editable draft."""
-    return analyze_file(await file.read())
+    """xlsx/csv grid, a typed-out list, or a PDF/photo of a printed syllabus (read by
+    the multimodal model). All three come back as the same editable draft."""
+    return analyze_file(await file.read(), file.filename or "syllabus.xlsx")
 
 
 @router.post("/syllabus/import/text", response_model=SyllabusAnalyzeOut)

@@ -784,7 +784,12 @@ function SyllabusStep() {
 
       {!draft ? (
         <>
-          <Dropzone busy={analyzeFile.isPending} onFile={(f) => analyzeFile.mutate(f)} hint="Chapter · Topic · Periods" />
+          <Dropzone
+            busy={analyzeFile.isPending}
+            onFile={(f) => analyzeFile.mutate(f)}
+            accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp"
+            hint="Chapter · Topic · Periods — or a PDF / photo of a printed syllabus"
+          />
           <div className="space-y-2">
             <Label htmlFor="paste">Or paste it</Label>
             <textarea
