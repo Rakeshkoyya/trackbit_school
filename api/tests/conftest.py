@@ -13,7 +13,11 @@ from app.main import app
 from app.models import Organization, User
 
 # Privileged session for setup/teardown (bypasses RLS) — never used by app code.
-_admin_engine = create_engine(settings.migration_database_url, pool_pre_ping=True)
+# One connection at a time is plenty: this engine only runs the cleanup deletes, and
+# the server it talks to allows 20 connections in total, which the app's own pool and
+# a running dev server are already drawing on.
+_admin_engine = create_engine(
+    settings.migration_database_url, pool_pre_ping=True, pool_size=1, max_overflow=1)
 AdminSession = sessionmaker(bind=_admin_engine, expire_on_commit=False)
 
 

@@ -263,6 +263,11 @@ export const schoolApi = {
     teacher_member_id?: string | null;
     periods_per_week?: number;
   }) => api.post<ClassSubject>("/academics/class-subjects", b),
+  /** Reassign the teacher, or change the weekly period count, in place. Passing
+   *  `teacher_member_id: null` un-assigns. Use this rather than delete + re-add:
+   *  deleting a class-subject cascades away its syllabus, plan and timetable slots. */
+  updateClassSubject: (id: string, b: { teacher_member_id?: string | null; periods_per_week?: number }) =>
+    api.patch<ClassSubject>(`/academics/class-subjects/${id}`, b),
   deleteClassSubject: (id: string) => api.del<{ message: string }>(`/academics/class-subjects/${id}`),
 
   // ── students ──────────────────────────────────────────────────────────────

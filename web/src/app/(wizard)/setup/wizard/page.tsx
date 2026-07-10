@@ -34,6 +34,8 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { BulkAddPanel } from "@/components/members/bulk-add-panel";
+import { ClassSubjectsPanel } from "@/components/school/class-subjects-panel";
 import { ExamPortions } from "@/components/wizard/exam-portions";
 import { Dropzone, GapQuestions, MappingPreview } from "@/components/wizard/import-panel";
 import { Aside, Stat, StepFrame, StepRail } from "@/components/wizard/shell";
@@ -522,12 +524,78 @@ const STAFF_LABELS = {
   assignments: "Classes & subjects",
 };
 
+/**
+ * Who teaches what, per class. The staff importer resolves assignment hints like
+ * "6-A Mathematics" and hands back whatever it could not place, telling the admin to
+ * "add those by hand" — this is the by-hand surface that sentence promised. Without
+ * it the wizard created teacher accounts that taught nothing, and the later steps
+ * (timetable, syllabus, plan generation) all hang off class-subjects that never existed.
+ */
+function StaffAssignments() {
+  const year = useActiveYear();
+  const { data: classes } = useQuery({
+    queryKey: ["classes", year?.id],
+    queryFn: () => schoolApi.classes(year!.id),
+    enabled: !!year,
+  });
+  const [picked, setPicked] = useState("");
+  const classId = picked || classes?.[0]?.id || "";
+
+  if (!classes?.length) {
+    return (
+      <p className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+        Add classes first — assignments attach a teacher to a class and subject.
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold">Who teaches what</h3>
+        <select
+          aria-label="Class"
+          className="rounded-md border border-border bg-card px-2 py-1 text-sm"
+          value={classId}
+          onChange={(e) => setPicked(e.target.value)}
+        >
+          {classes.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.section ? `-${c.section}` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+      <ClassSubjectsPanel classId={classId} canEdit />
+    </div>
+  );
+}
+
 function StaffStep() {
   const invalidate = useInvalidate();
+  const qc = useQueryClient();
   const year = useActiveYear();
   const [analysis, setAnalysis] = useState<AnalyzeResult | null>(null);
+  const [byHand, setByHand] = useState(false);
   const { data: members } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
   const teachers = (members?.members ?? []).filter((m) => m.role === "teacher");
+
+  // A teacher added by mistake — a typo'd username, a duplicated import row — used to
+  // be permanent until you left the wizard and went to Setup → Members.
+  const removeTeacher = useMutation({
+    mutationFn: (userId: string) => appApi.removeMember(userId),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["members"] });
+      qc.invalidateQueries({ queryKey: ["class-subjects"] });
+      toast.success(
+        res.orphaned_tasks > 0
+          ? `Removed · ${res.orphaned_tasks} task(s) now unassigned`
+          : "Teacher removed",
+      );
+    },
+    onError: (e) => showApiError(e, "Could not remove"),
+  });
 
   const analyze = useMutation({
     mutationFn: (f: File) => schoolApi.staffImportAnalyze(f),
@@ -548,7 +616,8 @@ function StaffStep() {
       toast.success(`${r.created_count} teachers added · ${r.assigned} assignments made`);
       if (r.unresolved.length) {
         toast.warning(
-          `Couldn't place ${r.unresolved.length} assignment hint(s) — add those by hand.`,
+          `Couldn't place ${r.unresolved.length} assignment hint(s) — set them in ` +
+            `"Who teaches what" below.`,
         );
       }
     },
@@ -569,10 +638,23 @@ function StaffStep() {
                 layout
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm"
               >
-                <span className="font-medium">{t.name}</span>
-                <span className="text-xs text-muted-foreground">{t.username ?? t.email}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
+                <span className="truncate text-xs text-muted-foreground">{t.username ?? t.email}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${t.name}`}
+                  disabled={removeTeacher.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Remove ${t.name} from this school?`)) {
+                      removeTeacher.mutate(t.user_id);
+                    }
+                  }}
+                  className="shrink-0 text-muted-foreground hover:text-danger"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </motion.div>
             ))}
             {!teachers.length ? (
@@ -603,9 +685,18 @@ function StaffStep() {
             onFile={(f) => analyze.mutate(f)}
             hint="xlsx or csv · Name, Email, Assignments"
           />
-          <p className="text-xs text-muted-foreground">
-            No sheet? Add staff by hand later from Setup → Members. This step can be skipped.
-          </p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setByHand((v) => !v)}>
+              <Plus className="h-4 w-4" /> {byHand ? "Hide" : "No sheet? Add teachers by hand"}
+            </Button>
+            <span className="text-xs text-muted-foreground">This step can be skipped.</span>
+          </div>
+          {byHand ? (
+            <div className="rounded-xl border border-border bg-card p-3">
+              <BulkAddPanel />
+            </div>
+          ) : null}
+          <StaffAssignments />
         </>
       ) : (
         <div className="space-y-3">

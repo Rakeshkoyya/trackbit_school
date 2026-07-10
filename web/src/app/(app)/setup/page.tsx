@@ -6,13 +6,13 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ClassSubjectsPanel } from "@/components/school/class-subjects-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
-import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
 
@@ -91,51 +91,6 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
         </form>
       ) : null}
     </Card>
-  );
-}
-
-function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canEdit: boolean }) {
-  const qc = useQueryClient();
-  const [subjectId, setSubjectId] = useState("");
-  const [teacherId, setTeacherId] = useState("");
-  const [periods, setPeriods] = useState("5");
-  const { data: rows = [] } = useQuery({ queryKey: ["class-subjects", classId], queryFn: () => schoolApi.classSubjects(classId) });
-  const { data: subjects = [] } = useQuery({ queryKey: ["subjects"], queryFn: schoolApi.subjects });
-  const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
-  const teachers = (membersData?.members ?? []).filter((m) => m.member_id);
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["class-subjects", classId] });
-  const add = useMutation({
-    mutationFn: () => schoolApi.addClassSubject({ class_id: classId, subject_id: subjectId, teacher_member_id: teacherId || null, periods_per_week: Number(periods) }),
-    onSuccess: () => { invalidate(); setSubjectId(""); setTeacherId(""); toast.success("Subject added"); },
-    onError: (e) => showApiError(e, "Could not add"),
-  });
-  const del = useMutation({ mutationFn: (id: string) => schoolApi.deleteClassSubject(id), onSuccess: invalidate });
-  const teacherName = (mid: string | null) => teachers.find((t) => t.member_id === mid)?.name;
-
-  return (
-    <div className="mt-2 rounded-md bg-muted/30 p-2">
-      {rows.length === 0 ? <p className="px-1 py-1 text-xs text-muted-foreground">No subjects yet.</p> : null}
-      {rows.map((cs) => (
-        <div key={cs.id} className="flex items-center gap-2 px-1 py-1 text-sm">
-          <span className="flex-1">{cs.subject_name} <span className="text-xs text-muted-foreground">· {cs.periods_per_week}p/wk{cs.teacher_member_id ? ` · ${teacherName(cs.teacher_member_id) ?? "teacher"}` : ""}</span></span>
-          {canEdit ? <button onClick={() => del.mutate(cs.id)} className="text-muted-foreground hover:text-danger"><Trash2 className="h-3.5 w-3.5" /></button> : null}
-        </div>
-      ))}
-      {canEdit ? (
-        <form className="mt-1 flex flex-wrap items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); if (subjectId) add.mutate(); }}>
-          <select className="rounded border border-border bg-card px-1.5 py-1 text-sm" value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>
-            <option value="">Subject…</option>
-            {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <select className="rounded border border-border bg-card px-1.5 py-1 text-sm" value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>
-            <option value="">Teacher…</option>
-            {teachers.map((t) => <option key={t.member_id} value={t.member_id!}>{t.name}</option>)}
-          </select>
-          <Input className="h-8 w-14" type="number" value={periods} onChange={(e) => setPeriods(e.target.value)} />
-          <Button size="sm" type="submit" disabled={add.isPending || !subjectId}>Add</Button>
-        </form>
-      ) : null}
-    </div>
   );
 }
 

@@ -16,7 +16,15 @@ from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError, PlanLimitError, ValidationError
 from app.core.security import hash_password
 from app.core.validators import normalize_username
-from app.models import Board, BoardMember, Membership, TaskInstance, User
+from app.models import (
+    Board,
+    BoardMember,
+    ClassSubject,
+    Membership,
+    SchoolClass,
+    TaskInstance,
+    User,
+)
 from app.schemas.org import (
     AdminResetPasswordResponse,
     BulkMemberResult,
@@ -127,6 +135,29 @@ class MemberService:
                 self.db.add(BoardMember(board_id=b.id, user_id=new_owner))
         self.db.flush()
 
+    def _release_teaching(self, org_id: uuid.UUID, membership_id: uuid.UUID) -> int:
+        """Un-assign a departing member from everything they taught.
+
+        Removal is a SOFT revoke (`status='removed'`), so the membership row survives
+        and the `ondelete="SET NULL"` on these columns never fires. Without this the
+        class-subject still names a teacher who no longer exists: the Members list
+        stops returning them, so the teacher dropdown silently renders blank while the
+        row still points at them, and the timetable keeps counting their weekly load.
+
+        Un-assigning, never deleting — the class still teaches Mathematics, it just has
+        nobody in front of it, which is the state the admin must see and fix."""
+        released = 0
+        for cs in self.db.scalars(select(ClassSubject).where(
+            ClassSubject.org_id == org_id, ClassSubject.teacher_member_id == membership_id
+        )):
+            cs.teacher_member_id = None
+            released += 1
+        for k in self.db.scalars(select(SchoolClass).where(
+            SchoolClass.org_id == org_id, SchoolClass.class_teacher_member_id == membership_id
+        )):
+            k.class_teacher_member_id = None
+        return released
+
     def remove(self, admin: CurrentMember, user_id: uuid.UUID) -> int:
         """Remove a member; orphan their open tasks (F9). Returns orphaned count."""
         m = self._get_membership(admin.org_id, user_id)
@@ -161,12 +192,16 @@ class MemberService:
         self.db.execute(
             BoardMember.__table__.delete().where(BoardMember.user_id == user_id)
         )
+        # Hand back their classes before the membership goes inactive.
+        released = self._release_teaching(admin.org_id, m.id)
+
         # Revoke the membership and all its sessions (status + token_version).
         m.status = "removed"
         m.token_version += 1
         self.db.flush()
         analytics.track(self.db, event="member_removed", org_id=admin.org_id,
-                        user_id=user_id, props={"orphaned": len(orphaned)})
+                        user_id=user_id,
+                        props={"orphaned": len(orphaned), "subjects_released": released})
         return len(orphaned)
 
     def invite(self, admin: CurrentMember, *, name: str, email: str | None,

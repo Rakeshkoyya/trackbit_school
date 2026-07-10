@@ -21,7 +21,17 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+# SQLAlchemy's defaults (pool_size=5, max_overflow=10) let ONE engine hold 15
+# connections. The managed Postgres this runs on allows 20 in total, a few of them
+# reserved for superusers — so a dev server plus a test run, or two gunicorn workers,
+# exhaust the server and every query dies with "remaining connection slots are
+# reserved". Size the pool from config and keep the default well under the cap.
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

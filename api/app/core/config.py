@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg2://trackbit:trackbit@localhost:5434/trackbit"
     ADMIN_DATABASE_URL: str = ""
     TEST_DATABASE_URL: str = "postgresql+psycopg2://trackbit:trackbit@localhost:5434/trackbit_test"
+    # Per-engine connection budget. Kept small on purpose: the managed Postgres caps
+    # `max_connections` at 20, and SQLAlchemy's own defaults (5 + 10 overflow) let a
+    # single process eat three quarters of that. Raise only alongside the server's cap.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
 
     @property
     def migration_database_url(self) -> str:
