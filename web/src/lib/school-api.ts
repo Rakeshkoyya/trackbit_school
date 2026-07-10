@@ -135,6 +135,15 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").TopicProgressRow[]>(
       `/planner/plan/${csId}/progress`),
 
+  // ── post-setup read models (V2-P10) ───────────────────────────────────────
+  schoolOverview: (yearId?: string) =>
+    api.get<import("@/lib/school-types").SchoolOverview>(
+      `/overview/school${qs({ year_id: yearId })}`),
+  classOverview: (classId: string) =>
+    api.get<import("@/lib/school-types").ClassOverview>(`/overview/classes/${classId}`),
+  teacherLoad: () =>
+    api.get<import("@/lib/school-types").TeacherLoadRow[]>("/overview/teacher-load"),
+
   // setup wizard (V2-P5, SPRD2 §5.1)
   wizardState: () => api.get<import("@/lib/school-types").WizardState>("/wizard/state"),
   wizardAdvance: (b: { to_step: number; payload?: Record<string, unknown> }) =>

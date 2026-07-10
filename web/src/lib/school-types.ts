@@ -755,3 +755,78 @@ export interface WizardStep {
   index: number;
   complete: boolean;
 }
+
+// ── post-setup read models (V2-P10) — derived on read, never cached ──────────
+export interface YearFacts {
+  academic_year_id: string;
+  label: string;
+  start_date: string;
+  end_date: string;
+  periods_per_day: number;
+  terms: number;
+  exams: number;
+  exam_portions: number;
+  /** Exams nobody mapped to a syllabus portion: configured but inert. */
+  exams_without_portions: number;
+}
+
+export type Rag = "green" | "none" | "amber" | "red";
+
+export interface ClassRow {
+  class_id: string;
+  label: string;
+  students: number;
+  subjects: number;
+  subjects_without_teacher: number;
+  subjects_without_syllabus: number;
+  timetable_slots: number;
+  plans_approved: number;
+  plans_total: number;
+  worst_forecast: Rag;
+}
+
+export interface SchoolOverview {
+  year: YearFacts;
+  teachers: number;
+  students: number;
+  classes: ClassRow[];
+}
+
+export interface SubjectRow {
+  class_subject_id: string;
+  subject_name: string;
+  teacher_member_id: string | null;
+  teacher_name: string | null;
+  periods_per_week: number;
+  timetabled_periods: number;
+  /** The entered budget and the grid disagree — every plan date is off. */
+  periods_mismatch: boolean;
+  chapters: number;
+  topics: number;
+  est_periods: number;
+  topics_taught: number;
+  plan_status: "none" | "draft" | "approved";
+  plan_approved_at: string | null;
+  forecast: Rag;
+  weeks_behind: number | null;
+  baseline_finish: string | null;
+  projected_finish: string | null;
+}
+
+export interface ClassOverview {
+  class_id: string;
+  label: string;
+  academic_year_id: string;
+  year_label: string;
+  students: number;
+  class_teacher_name: string | null;
+  subjects: SubjectRow[];
+}
+
+export interface TeacherLoadRow {
+  member_id: string;
+  name: string;
+  periods_per_week: number;
+  classes: number;
+  subjects: number;
+}
