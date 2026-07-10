@@ -1,24 +1,90 @@
-"""`extract` (SPRD2 §8) — AI phrasing for import gaps, never AI *detection* of them.
+"""`extract` (SPRD2 §8) — AI assists the importer; it never decides for it.
 
-The deterministic importer already knows which required field it could not map and
-which source columns went unused. This module turns that into a sentence a school
-admin wants to read, and offers the unused columns as choices.
+Three jobs, all optional, all falling back to a deterministic heuristic:
 
-Env-gated like every other AI service: with no key it returns a deterministic
-template, so the entire setup wizard runs and is tested offline. The output always
-lands in a human-confirm surface — the admin picks a column or types a value; the
-model never writes to a table.
+  * `suggest_mapping`   — when the keyword heuristic can't find a required column,
+                          ask the model which column holds it. The model sees the
+                          headers and a few sample rows, and may only answer with
+                          columns that actually exist.
+  * `phrase_gap_question` — turn a gap the *validator* found into a sentence an
+                          admin wants to read.
+  * `split_syllabus_text` — free text → chapters and topics with period estimates.
+
+The division of labour is the whole design. **Deterministic validators decide what
+is missing; the model only proposes and phrases.** With no `OPENROUTER_API_KEY`
+every function here returns its heuristic answer, so the setup wizard runs, and is
+tested, entirely offline. Nothing here persists — the output lands in a review
+screen the admin confirms.
 """
 
-from app.core.config import settings
+import re
+from typing import Any
 
-# Deterministic phrasings used when no key is configured (and as the model's
-# system-prompt skeleton when one is).
+from app.core.config import settings
+from app.services.ai.client import chat_json
+
+# Deterministic phrasings used when no key is configured.
 _TEMPLATES: dict[str, str] = {
     "students": "Which column holds each student's {label}?",
     "staff": "Which column holds each teacher's {label}?",
     "syllabus": "Which column holds the {label}?",
 }
+
+_MAPPING_SYSTEM = (
+    "You map spreadsheet columns to known fields for an Indian school's records. "
+    "Reply with ONLY a JSON object of the form {\"mapping\": {\"field\": \"Column Header\"}}. "
+    "Use a column header EXACTLY as given. Omit any field you are not confident about — "
+    "a missing field is fine, a wrong one is not. Never invent a column."
+)
+
+_QUESTION_SYSTEM = (
+    "You write one short question for a school administrator who is importing a "
+    "spreadsheet. Reply with ONLY {\"question\": \"...\"}. One sentence, plain English, "
+    "no jargon, no preamble. Ask which column holds the named field."
+)
+
+_SPLIT_SYSTEM = (
+    "You convert a school syllabus into structured chapters and topics. Reply with ONLY "
+    "{\"units\": [{\"title\": \"...\", \"topics\": [{\"title\": \"...\", \"est_periods\": 1}]}]}. "
+    "Preserve the document's order. est_periods is the number of class periods a topic "
+    "needs; use the document's own number when it states one, otherwise 1. Never invent "
+    "chapters or topics that are not in the text."
+)
+
+
+def suggest_mapping(
+    kind: str, fields: list[str], columns: list[str], sample_rows: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Propose `field -> column` for fields the heuristic could not map.
+
+    Returns {} when AI is off or the call fails. The result is **filtered against
+    the real column list** before it is returned, so a hallucinated header can
+    never reach the importer — and the admin still confirms it on screen."""
+    if not settings.ai_configured or not fields or not columns:
+        return {}
+
+    preview = sample_rows[:3]
+    user = (
+        f"Record type: {kind}\n"
+        f"Columns: {columns}\n"
+        f"Sample rows: {preview}\n"
+        f"Map these fields if you can: {fields}"
+    )
+    result = chat_json(_MAPPING_SYSTEM, user, model=settings.AI_MODEL_PARSE)
+    if not result:
+        return {}
+
+    proposed = result.get("mapping")
+    if not isinstance(proposed, dict):
+        return {}
+
+    allowed = set(columns)
+    wanted = set(fields)
+    return {
+        field: column
+        for field, column in proposed.items()
+        if field in wanted and isinstance(column, str) and column in allowed
+    }
 
 
 def phrase_gap_question(kind: str, field: str, label: str, unmapped_columns: list[str]) -> dict:
@@ -29,13 +95,19 @@ def phrase_gap_question(kind: str, field: str, label: str, unmapped_columns: lis
     declines is handled by the importer's per-row error list, never by a crash."""
     template = _TEMPLATES.get(kind, "Which column holds the {label}?")
     text = template.format(label=label)
+    source = "fixture"
+
     if settings.ai_configured:
-        # A real call would rewrite `text` in the school's own vocabulary using the
-        # sample rows. The contract — field, options, skippable — is unchanged, so
-        # nothing downstream can tell the difference.
-        source = "ai"
-    else:
-        source = "fixture"
+        user = (
+            f"Record type: {kind}\nField we could not find: {label}\n"
+            f"Unused columns in their file: {unmapped_columns}"
+        )
+        result = chat_json(_QUESTION_SYSTEM, user, model=settings.AI_MODEL_DRAFT, max_tokens=200)
+        phrased = (result or {}).get("question")
+        if isinstance(phrased, str) and phrased.strip():
+            text = phrased.strip()
+            source = "ai"
+
     return {
         "field": field,
         "label": label,
@@ -46,15 +118,10 @@ def phrase_gap_question(kind: str, field: str, label: str, unmapped_columns: lis
     }
 
 
-def split_syllabus_text(text: str) -> list[dict]:
-    """Free text → [{title, topics: [{title, est_periods}]}].
-
-    Heuristic (the offline path, and the one tuned against real school syllabi): a
-    line that looks like a heading — "Unit 2", "Chapter 4: Plants", ALL CAPS, or
-    trailing ':' — opens a chapter; everything under it is a topic. A trailing
-    "(3)" or "- 3 periods" on a topic line is read as its period estimate."""
-    import re
-
+def _split_syllabus_heuristic(text: str) -> list[dict]:
+    """A line that looks like a heading — "Unit 2", "Chapter 4: Plants", ALL CAPS, or
+    trailing ':' — opens a chapter; everything under it is a topic. A trailing "(3)"
+    or "- 3 periods" on a topic line is read as its period estimate."""
     units: list[dict] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -79,3 +146,47 @@ def split_syllabus_text(text: str) -> list[dict]:
             line = line[: m.start()].strip(" -–\t")
         units[-1]["topics"].append({"title": line, "est_periods": est})
     return [u for u in units if u["topics"]]
+
+
+def _clean_units(raw: Any) -> list[dict]:
+    """Coerce a model reply into the draft shape, dropping anything malformed."""
+    if not isinstance(raw, list):
+        return []
+    units: list[dict] = []
+    for u in raw:
+        if not isinstance(u, dict):
+            continue
+        title = str(u.get("title") or "").strip()
+        topics_in = u.get("topics")
+        if not title or not isinstance(topics_in, list):
+            continue
+        topics: list[dict] = []
+        for t in topics_in:
+            if not isinstance(t, dict):
+                continue
+            t_title = str(t.get("title") or "").strip()
+            if not t_title:
+                continue
+            try:
+                est = max(1, int(t.get("est_periods") or 1))
+            except (TypeError, ValueError):
+                est = 1
+            topics.append({"title": t_title, "est_periods": est})
+        if topics:
+            units.append({"title": title, "topics": topics})
+    return units
+
+
+def split_syllabus_text(text: str) -> list[dict]:
+    """Free text → [{title, topics: [{title, est_periods}]}].
+
+    The model handles the messy real-world cases the heuristic can't — chapters
+    numbered in Roman numerals, topics on the same line, no punctuation. It is only
+    trusted when it returns something well-formed; otherwise the heuristic wins."""
+    if settings.ai_configured and text.strip():
+        result = chat_json(_SPLIT_SYSTEM, text[:20000], model=settings.AI_MODEL_DRAFT,
+                           max_tokens=4000)
+        units = _clean_units((result or {}).get("units"))
+        if units:
+            return units
+    return _split_syllabus_heuristic(text)

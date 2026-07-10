@@ -279,12 +279,25 @@ Parents have **no login** — guardians are records that receive outbound notifi
 
 ## AI services & stubs
 
-All AI lives in `app/services/ai/`, is a single internal client, and is **env-gated** — when keys are
-unset it returns deterministic fixtures so every flow is testable offline. Same pattern as the seed's
+All AI lives in `app/services/ai/`, routed through **OpenRouter** (one OpenAI-compatible endpoint,
+any model, one key) via `ai/client.py::chat_json` — the only function here that touches the network.
+It is **env-gated**: with `OPENROUTER_API_KEY` unset every call short-circuits and the caller's
+deterministic heuristic runs, so all flows are testable offline. Same pattern as the seed's
 integrations (email/R2/billing/push stub when keys blank). **No chat UI** — AI is invisible plumbing
 (plan drafts, celebration drafts, syllabus split, xlsx/photo parsing), and **every AI output lands in
 a human-confirm surface before persisting** (editable drafts, verify grids). Model ids come from env
-(`AI_MODEL_DRAFT`, `AI_MODEL_PARSE`); use current Claude models per the claude-api skill.
+as OpenRouter slugs (`AI_MODEL_DRAFT=anthropic/claude-opus-4.8`,
+`AI_MODEL_PARSE=anthropic/claude-sonnet-5`); browse slugs at openrouter.ai/models.
+
+Two rules make it safe in the setup wizard's critical path:
+
+- **`chat_json` fails soft, never up.** Timeout, 429, 5xx, prose-instead-of-JSON → returns `None`,
+  the heuristic runs, the admin never sees a stack trace. A non-retryable 4xx (bad key, bad slug)
+  breaks out immediately rather than making them wait through a retry.
+- **Deterministic validators decide; the model only proposes and phrases.** `ingest.py` asks the
+  model to map only the columns the keyword heuristic *couldn't* place — never overriding an exact
+  header match — then filters the reply against the real column list, so a hallucinated column can't
+  reach an importer. AI proposals are flagged `low_confidence` for the human's glance.
 
 ## Fences — v2 (SPRD2 §11, binding; supersedes arch §8)
 

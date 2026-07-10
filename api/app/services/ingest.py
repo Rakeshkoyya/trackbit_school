@@ -18,7 +18,7 @@ doesn't.
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.services.ai.extract import phrase_gap_question
+from app.services.ai.extract import phrase_gap_question, suggest_mapping
 
 
 @dataclass
@@ -75,6 +75,24 @@ def build_analysis(
     kind: str, columns: list[str], rows: list[dict[str, Any]], specs: list[FieldSpec],
 ) -> Analysis:
     mapping, low = heuristic_mapping(columns, specs)
+    source = "heuristic"
+
+    # Only ask the model about fields the keyword heuristic could not place. It
+    # never overrides an exact header match — a column literally named "Student
+    # Name" is not a judgement call, and paying a model to second-guess it would
+    # make a deterministic result non-deterministic.
+    unresolved = [s.name for s in specs if s.name not in mapping]
+    if unresolved:
+        proposed = suggest_mapping(kind, unresolved, columns, rows)
+        # `suggest_mapping` already filtered to real columns; guard against a
+        # model handing the same column to two fields.
+        for field, column in proposed.items():
+            if column in mapping.values():
+                continue
+            mapping[field] = column
+            low.append(field)  # AI proposals are always worth a human glance
+            source = "ai"
+
     used = set(mapping.values())
     unmapped = [c for c in columns if c not in used]
     missing = [s.name for s in specs if s.required and s.name not in mapping]
@@ -86,4 +104,4 @@ def build_analysis(
     return Analysis(
         columns=columns, mapping=mapping, rows=rows, row_count=len(rows),
         unmapped_columns=unmapped, missing_required=missing, low_confidence=low,
-        questions=questions)
+        questions=questions, source=source)

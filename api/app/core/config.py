@@ -112,17 +112,30 @@ class Settings(BaseSettings):
             and self.R2_SECRET_ACCESS_KEY and self.R2_BUCKET
         )
 
-    # AI services (SPRD §8). Empty key => the AI client returns deterministic
-    # fixtures so every drafting/parsing flow is testable offline. Model ids live
-    # in env so upgrades are config, not code. Every AI output lands in a
-    # human-confirm surface before persisting (editable drafts, verify grids).
-    ANTHROPIC_API_KEY: str = ""
-    AI_MODEL_DRAFT: str = "claude-sonnet-5"
-    AI_MODEL_PARSE: str = "claude-haiku-4-5-20251001"
+    # AI services (SPRD §8), routed through OpenRouter — one OpenAI-compatible
+    # endpoint, any model, one key. Empty key => every AI call short-circuits and
+    # the caller falls back to its deterministic heuristic, so all drafting and
+    # parsing flows stay testable offline. Model ids live in env so upgrading is
+    # config, not code. Every AI output lands in a human-confirm surface before
+    # persisting (editable drafts, verify grids) — AI never writes to a table.
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    # OpenRouter attributes usage to these (both optional; they appear on the
+    # openrouter.ai leaderboards and in your usage dashboard).
+    OPENROUTER_SITE_URL: str = ""
+    OPENROUTER_APP_NAME: str = "TrackBit School"
+    # `draft` = generative work (question phrasing, syllabus splitting).
+    # `parse` = structured extraction (column mapping). Same endpoint either way.
+    AI_MODEL_DRAFT: str = "anthropic/claude-opus-4.8"
+    AI_MODEL_PARSE: str = "anthropic/claude-sonnet-5"
+    # Ingestion runs while an admin waits on a spinner. Fail fast and fall back to
+    # the heuristic rather than hanging the setup wizard on a slow model.
+    AI_TIMEOUT_SECONDS: float = 20.0
+    AI_MAX_RETRIES: int = 1
 
     @property
     def ai_configured(self) -> bool:
-        return bool(self.ANTHROPIC_API_KEY)
+        return bool(self.OPENROUTER_API_KEY)
 
     # V2-P1 §5.3 — the assisted timetable draft (proposer + validators + repair) is
     # NOT a guaranteed solver, so it ships behind a flag until piloted. Off => the
