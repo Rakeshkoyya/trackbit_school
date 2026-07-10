@@ -208,30 +208,48 @@ Frontend, from `web/` (Node 20+): `npm run dev` (needs API up), `npm run build`,
 end green on `npx tsc --noEmit` + `eslint` + `next build`. The **full backend suite (currently 130) is
 the regression gate** — it must stay green after every change.
 
-### Local dev database (validated setup)
+### Database — managed Postgres on Aiven (no Docker)
 
-Tests/Alembic need **real PostgreSQL** (no SQLite fallback) with the two-role RLS setup. `api/.env`
-is a template pointing at a to-be-created Aiven `trackbit_school_db` (SPRD §2.4 — do **not** reuse the
-seed's `trackbit_db`). For local dev, the seed's `docker-compose.yml` gives you Postgres on `:5434`:
+**Docker does not work on this machine. Never use it.** There is no local Postgres container,
+and `api/docker-compose.yml` is dead — ignore it. The Dockerfiles exist only for Dokploy to
+build remotely; they are never built or run here.
+
+The database is an Aiven Postgres, database name **`trackbit_school`**. Both URLs live in
+`api/.env` (gitignored — never commit, never paste into `.env.example` or a commit message):
+
+- `ADMIN_DATABASE_URL` → `avnadmin`, the schema owner. Used **only** by Alembic.
+- `DATABASE_URL` → `trackbit_school_app`, a **NOBYPASSRLS** role. This split is what makes
+  architectural law 2 real: `avnadmin` has `rolbypassrls = true`, so pointing the app at it
+  would silently disable every RLS policy.
+
+`?sslmode=require` is mandatory. To touch the DB, read `api/.env` and connect with psycopg2
+from the uv venv; do not try to start a server.
 
 ```bash
-# from api/
-docker compose up -d db                       # postgres 16 on localhost:5434 (user/pw/db: trackbit)
-# one-time: a restricted, NOBYPASSRLS app role so RLS actually applies (test_rls needs this)
-docker exec -i trackbit_db psql -U trackbit -d trackbit_test -c \
-  "CREATE ROLE trackbit_app LOGIN PASSWORD 'apppass' NOSUPERUSER NOBYPASSRLS; \
-   GRANT USAGE ON SCHEMA public TO trackbit_app; \
-   GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO trackbit_app; \
-   GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO trackbit_app; \
-   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO trackbit_app;"
-# then run with the app role for DATABASE_URL and the owner for migrations:
-export DATABASE_URL="postgresql+psycopg2://trackbit_app:apppass@localhost:5434/trackbit_test"
-export ADMIN_DATABASE_URL="postgresql+psycopg2://trackbit:trackbit@localhost:5434/trackbit_test"
-uv run alembic upgrade head && uv run pytest -q
+# from api/ — .env is read automatically, don't export DATABASE_URL over it
+uv run alembic upgrade head
+uv run alembic current
 ```
 
-(Grants must be re-run only if migrations add tables *before* those tables have rows the app touches;
-`ALTER DEFAULT PRIVILEGES` covers new tables created afterward.)
+The test suite needs a real Postgres. Point `TEST_DATABASE_URL` at a separate Aiven database
+if you need to run it — do not run it against `trackbit_school`, the tests create and delete
+orgs. Current state: schema is at head `f6b7c8d9e0f1`, 46 tables carry an `org_isolation`
+policy, and `trackbit_school_app` is confirmed `rolbypassrls = false`.
+
+### Deployment — Dokploy
+
+Dokploy builds `api/Dockerfile` and `web/Dockerfile` and injects config as environment
+variables; nothing is baked into an image (`.env` is in both `.dockerignore` files).
+
+`api/docker-entrypoint.sh` runs migrations, then execs gunicorn. **It forces one worker
+whenever `ENABLE_SCHEDULER` is on**, because APScheduler starts inside each gunicorn worker —
+two workers would send every absent student's guardian two WhatsApp messages. Run exactly one
+scheduler instance; scale the rest with `ENABLE_SCHEDULER` unset and `WEB_CONCURRENCY=2+`.
+Health probe is `GET /health` (app root, *not* under `/api/v1`).
+
+`web/docker-entrypoint.sh` rewrites a build-time sentinel with the real
+`NEXT_PUBLIC_API_BASE_URL` at container start, so the frontend image is repointable without a
+rebuild.
 
 ## Six architectural laws (load-bearing — carry into all new tables/endpoints)
 
