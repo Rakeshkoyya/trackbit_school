@@ -769,7 +769,8 @@ export interface TopicProgressRow {
   topic_id: string;
   topic_title: string;
   unit_title: string;
-  est_periods: number;
+  /** null = not sized yet, so the chapter is not scheduled. */
+  est_periods: number | null;
   status: "done" | "in_progress" | "pending";
 }
 

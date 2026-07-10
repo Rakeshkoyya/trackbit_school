@@ -207,9 +207,13 @@ class PlannerService:
         """Derived cache over `plan_approvals` — see the Plan docstring. The log is
         the truth; these columns just let overview/wizard ask "is it locked?"."""
         state = self._approval_state(m.org_id, cs_id)
-        term_ids = {u.term_id for u in self._units(m.org_id, cs_id) if u.term_id is not None}
+        # Every bucket that actually holds chapters must be locked before the plan as a
+        # whole is "approved" — including the untermed bucket. Looking only at the
+        # termed ones would call a syllabus locked while its untermed chapters sit
+        # unplanned. A whole-year approval (`None`) covers all of them at once.
+        buckets = {u.term_id for u in self._units(m.org_id, cs_id) if u.topics}
 
-        if state.get(None) or (term_ids and all(state.get(t) for t in term_ids)):
+        if state.get(None) or (buckets and all(state.get(b) for b in buckets)):
             plan.status = "approved"
         elif any(state.values()):
             plan.status = "partial"

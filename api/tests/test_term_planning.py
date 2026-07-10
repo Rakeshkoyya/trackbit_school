@@ -184,7 +184,7 @@ def test_approved_term_is_locked_and_unapprove_is_an_append(client, cleanup):
     # Locked: re-generating that term is refused.
     blocked = client.post(f"/api/v1/planner/plan/{cs['id']}/generate?term_id={t1['id']}",
                           headers=h)
-    assert blocked.status_code == 400
+    assert blocked.status_code == 422
     assert "locked" in blocked.json()["error"]["message"].lower()
 
     # ...and so is quietly re-sizing a chapter underneath it.
@@ -193,7 +193,7 @@ def test_approved_term_is_locked_and_unapprove_is_an_append(client, cleanup):
     t1_topic = next(t for u in syllabus if u["term_id"] == t1["id"] for t in u["topics"])
     r = client.put(f"/api/v1/planner/syllabus/topics/{t1_topic['id']}/estimate", headers=h,
                    json={"est_periods": 9})
-    assert r.status_code == 400
+    assert r.status_code == 422
 
     # Un-approve, then re-plan. The undo is a compensating row, not a rewrite.
     un = client.post(f"/api/v1/planner/plan/{cs['id']}/unapprove?term_id={t1['id']}", headers=h)
@@ -204,7 +204,7 @@ def test_approved_term_is_locked_and_unapprove_is_an_append(client, cleanup):
 
     # Un-approving something that isn't approved is an error, not a silent no-op.
     assert client.post(f"/api/v1/planner/plan/{cs['id']}/unapprove?term_id={t2['id']}",
-                       headers=h).status_code == 400
+                       headers=h).status_code == 422
 
 
 def test_cannot_approve_a_term_with_unsized_chapters(client, cleanup):
@@ -213,7 +213,7 @@ def test_cannot_approve_a_term_with_unsized_chapters(client, cleanup):
     _termwise(client, h, cs["id"], t1, t2)
     client.post(f"/api/v1/planner/plan/{cs['id']}/generate?term_id={t2['id']}", headers=h)
     r = client.post(f"/api/v1/planner/plan/{cs['id']}/approve?term_id={t2['id']}", headers=h)
-    assert r.status_code == 400
+    assert r.status_code == 422
     assert "no period estimate" in r.json()["error"]["message"]
 
 
@@ -224,7 +224,7 @@ def test_whole_year_replan_refused_while_a_term_is_approved(client, cleanup):
     client.post(f"/api/v1/planner/plan/{cs['id']}/approve?term_id={t1['id']}", headers=h)
 
     r = client.post(f"/api/v1/planner/plan/{cs['id']}/generate", headers=h)
-    assert r.status_code == 400
+    assert r.status_code == 422
     assert "individually" in r.json()["error"]["message"]
 
 
@@ -295,6 +295,21 @@ def test_plan_reports_a_row_per_term(client, cleanup):
     assert by_name["Term 2"]["unestimated_topics"] == 2
 
 
+def test_untermed_chapters_keep_the_plan_partial(client, cleanup):
+    """Approving every term does not make the plan approved while untermed chapters
+    remain — they are a bucket of their own, and nobody has locked them."""
+    h, _y, _k, cs, t1, _t2 = _setup(client, cleanup)
+    _unit(client, h, cs["id"], "Termed", t1["id"], [("A", 2)])
+    _unit(client, h, cs["id"], "Untermed", None, [("B", 2)])
+
+    client.post(f"/api/v1/planner/plan/{cs['id']}/generate?term_id={t1['id']}", headers=h)
+    out = client.post(f"/api/v1/planner/plan/{cs['id']}/approve?term_id={t1['id']}",
+                      headers=h).json()
+    assert out["status"] == "partial"
+    names = {t["name"] for t in out["terms"]}
+    assert "Unscheduled" in names
+
+
 def test_whole_year_school_is_unaffected(client, cleanup):
     """No terms on any chapter → the original behaviour, approve locks the year."""
     h, _y, klass, cs, _t1, _t2 = _setup(client, cleanup)
@@ -307,7 +322,7 @@ def test_whole_year_school_is_unaffected(client, cleanup):
 
     ap = client.post(f"/api/v1/planner/plan/{cs['id']}/approve", headers=h)
     assert ap.status_code == 200 and ap.json()["status"] == "approved"
-    assert client.post(f"/api/v1/planner/plan/{cs['id']}/generate", headers=h).status_code == 400
+    assert client.post(f"/api/v1/planner/plan/{cs['id']}/generate", headers=h).status_code == 422
 
     rows = client.get(f"/api/v1/planner/plan/forecast?class_id={klass['id']}", headers=h).json()
     assert next(r for r in rows if r["class_subject_id"] == cs["id"])["status"] == "green"

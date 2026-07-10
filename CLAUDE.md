@@ -159,6 +159,28 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   today's **per-period attendance** (with an absence + late), **daily checks** (confirmed + a
   C-band check), and a generated **daily report** — so every v2 screen renders with real data.
   Verified end-to-end: server boots, login works, My Day/timeline/report/wizard all populate.
+- **V2-P11 (term-scoped planning) COMPLETE** — migration `f7c8d9e0f1a2` (head). Schools fix the
+  year's portion in April but size each chapter when its term begins, which the planner could not
+  express. `syllabus_units.term_id` (nullable; NULL = whole-year, so term-less schools are
+  unchanged) files a chapter under a `Term`. **`syllabus_topics.est_periods` is now NULLABLE** —
+  NULL means *not sized yet* and is never scheduled: `distribute` skips it, validator **V6
+  `validate_unsized`** reports it, `approve` refuses to lock it, and `forecast` returns
+  **`unplanned`** instead of a RAG colour. (The old `NOT NULL DEFAULT 1` made an unplanned year
+  forecast **green**: unsized chapters looked like one-period chapters, so baseline == projection.)
+  `plan_approvals` is an **append-only** log per (class-subject, term) — un-approve appends
+  `action='revoke'`, never mutates (law 3) — and `plans.status` becomes a derived cache that gains
+  **`partial`**. `draft`/`generate`/`approve`/**`unapprove`** take an optional `term_id` and touch
+  only that term's `plan_entries`, inside that term's dates, against that term's capacity, so an
+  approved Term 1 is never rewritten by a Term 2 re-draft (P2). Also fixed: `effective_periods`
+  normalised by the working days *inside* the window, so a boundary-straddling week yielded a full
+  week's periods (a Term 2 opening on a Thursday took 6 periods of topics into 3 days) — the
+  denominator is now the week's working days, identical for any week wholly inside the window.
+  Syllabus importer maps a `Term` column and reports names it can't resolve rather than inventing
+  them. `test_term_planning.py`.
+- **`test_doc/`** — dummy xlsx/txt fixtures for the roster, staff and syllabus importers, plus the
+  generator that writes them. Each carries rows meant to fail (missing name, unresolvable
+  class-subject, duplicates of seeded rows) so the `errors`/`skipped`/`unresolved` surfaces get
+  exercised. See `test_doc/README.md`.
 
 ## How this repo was bootstrapped (background)
 
@@ -231,10 +253,22 @@ uv run alembic upgrade head
 uv run alembic current
 ```
 
-The test suite needs a real Postgres. Point `TEST_DATABASE_URL` at a separate Aiven database
-if you need to run it — do not run it against `trackbit_school`, the tests create and delete
-orgs. Current state: schema is at head `f6b7c8d9e0f1`, 46 tables carry an `org_isolation`
-policy, and `trackbit_school_app` is confirmed `rolbypassrls = false`.
+The test suite needs a real Postgres and runs **against `trackbit_school`**, because as of
+2026-07-10 that Aiven database is a **development/prototyping** database, not production —
+the founder's explicit call. The suite creates and hard-deletes orgs; that is fine here.
+A separate production database arrives later, and that switch is where this stops being safe.
+
+⚠️ `TEST_DATABASE_URL` is declared in `app/core/config.py` but **nothing reads it**. `pytest`
+connects via `DATABASE_URL`. There is no safety net — the day a production URL lands in
+`api/.env`, `uv run pytest -q` will delete orgs out of it. Wire `conftest.py` to honour
+`TEST_DATABASE_URL` before that happens.
+
+Worktrees have no `.env` (gitignored, not copied). Copy it in before running Alembic or pytest
+there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
+"connection refused".
+
+Current state: schema is at head `f7c8d9e0f1a2`, 47 tables carry an `org_isolation` policy, and
+`trackbit_school_app` is confirmed `rolbypassrls = false`.
 
 ### Deployment — Dokploy
 

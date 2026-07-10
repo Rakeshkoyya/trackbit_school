@@ -61,11 +61,16 @@ class StaffCommitOut(BaseModel):
 # ── syllabus ─────────────────────────────────────────────────────────────────
 class SyllabusTopicDraft(BaseModel):
     title: str = Field(min_length=1, max_length=300)
-    est_periods: int = Field(default=1, ge=1, le=200)
+    # None = the document didn't state a number. Imported unsized, never guessed as 1
+    # — an unsized chapter is not scheduled, and the forecast says so (V2-P11).
+    est_periods: int | None = Field(default=None, ge=1, le=200)
 
 
 class SyllabusUnitDraft(BaseModel):
     title: str = Field(min_length=1, max_length=300)
+    # Term name exactly as written in the sheet; resolved against the class's terms on
+    # commit, and reported in `unresolved_terms` when it matches none of them.
+    term: str | None = Field(default=None, max_length=100)
     topics: list[SyllabusTopicDraft] = []
 
 

@@ -35,6 +35,20 @@ def _no_real_email():
     settings.RESEND_API_KEY = prev
 
 
+@pytest.fixture(autouse=True)
+def _no_real_ai():
+    """Force the deterministic heuristic path so tests never call OpenRouter.
+
+    `settings.ai_configured` is just `bool(OPENROUTER_API_KEY)`, and a real key now
+    lives in `api/.env`. Without this, every importer test silently posts the fixture
+    to a live model: slow, costly, non-deterministic, and it fails offline. Tests that
+    exercise the AI branch set the key themselves, after this fixture has run."""
+    prev = settings.OPENROUTER_API_KEY
+    settings.OPENROUTER_API_KEY = ""
+    yield
+    settings.OPENROUTER_API_KEY = prev
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)

@@ -51,7 +51,8 @@ class TopicProgressRow(BaseModel):
     topic_id: uuid.UUID
     topic_title: str
     unit_title: str
-    est_periods: int
+    # None = the chapter has no period estimate yet, so it is not scheduled.
+    est_periods: int | None = None
     # done (a full-coverage log exists) | in_progress (only partial logs) | pending
     status: str
 
