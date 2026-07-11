@@ -18,6 +18,7 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageLoading } from "@/components/ui/page-loading";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
 import type {
@@ -139,20 +140,24 @@ function AttendanceSection({ card, onSaved }: { card: PeriodCard; onSaved: () =>
   );
 }
 
-// ── 2 · topic — pick from the syllabus list, confirm coverage ────────────────
+// ── 2 · topics — several can fit in one period; one can span many days ───────
 function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void }) {
   const { plan } = card;
-  const logged = plan.logged_topic_id != null || plan.logged_coverage != null;
-  const [changing, setChanging] = useState(false);
-  const [topicId, setTopicId] = useState(plan.logged_topic_id ?? plan.planned_topic_id ?? "");
+  const [adding, setAdding] = useState(plan.logged.length === 0);
+  const [topicId, setTopicId] = useState(plan.planned_topic_id ?? "");
   const [note, setNote] = useState("");
   const log = useMutation({
     mutationFn: (coverage: string) => schoolApi.logLesson({
       class_subject_id: card.class_subject_id!, topic_id: topicId || null, coverage,
       note: note.trim() || null, period_no: card.period_no,
     }),
-    onSuccess: () => { toast.success("Topic logged"); setChanging(false); onSaved(); },
+    onSuccess: () => { toast.success("Topic logged"); setNote(""); setAdding(false); onSaved(); },
     onError: (e) => showApiError(e, "Could not log"),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => schoolApi.deleteLog(id),
+    onSuccess: () => { toast.success("Removed"); onSaved(); },
+    onError: (e) => showApiError(e, "Could not remove"),
   });
 
   // Group the syllabus list by chapter so the picker reads like the plan.
@@ -161,62 +166,87 @@ function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void
     if (!byUnit.has(row.unit_title)) byUnit.set(row.unit_title, []);
     byUnit.get(row.unit_title)!.push(row);
   }
-  const loggedTitle = plan.progress.find((r) => r.topic_id === plan.logged_topic_id)?.topic_title;
 
   if (card.class_subject_id == null) {
     return (
-      <Section title="Topic" icon={<Check className="h-4 w-4" />}>
+      <Section title="Topics taught" icon={<Check className="h-4 w-4" />}>
         <p className="text-sm text-muted-foreground">No subject is timetabled for this period.</p>
       </Section>
     );
   }
 
-  if (logged && !changing) {
-    return (
-      <Section title="Topic" icon={<Check className="h-4 w-4" />}
-        aside={<Button size="sm" variant="ghost" onClick={() => setChanging(true)}>Change</Button>}>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge tone="success">logged</Badge>
-          <span>{loggedTitle ?? "Topic"}</span>
-          {plan.logged_coverage ? <span className="text-muted-foreground">· {plan.logged_coverage === "full" ? "covered" : "partially"}</span> : null}
-        </div>
-      </Section>
-    );
-  }
-
   return (
-    <Section title="Topic" icon={<Check className="h-4 w-4" />}>
-      {plan.planned_topic_title ? (
-        <p className="mb-2 text-xs text-muted-foreground">
-          Planned this week: <span className="font-medium text-foreground">{plan.planned_topic_title}</span>
-          {plan.planned_unit_title ? ` (${plan.planned_unit_title})` : ""}
-        </p>
-      ) : null}
-      {plan.progress.length > 0 ? (
-        <select
-          aria-label="Topic taught"
-          className="mb-2 h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
-          value={topicId} onChange={(e) => setTopicId(e.target.value)}>
-          <option value="">No specific topic</option>
-          {[...byUnit.entries()].map(([unit, rows]) => (
-            <optgroup key={unit} label={unit}>
-              {rows.map((r) => (
-                <option key={r.topic_id} value={r.topic_id}>
-                  {r.topic_title}{r.status === "done" ? " ✓" : r.status === "in_progress" ? " ◐" : ""}
-                </option>
-              ))}
-            </optgroup>
+    <Section title="Topics taught" icon={<Check className="h-4 w-4" />}
+      aside={!adding ? (
+        <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
+          <Plus className="h-4 w-4" /> {plan.logged.length > 0 ? "Add another topic" : "Add topic"}
+        </Button>
+      ) : null}>
+
+      {plan.logged.length > 0 ? (
+        <ul className="mb-1 space-y-1">
+          {plan.logged.map((l) => (
+            <li key={l.id} className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
+              <Check className="h-4 w-4 shrink-0 text-[color:var(--success,#234a37)]" />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{l.topic_title ?? "No specific topic"}</span>
+                {l.note ? <span className="text-muted-foreground"> — {l.note}</span> : null}
+              </span>
+              <Badge tone={l.coverage === "full" ? "success" : "warning"}>
+                {l.coverage === "full" ? "covered" : "continues"}
+              </Badge>
+              <button type="button" aria-label="Remove log" onClick={() => remove.mutate(l.id)}
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </li>
           ))}
-        </select>
-      ) : (
-        <p className="mb-2 text-sm text-muted-foreground">No syllabus loaded for this subject yet.</p>
-      )}
-      <Input className="mb-3" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-      <div className="flex gap-2">
-        <Button className="flex-1" onClick={() => log.mutate("full")} disabled={log.isPending}>Covered</Button>
-        <Button className="flex-1" variant="outline" onClick={() => log.mutate("partial")} disabled={log.isPending}>Partially</Button>
-        {changing ? <Button variant="ghost" onClick={() => setChanging(false)}>Cancel</Button> : null}
-      </div>
+        </ul>
+      ) : null}
+
+      {adding ? (
+        <div className={plan.logged.length > 0 ? "mt-2 border-t border-border pt-3" : ""}>
+          {plan.planned_topic_title ? (
+            <p className="mb-2 text-xs text-muted-foreground">
+              Planned this week: <span className="font-medium text-foreground">{plan.planned_topic_title}</span>
+              {plan.planned_unit_title ? ` (${plan.planned_unit_title})` : ""}
+            </p>
+          ) : null}
+          {plan.progress.length > 0 ? (
+            <select
+              aria-label="Topic taught"
+              className="mb-2 h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+              value={topicId} onChange={(e) => setTopicId(e.target.value)}>
+              <option value="">No specific topic</option>
+              {[...byUnit.entries()].map(([unit, rows]) => (
+                <optgroup key={unit} label={unit}>
+                  {rows.map((r) => (
+                    <option key={r.topic_id} value={r.topic_id}>
+                      {r.topic_title}{r.status === "done" ? " ✓" : r.status === "in_progress" ? " ◐" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          ) : (
+            <p className="mb-2 text-sm text-muted-foreground">No syllabus loaded for this subject yet.</p>
+          )}
+          <Input className="mb-3" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <div className="flex gap-2">
+            <Button className="flex-1" onClick={() => log.mutate("full")} disabled={log.isPending}>Covered ✓</Button>
+            <Button className="flex-1" variant="outline" onClick={() => log.mutate("partial")} disabled={log.isPending}>
+              Partially — continues
+            </Button>
+            {plan.logged.length > 0 ? (
+              <Button variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
+            ) : null}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            “Partially” keeps the topic in tomorrow’s list — one topic can run across many days,
+            and you can log several topics in the same period.
+          </p>
+        </div>
+      ) : null}
     </Section>
   );
 }
@@ -598,7 +628,7 @@ function PeriodPageInner() {
   });
 
   if (isLoading || !card) {
-    return <p className="py-12 text-center text-sm text-muted-foreground">Loading period…</p>;
+    return <PageLoading label="Loading period…" />;
   }
 
   return (
@@ -637,7 +667,7 @@ function PeriodPageInner() {
       ) : (
         <div className="space-y-3">
           <AttendanceSection key={`att-${card.attendance_marked}`} card={card} onSaved={refresh} />
-          <TopicSection key={`topic-${card.plan.logged_topic_id ?? ""}-${card.plan.logged_coverage ?? ""}`} card={card} onSaved={refresh} />
+          <TopicSection key={`topic-${card.plan.logged.length}`} card={card} onSaved={refresh} />
           <HomeworkSection card={card} onSaved={refresh} />
           <ChecksSection card={card} />
           <DeepLogSection card={card} />

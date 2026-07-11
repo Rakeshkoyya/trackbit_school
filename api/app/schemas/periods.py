@@ -57,14 +57,28 @@ class TopicProgressRow(BaseModel):
     status: str
 
 
+class PeriodLogOut(BaseModel):
+    """One topic actually taught this period. A period can hold several (the
+    class finished one topic and started the next), and the same topic can span
+    many days via `partial` coverage until it's finished."""
+
+    id: uuid.UUID
+    topic_id: uuid.UUID | None = None
+    topic_title: str | None = None
+    coverage: str
+    note: str | None = None
+
+
 class PeriodPlanOut(BaseModel):
     """What the plan says this period is for, plus the chapter's running progress."""
 
     planned_topic_id: uuid.UUID | None = None
     planned_topic_title: str | None = None
     planned_unit_title: str | None = None
+    # First log of the period — kept for existing callers; `logged` is the full list.
     logged_topic_id: uuid.UUID | None = None
     logged_coverage: str | None = None
+    logged: list[PeriodLogOut] = []
     progress: list[TopicProgressRow] = []
 
 

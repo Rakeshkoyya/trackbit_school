@@ -965,12 +965,23 @@ export interface TeacherLoadRow {
 }
 
 // â”€â”€ period detail page (V2-P6 card) â€” the teacher's per-class capture surface â”€
+/** One topic actually taught this period — a period can hold several, and the
+ *  same topic can continue across days (partial → full). */
+export interface PeriodLog {
+  id: string;
+  topic_id: string | null;
+  topic_title: string | null;
+  coverage: string;
+  note: string | null;
+}
+
 export interface PeriodPlan {
   planned_topic_id: string | null;
   planned_topic_title: string | null;
   planned_unit_title: string | null;
   logged_topic_id: string | null;
   logged_coverage: string | null;
+  logged: PeriodLog[];
   progress: TopicProgressRow[];
 }
 

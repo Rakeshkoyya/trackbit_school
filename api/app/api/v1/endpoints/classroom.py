@@ -42,6 +42,14 @@ def create_log(body: LessonLogIn, m: CurrentMember = Depends(require_academic),
     return ClassroomService(db).log(m, body)
 
 
+@router.delete("/lesson-logs/{log_id}", response_model=MessageResponse)
+def delete_log(log_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+               db: Session = Depends(get_db)):
+    """Undo a mis-tapped topic log from the period page."""
+    ClassroomService(db).delete_log(m, log_id)
+    return MessageResponse(message="Log removed.")
+
+
 @router.post("/homework", response_model=HomeworkOut)
 def add_homework(body: HomeworkIn, m: CurrentMember = Depends(require_academic),
                  db: Session = Depends(get_db)):

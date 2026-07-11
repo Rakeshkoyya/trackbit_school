@@ -1,101 +1,287 @@
 "use client";
 
+// Session capture — a guided flow, attendance first (P1v2 budget: 15 students in
+// under a minute). Step 1 attendance (tap-cycle, all-present fast path), step 2
+// homework (tap only who DIDN'T do it), step 3 batch photo + done. Re-opening a
+// captured session lands on the summary with edit shortcuts.
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Camera, Check, ImageIcon } from "lucide-react";
+import {
+  ArrowLeft, ArrowRight, BookOpen, CalendarClock, Camera, Check, ImageIcon,
+  Loader2, PlayCircle, Users,
+} from "lucide-react";
 import Link from "next/link";
 import { use, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageLoading } from "@/components/ui/page-loading";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type { AttendanceStatus, MeetingRow } from "@/lib/school-types";
+import type { AttendanceStatus, Meeting } from "@/lib/school-types";
 
-type Edit = { status: AttendanceStatus; late_minutes: number | null; homework_done: boolean | null };
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const NEXT: Record<AttendanceStatus, AttendanceStatus> = { present: "late", late: "absent", absent: "present" };
-const STATUS_STYLE: Record<AttendanceStatus, string> = {
-  present: "bg-[#e7efe9] text-[#234a37]",
-  late: "bg-warning-soft text-warning",
-  absent: "bg-muted text-muted-foreground line-through",
+const TONE: Record<AttendanceStatus, "success" | "warning" | "danger"> = {
+  present: "success", late: "warning", absent: "danger",
 };
 
-function CaptureInner({ id }: { id: string }) {
-  const qc = useQueryClient();
-  const [edits, setEdits] = useState<Record<string, Edit>>({});
-  // open (get-or-create) today's meeting once
-  const { data: meeting } = useQuery({ queryKey: ["meeting", id], queryFn: () => schoolApi.openMeeting(id) });
+type Step = "attendance" | "homework" | "done";
+type Row = { status: AttendanceStatus; late_minutes: number | null; hw_done: boolean };
 
-  const eff = (r: MeetingRow): Edit =>
-    edits[r.student_id] ?? {
+function StepDots({ step }: { step: Step }) {
+  const order: Step[] = ["attendance", "homework", "done"];
+  const labels = { attendance: "Attendance", homework: "Homework", done: "Wrap up" };
+  return (
+    <ol className="mb-4 flex items-center gap-2 text-xs">
+      {order.map((s, i) => {
+        const active = order.indexOf(step) === i;
+        const passed = order.indexOf(step) > i;
+        return (
+          <li key={s} className="flex items-center gap-2">
+            <span className={`grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold ${passed ? "bg-[color:var(--success,#234a37)] text-white" : active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+              {passed ? <Check className="h-3 w-3" /> : i + 1}
+            </span>
+            <span className={active ? "font-semibold" : "text-muted-foreground"}>{labels[s]}</span>
+            {i < order.length - 1 ? <span className="w-4 border-t border-border" /> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CaptureFlow({ meeting, sessionName, onExit }: {
+  meeting: Meeting; sessionName: string; onExit: () => void;
+}) {
+  const qc = useQueryClient();
+  const alreadyCaptured = meeting.roster.some((r) => r.status != null);
+  const [step, setStep] = useState<Step>(alreadyCaptured ? "done" : "attendance");
+  const [rows, setRows] = useState<Record<string, Row>>(() =>
+    Object.fromEntries(meeting.roster.map((r) => [r.student_id, {
       status: (r.status as AttendanceStatus) ?? "present",
-      late_minutes: r.late_minutes, homework_done: r.homework_done,
-    };
-  const setEdit = (r: MeetingRow, patch: Partial<Edit>) =>
-    setEdits((p) => ({ ...p, [r.student_id]: { ...eff(r), ...patch } }));
+      late_minutes: r.late_minutes,
+      hw_done: r.homework_done ?? true,
+    }])));
+
+  const patch = (id: string, p: Partial<Row>) =>
+    setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...p } }));
 
   const save = useMutation({
-    mutationFn: () => schoolApi.recordAttendance(meeting!.id, meeting!.roster.map((r) => {
-      const e = eff(r);
-      return { student_id: r.student_id, status: e.status, late_minutes: e.status === "late" ? e.late_minutes ?? 0 : null, homework_done: e.homework_done };
-    })),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["meeting", id] }); setEdits({}); toast.success("Attendance saved"); },
+    mutationFn: (next: Step) => schoolApi.recordAttendance(meeting.id, meeting.roster.map((r) => {
+      const e = rows[r.student_id];
+      return {
+        student_id: r.student_id, status: e.status,
+        late_minutes: e.status === "late" ? e.late_minutes ?? 0 : null,
+        homework_done: e.status === "absent" ? null : e.hw_done,
+      };
+    })).then(() => next),
+    onSuccess: (next) => {
+      qc.invalidateQueries({ queryKey: ["session-meeting", meeting.session_id] });
+      toast.success("Saved");
+      setStep(next);
+    },
     onError: (e) => showApiError(e, "Could not save"),
   });
   const photo = useMutation({
-    mutationFn: (file: File) => schoolApi.uploadEvidence(meeting!.id, file),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["meeting", id] }); toast.success("Photo attached"); },
+    mutationFn: (file: File) => schoolApi.uploadEvidence(meeting.id, file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["session-meeting", meeting.session_id] });
+      toast.success("Photo attached");
+    },
     onError: (e) => showApiError(e, "Could not upload"),
   });
 
-  if (!meeting) return null;
+  const vals = Object.values(rows);
+  const absent = vals.filter((r) => r.status === "absent").length;
+  const late = vals.filter((r) => r.status === "late").length;
+  const present = vals.length - absent;
+  const hwMissing = meeting.roster.filter((r) => rows[r.student_id].status !== "absent" && !rows[r.student_id].hw_done).length;
+  const saving = save.isPending;
 
   return (
-    <div className="pb-24">
-      <Link href="/sessions" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+    <div>
+      <StepDots step={step} />
+
+      {step === "attendance" ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+            <Users className="h-4 w-4" /> Who’s here?
+          </h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Everyone starts present — tap a name to cycle present → late → absent.
+            {" "}{present}/{vals.length} present{late ? ` · ${late} late` : ""}{absent ? ` · ${absent} absent` : ""}
+          </p>
+          <div className="mb-3 grid gap-1 sm:grid-cols-2">
+            {meeting.roster.map((r) => {
+              const e = rows[r.student_id];
+              return (
+                <div key={r.student_id} className="flex items-center gap-1.5">
+                  <button type="button" onClick={() => patch(r.student_id, { status: NEXT[e.status] })}
+                    className="flex min-w-0 flex-1 items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-left text-sm active:scale-[0.99]">
+                    <span className="truncate">{r.roll_no ? `${r.roll_no}. ` : ""}{r.full_name}</span>
+                    <Badge tone={TONE[e.status]}>{e.status}</Badge>
+                  </button>
+                  {e.status === "late" ? (
+                    <Input className="h-9 w-14 shrink-0" type="number" placeholder="min"
+                      aria-label={`${r.full_name} minutes late`}
+                      value={e.late_minutes ?? ""}
+                      onChange={(ev) => patch(r.student_id, { late_minutes: ev.target.value ? Number(ev.target.value) : null })} />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <Button className="w-full" disabled={saving} onClick={() => save.mutate("homework")}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+            {absent || late ? "Save attendance & continue" : "All present ✓ — continue"}
+          </Button>
+        </section>
+      ) : null}
+
+      {step === "homework" ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-1 flex items-center gap-1.5 text-sm font-semibold">
+            <BookOpen className="h-4 w-4" /> Homework check
+          </h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Tap only the students who did <span className="font-semibold">not</span> do their homework.
+          </p>
+          <div className="mb-3 grid gap-1 sm:grid-cols-2">
+            {meeting.roster.map((r) => {
+              const e = rows[r.student_id];
+              if (e.status === "absent") {
+                return (
+                  <div key={r.student_id} className="flex items-center justify-between rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                    <span className="truncate line-through">{r.full_name}</span>
+                    <span className="text-xs">absent</span>
+                  </div>
+                );
+              }
+              return (
+                <button key={r.student_id} type="button" onClick={() => patch(r.student_id, { hw_done: !e.hw_done })}
+                  className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-left text-sm active:scale-[0.99]">
+                  <span className="truncate">{r.roll_no ? `${r.roll_no}. ` : ""}{r.full_name}</span>
+                  {e.hw_done ? <Badge tone="success">did it</Badge> : <Badge tone="warning">didn’t do it</Badge>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setStep("attendance")} disabled={saving}>
+              <ArrowLeft className="h-4 w-4" /> Back
+            </Button>
+            <Button className="flex-1" disabled={saving} onClick={() => save.mutate("done")}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              {hwMissing ? `Save — ${hwMissing} didn’t do it` : "Everyone did it ✓ — finish"}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {step === "done" ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold">
+            <Check className="h-4 w-4 text-[color:var(--success,#234a37)]" /> {sessionName} · captured
+          </h2>
+          <div className="mb-4 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-border bg-background py-3">
+              <p className="text-xl font-semibold">{present}/{vals.length}</p>
+              <p className="text-xs text-muted-foreground">present</p>
+            </div>
+            <div className="rounded-lg border border-border bg-background py-3">
+              <p className="text-xl font-semibold">{late}</p>
+              <p className="text-xs text-muted-foreground">late</p>
+            </div>
+            <div className="rounded-lg border border-border bg-background py-3">
+              <p className="text-xl font-semibold">{hwMissing}</p>
+              <p className="text-xs text-muted-foreground">no homework</p>
+            </div>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <label className="inline-flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40">
+              {photo.isPending ? <Loader2 className="h-4 w-4 animate-spin" />
+                : meeting.evidence_url ? <ImageIcon className="h-4 w-4 text-primary" /> : <Camera className="h-4 w-4" />}
+              {meeting.evidence_url ? "Photo added — retake" : "Add one batch photo"}
+              <input type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={(ev) => { const f = ev.target.files?.[0]; if (f) photo.mutate(f); }} />
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setStep("attendance")}>Edit attendance</Button>
+            <Button variant="outline" className="flex-1" onClick={() => setStep("homework")}>Edit homework</Button>
+            <Button className="flex-1" onClick={onExit}>Done</Button>
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function SessionInner({ id }: { id: string }) {
+  const [capturing, setCapturing] = useState(false);
+  const { data: session, isLoading } = useQuery({
+    queryKey: ["session", id],
+    queryFn: () => schoolApi.session(id),
+  });
+  // Get-or-create today's meeting — only once the teacher taps "Take session".
+  const { data: meeting, isLoading: opening } = useQuery({
+    queryKey: ["session-meeting", id],
+    queryFn: () => schoolApi.openMeeting(id),
+    enabled: capturing,
+  });
+
+  if (isLoading || !session) return <PageLoading label="Loading session…" />;
+
+  return (
+    <div className="mx-auto max-w-2xl pb-8">
+      <Link href="/sessions" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Sessions
       </Link>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Today’s session</h1>
-      <p className="mb-4 text-sm text-muted-foreground">Tap a name to cycle present → late → absent. Toggle homework.</p>
-
-      <div className="space-y-2">
-        {meeting.roster.map((r) => {
-          const e = eff(r);
-          return (
-            <div key={r.student_id} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5">
-              <button onClick={() => setEdit(r, { status: NEXT[e.status] })}
-                className={`min-w-0 flex-1 rounded-md px-3 py-2 text-left text-sm font-medium ${STATUS_STYLE[e.status]}`}>
-                {r.full_name} <span className="text-xs font-normal">· {e.status}</span>
-              </button>
-              {e.status === "late" ? (
-                <Input className="h-8 w-14" type="number" placeholder="min" value={e.late_minutes ?? ""}
-                  onChange={(ev) => setEdit(r, { late_minutes: ev.target.value ? Number(ev.target.value) : null })} />
-              ) : null}
-              <button onClick={() => setEdit(r, { homework_done: !e.homework_done })}
-                className={`flex h-8 w-8 items-center justify-center rounded-md border ${e.homework_done ? "border-primary bg-accent text-accent-foreground" : "border-border text-muted-foreground"}`}
-                aria-label="Homework done" title="Homework done">
-                <Check className="h-4 w-4" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Sticky footer: one batch photo (P5) + Done */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-4 py-3 backdrop-blur lg:pl-64">
-        <div className="mx-auto flex max-w-2xl items-center gap-2 lg:max-w-4xl">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm">
-            {meeting.evidence_url ? <ImageIcon className="h-4 w-4 text-primary" /> : <Camera className="h-4 w-4" />}
-            {meeting.evidence_url ? "Photo added" : "Batch photo"}
-            <input type="file" accept="image/*" capture="environment" className="hidden"
-              onChange={(ev) => { const f = ev.target.files?.[0]; if (f) photo.mutate(f); }} />
-          </label>
-          <Button className="flex-1" onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Done"}
-          </Button>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{session.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            {session.weekdays.map((d) => DOW[d]).join(" · ") || "no days set"}
+            {session.time ? ` · ${session.time.slice(0, 5)}` : ""} · {session.students.length} students
+          </p>
         </div>
+        {!capturing ? (
+          <Button onClick={() => setCapturing(true)}>
+            <PlayCircle className="h-4 w-4" /> Take today’s session
+          </Button>
+        ) : null}
       </div>
+
+      {!capturing ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+            <Users className="h-4 w-4" /> Roster
+          </h2>
+          {session.students.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No students in this session yet.</p>
+          ) : (
+            <ul className="grid gap-1 text-sm sm:grid-cols-2">
+              {session.students.map((s) => (
+                <li key={s.student_id} className="rounded-md border border-border bg-background px-3 py-1.5">
+                  {s.roll_no ? `${s.roll_no}. ` : ""}{s.full_name}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CalendarClock className="h-3.5 w-3.5" />
+            “Take today’s session” opens attendance first, then the homework check — under a minute.
+          </p>
+        </section>
+      ) : opening || !meeting ? (
+        <PageLoading label="Opening today’s session…" />
+      ) : (
+        <CaptureFlow meeting={meeting} sessionName={session.name} onExit={() => setCapturing(false)} />
+      )}
     </div>
   );
 }
@@ -104,7 +290,7 @@ export default function SessionCapturePage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   return (
     <AuthGuard allow={["admin", "teacher"]}>
-      <CaptureInner id={id} />
+      <SessionInner id={id} />
     </AuthGuard>
   );
 }

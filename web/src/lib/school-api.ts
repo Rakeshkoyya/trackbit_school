@@ -192,6 +192,7 @@ export const schoolApi = {
     period_id?: string | null;
     period_no?: number | null;
   }) => api.post<{ id: string }>("/classroom/lesson-logs", b),
+  deleteLog: (id: string) => api.del<{ message: string }>(`/classroom/lesson-logs/${id}`),
   addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null; student_id?: string | null }) =>
     api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
   checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
