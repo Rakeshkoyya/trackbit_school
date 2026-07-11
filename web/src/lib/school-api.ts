@@ -73,6 +73,11 @@ export const schoolApi = {
 
   classSubjects: (classId: string) =>
     api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
+  /** Copy another class's subjects (+ syllabus) onto this one — for sibling sections. */
+  copyClassSubjects: (classId: string, fromClassId: string, includeSyllabus = true) =>
+    api.post<{ subjects_added: number; units_copied: number; topics_copied: number }>(
+      `/academics/classes/${classId}/copy-subjects`,
+      { from_class_id: fromClassId, include_syllabus: includeSyllabus }),
   /** Periods/week per subject vs the week's capacity, with a suggested split. */
   classAllocation: (classId: string) =>
     api.get<import("@/lib/school-types").ClassAllocation>(`/academics/classes/${classId}/allocation`),

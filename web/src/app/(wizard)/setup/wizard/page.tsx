@@ -37,6 +37,7 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { BulkAddPanel } from "@/components/members/bulk-add-panel";
 import { ClassSubjectsPanel } from "@/components/school/class-subjects-panel";
 import { ExamFitPanel } from "@/components/school/exam-fit-panel";
+import { SyllabusEditor } from "@/components/school/plan-shared";
 import { ExamPortions } from "@/components/wizard/exam-portions";
 import { Dropzone, GapQuestions, MappingPreview } from "@/components/wizard/import-panel";
 import { Aside, Stat, StepFrame, StepRail } from "@/components/wizard/shell";
@@ -756,6 +757,18 @@ function SyllabusStep() {
   const csId = css?.some((c) => c.id === pickedCs) ? pickedCs : (css?.[0]?.id ?? "");
   const [draft, setDraft] = useState<SyllabusAnalyzeResult | null>(null);
   const [text, setText] = useState("");
+  const { data: terms = [] } = useQuery({
+    queryKey: ["terms", year?.id],
+    queryFn: () => schoolApi.terms(year!.id),
+    enabled: !!year,
+  });
+  // What's already saved on this class-subject — so re-selecting 6 · Maths shows
+  // the imported chapters and lets the admin edit or delete them right here.
+  const { data: existing = [] } = useQuery({
+    queryKey: ["syllabus", csId],
+    queryFn: () => schoolApi.syllabus(csId),
+    enabled: !!csId,
+  });
 
   const analyzeFile = useMutation({
     mutationFn: (f: File) => schoolApi.syllabusImportAnalyze(f),
@@ -882,6 +895,16 @@ function SyllabusStep() {
 
       {!draft ? (
         <>
+          {existing.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">
+                Already saved on this subject — edit here, or import again to replace it.
+              </p>
+              <div className="max-h-80 overflow-auto rounded-xl border border-border p-3">
+                <SyllabusEditor csId={csId} canEdit terms={terms} />
+              </div>
+            </div>
+          ) : null}
           <Dropzone
             busy={analyzeFile.isPending}
             onFile={(f) => analyzeFile.mutate(f)}
@@ -1356,14 +1379,17 @@ function GenerateStep({ onDone }: { onDone: () => void }) {
     >
       {gaps.length ? (
         <div className="space-y-1.5 rounded-xl border border-danger/40 bg-danger/5 p-3">
-          <p className="text-sm font-medium">Fix these first — the plan would be wrong:</p>
+          <p className="text-sm font-medium">Generation is blocked until these are fixed:</p>
           {gaps.map((g, i) => (
             <p key={i} className="text-xs text-muted-foreground">{g}</p>
           ))}
+          <p className="pt-1 text-xs text-muted-foreground">
+            Go back to the step that owns the gap; this list refreshes as you fix them.
+          </p>
         </div>
       ) : null}
 
-      <Button onClick={() => run.mutate()} disabled={run.isPending}>
+      <Button onClick={() => run.mutate()} disabled={run.isPending || gaps.length > 0}>
         {run.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Generate every plan
       </Button>

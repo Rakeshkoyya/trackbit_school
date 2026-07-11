@@ -135,6 +135,19 @@ class ClassAllocationOut(BaseModel):
     rows: list[AllocationRow]
 
 
+class CopySubjectsIn(BaseModel):
+    """Sections of the same class teach the same subjects — set 6-A up once and
+    copy it onto 6-B instead of typing everything twice."""
+    from_class_id: uuid.UUID
+    include_syllabus: bool = True
+
+
+class CopySubjectsOut(BaseModel):
+    subjects_added: int
+    units_copied: int
+    topics_copied: int
+
+
 class AllocationItemIn(BaseModel):
     class_subject_id: uuid.UUID
     periods_per_week: int = Field(ge=0, le=60)

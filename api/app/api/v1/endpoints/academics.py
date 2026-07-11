@@ -21,6 +21,8 @@ from app.schemas.academics import (
     ClassSubjectOut,
     ClassSubjectUpdate,
     ClassUpdate,
+    CopySubjectsIn,
+    CopySubjectsOut,
     SubjectCreate,
     SubjectOut,
     TermCreate,
@@ -169,6 +171,15 @@ def update_class_subject(cs_id: uuid.UUID, body: ClassSubjectUpdate,
                          m: CurrentMember = Depends(require_admin),
                          db: Session = Depends(get_db)):
     return AcademicService(db).update_class_subject(m, cs_id, body)
+
+
+@router.post("/classes/{class_id}/copy-subjects", response_model=CopySubjectsOut)
+def copy_class_subjects(class_id: uuid.UUID, body: CopySubjectsIn,
+                        m: CurrentMember = Depends(require_admin),
+                        db: Session = Depends(get_db)):
+    """Copy another class's subjects (+ optionally syllabus) onto this one —
+    sections of the same class teach the same things."""
+    return AcademicService(db).copy_class_subjects(m, class_id, body)
 
 
 @router.get("/classes/{class_id}/allocation", response_model=ClassAllocationOut)

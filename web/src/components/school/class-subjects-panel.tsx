@@ -34,7 +34,9 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
     queryFn: () => schoolApi.classSubjects(classId),
     enabled: !!classId,
   });
+  const [copyFrom, setCopyFrom] = useState("");
   const { data: subjects = [] } = useQuery({ queryKey: ["subjects"], queryFn: schoolApi.subjects });
+  const { data: allClasses = [] } = useQuery({ queryKey: ["classes-all"], queryFn: () => schoolApi.classes() });
   const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
   const { data: allocation } = useQuery({
     queryKey: ["class-allocation", classId],
@@ -49,6 +51,21 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
     qc.invalidateQueries({ queryKey: ["class-allocation", classId] });
     qc.invalidateQueries({ queryKey: ["forecast"] });
   };
+
+  const copy = useMutation({
+    mutationFn: () => schoolApi.copyClassSubjects(classId, copyFrom),
+    onSuccess: (r) => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ["syllabus"] });
+      qc.invalidateQueries({ queryKey: ["wizard"] });
+      toast.success(
+        r.subjects_added || r.units_copied
+          ? `Copied ${r.subjects_added} subject(s) · ${r.units_copied} chapters`
+          : "Nothing to copy — this class already has it all");
+      setCopyFrom("");
+    },
+    onError: (e) => showApiError(e, "Could not copy"),
+  });
 
   const applySuggested = useMutation({
     mutationFn: () =>
@@ -208,6 +225,27 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
           )}
         </div>
       ))}
+
+      {canEdit ? (
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 border-b border-border/60 pb-1.5 text-xs">
+          <span className="text-muted-foreground">Same as another section?</span>
+          <select
+            aria-label="Class to copy subjects from"
+            className="rounded border border-border bg-card px-1.5 py-1 text-xs"
+            value={copyFrom}
+            onChange={(e) => setCopyFrom(e.target.value)}
+          >
+            <option value="">Copy from…</option>
+            {allClasses.filter((c) => c.id !== classId).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>
+            ))}
+          </select>
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs"
+            disabled={!copyFrom || copy.isPending} onClick={() => copy.mutate()}>
+            Copy subjects &amp; syllabus
+          </Button>
+        </div>
+      ) : null}
 
       {canEdit ? (
         <form

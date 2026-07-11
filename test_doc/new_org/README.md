@@ -1,72 +1,123 @@
-# new_org — full setup walkthrough pack
+# new_org — full setup walkthrough (classes 5 · 6 · 7)
 
-Documents for testing the whole setup wizard on a **fresh organisation**, end to end,
-including the new planner features (periods/week capture, whole-school timetable
-generation, exam-gap fit, computed class week). Regenerate with
-`cd api && uv run python ../test_doc/new_org/generate.py`.
+Clean mock data for testing the whole academic-planner setup on a **fresh organisation**.
+Every row is valid — imports should land 100%, and the final generate step should lock
+every plan. Regenerate files with `cd api && uv run python ../test_doc/new_org/generate.py`.
 
-## What to enter at each wizard step
+**The school this pack describes:**
+- 3 classes — **5, 6, 7** (leave Section blank everywhere)
+- 6 subjects — **Mathematics, Science, English, Social Studies, Hindi, IT**
+- 5 teachers — **Anil Kumar teaches two subjects** (Math + Science on class 5)
+- 10 students per class (30 total)
+- Every class's week is exactly full: 9+9+8+8+7+7 = **48 of 48 periods**
 
-| Step | What to do |
-|---|---|
-| 1 · Year | Label **2026-27**, `2026-06-15` → `2027-04-15`. Add terms **Term 1** (`2026-06-15` → `2026-10-31`) and **Term 2** (`2026-11-01` → `2027-04-15`). |
-| 2 · Timings | Mon–Sat working, **8 periods/day**. (Capacity becomes 48 periods/week per class.) |
-| 3 · Classes | **6-A, 6-B, 7-A** |
-| 4 · Subjects | **English, Mathematics, Science, Social Studies, Hindi** |
-| 5 · Teachers | Import **`teachers_staff.xlsx`** |
-| 6 · Syllabus | Per class-subject: **`syllabus_maths_termwise.xlsx`** on each Mathematics, **`syllabus_science.xlsx`** on each Science, **`syllabus_generic.xlsx`** on English + Social Studies, paste **`syllabus_hindi.txt`** on Hindi |
-| 7 · Calendar | Paint exams in the UI: e.g. **Term 1 Exam** `2026-09-21` → `2026-09-26`, **Term 2 Exam** `2027-03-08` → `2027-03-13`, plus a Diwali holiday week in Nov. Then set each exam's **portion** per subject — the **Exam fit** panel updates live as you do. |
-| 8 · Students | Import **`students_roster.xlsx`** |
-| 9 · Timetable | Tap **“Generate the whole school's timetable”** → preview → apply. |
-| 10 · Generate | Check the **gap report** is clean, then *Generate every plan* → *Approve & lock*. |
+---
 
-## What each file should produce
+## Step-by-step: what to do and what to decide
 
-**`teachers_staff.xlsx`** — 7 rows.
-- 6 teachers created; assignments carry **periods/week** via the `x10` / `x9` suffixes.
-- Every class ends up allocated **exactly 48 of 48** periods/week
-  (Maths 10 · Science 10 · English 10 · Social 9 · Hindi 9) — check the
-  "48 of 48 periods/week allocated" line on each class in the staff step.
-- `Divya Nair`: her `9-C Astronomy x4` token comes back **unresolved** (no such
-  class/subject); `7-A Hindi x9` still lands — so 7-A Hindi's teacher is Divya, and
-  Farhan keeps 6-A/6-B Hindi.
-- The nameless row lands in `errors`.
+### Step 1 — Academic year
+Label **2026-27**, from **2026-06-15** to **2027-04-15**.
+Add both terms (the syllabus files reference them by name — spell them exactly):
+- **Term 1** — 2026-06-15 → 2026-10-31
+- **Term 2** — 2026-11-01 → 2027-04-15
 
-**`students_roster.xlsx`** — 33 rows → **created 31, errors 2**.
-- 30 assigned across 6-A / 6-B / 7-A (10 each), each with father+mother guardian rows.
-- `Zoya Ansari` names class 8-A → imports **unassigned**.
-- One row missing a name, one missing an admission no → `errors`.
+### Step 2 — School timings
+Working days **Mon–Sat**, **8 periods/day**.
+*Decision:* this fixes each class's weekly capacity at 48 — the staff file's `x` numbers
+are built to sum to exactly that.
 
-**`syllabus_maths_termwise.xlsx`** — 11 chapters / 24 topics with a **Term** column.
-- Term 1 chapters are sized (≈52 periods); **Term 2 chapters have blank Periods** —
-  they import as *unsized*, are never scheduled, and the generate step reports them.
-  This is the correct term-wise state: size them when Term 2 begins
-  (Plan → Syllabus → set periods → generate Term 2).
+### Step 3 — Classes
+Add **5**, **6**, **7**. Leave the section field **blank** (one section per grade, so no
+A/B duplication).
 
-**`syllabus_science.xlsx`** — 11 chapters / 26 topics, fully sized (≈84 periods).
+### Step 4 — Subjects
+Add all six: **Mathematics, Science, English, Social Studies, Hindi, IT**
+(spell them exactly — the staff file's assignments resolve by name).
 
-**`syllabus_generic.xlsx`** — 7 units / 21 topics (≈68 periods). Reusable on any
-class-subject that needs a sized syllabus quickly.
+### Step 5 — Teachers & assignments
+Import **`teachers_staff.xlsx`** → 5 accounts, 18 assignments, zero errors.
+- ⚠️ **Write down the generated passwords** shown after import — you'll want them to log
+  in as a teacher later (e.g. to see My Day).
+- Check each class's panel now reads **“48 of 48 periods/week allocated”**. That's the
+  `x9`/`x8`/`x7` suffixes doing their job.
+- Anil Kumar should show on both 5-Mathematics and 5-Science.
 
-**`syllabus_hindi.txt`** — paste path; trailing `(3)` becomes `est_periods = 3`.
+### Step 6 — Syllabus (the shortcut matters)
+Only import onto **class 5**, then copy:
+1. On class **5**, import each file onto its subject:
+   `syllabus_mathematics.xlsx` · `syllabus_science.xlsx` · `syllabus_english.xlsx` ·
+   `syllabus_social_studies.xlsx` · `syllabus_hindi.xlsx` · `syllabus_it.xlsx`
+   (each shows a draft first — chapters split into Term 1/Term 2, every topic sized —
+   then *Save to this subject*).
+2. Go back to **Teachers & assignments**, open class **6**'s subject panel, and use
+   **“Same as another section? Copy from 5”** → copies all six subjects' syllabus in one
+   click. Repeat for class **7**.
+3. Back on the Syllabus step, re-select any class+subject — the saved chapters now show
+   right there, editable (change a period count, delete a topic) without re-importing.
 
-## What to verify after setup (the new V2-P12 surfaces)
+*Decision:* real grades have different syllabi; reusing one file per subject across
+5/6/7 is a mock-data convenience.
 
-1. **Timetable** (Plan → Timetable): every class full 48/48, no teacher in two places
-   at once. Suresh (Maths in all 3 classes) is the clash-pressure case.
-2. **Exam fit** (Plan → Year, and in the wizard's calendar step): after portions are
-   set, each subject shows *won't fit / manageable / perfect / spare time* with
-   "needs Xp · has ~Yp". **Drag the Term 1 exam earlier** (delete + repaint a week
-   earlier) and watch verdicts tighten; move it later and they relax.
-3. **Class week** (Plan → Week plan): the day-by-day grid — subject + topic per
-   period. Log a lesson from My Day, come back: that cell turns green (actual) and
-   the projection shifts.
-4. **Forecast** (Plan → Week plan): Maths shows the Term-2 chapters as unsized
-   (`unplanned`) until you size them — never a false green.
-5. **Gap report** (wizard step 10): should be clean with this pack. To see it fire,
-   skip a syllabus import for one class or skip the timetable step.
+### Step 7 — Calendar, holidays & exams (all in the UI)
+Paint on the calendar:
+- **Term 1 Exam** — 2026-09-21 → 2026-09-26
+- **Term 2 Exam** — 2027-03-08 → 2027-03-13
+- A **Diwali holiday** week, e.g. 2026-11-09 → 2026-11-14
+- Any other holidays you like — watch **teaching days** recompute.
 
-## Deliberate failure rows (don't "fix" them)
+Then set **exam portions** per class: for the Term 1 exam pick roughly the last Term-1
+chapter of each subject ("up to *Integers*" for Maths, "up to *Changes Around Us*" for
+Science, …); for Term 2 pick the final chapter.
 
-Same philosophy as `../README.md`: each importer file carries rows meant to fail so
-the `errors` / `unresolved` / unassigned surfaces get exercised, not just the happy path.
+**Watch the Exam fit panel** below the calendar: every subject should read *perfect* or
+*spare time* with real numbers ("needs 42p · has ~126p"). Now **delete the Term 1 exam
+and repaint it 6–8 weeks earlier** — verdicts flip toward *manageable / won't fit*.
+That's the guidance loop you asked for. Repaint it back when done.
+
+### Step 8 — Students
+Import **`students_roster.xlsx`** → **created 30, skipped 0, errors 0**.
+Check the **Students page**: table view with class column; filter by class 5/6/7;
+click a row → **Edit details** → change a roll number → Save.
+
+### Step 9 — Timetable
+Tap **“Generate the whole school's timetable”** → preview should say
+**144 periods across 3 classes** with *every subject placed cleanly* (no teacher
+double-booked — Priya carries 45/48 periods, the tightest load). Apply.
+Open a class grid and spot-check: no two classes share a teacher in the same period.
+
+### Step 10 — Generate & lock
+- The gap report should be **empty** (button enabled). To see the blocking work, try
+  this first: delete one subject's syllabus (Syllabus step → trash a chapter set) and
+  come back — generation is blocked with a named gap. Restore it (re-import/copy).
+- **Generate every plan** → all 18 subjects come back **clean** (fits, in order,
+  before their exams).
+- **Approve & lock 18 plans** → done screen.
+
+---
+
+## After setup — what to verify
+
+1. **Plan → Week plan**: pick a class → the **class week grid** shows every period with
+   its topic. Navigate weeks; future weeks show the projected syllabus.
+2. **Plan → Year**: exam fit panel + calendar live here permanently.
+3. **Log in as a teacher** (e.g. Priya's generated password): **My Day** shows her
+   periods from the generated timetable; take attendance on one period, log the topic.
+   Return to Plan → Week plan as admin — that cell is now green (actual).
+4. **Plan → Classes**: every subject **on track** (green), none `unallocated`/`not sized`.
+5. **Students**: filter, search, edit — and open a student to see today's timeline after
+   some attendance exists.
+
+## Files
+
+| File | Where | Expect |
+|---|---|---|
+| `teachers_staff.xlsx` | Setup wizard → Teachers | 5 created · 18 assignments · 48/48 per class |
+| `students_roster.xlsx` | Wizard → Students (or Students → Import) | 30 created, 0 errors |
+| `syllabus_mathematics.xlsx` | Syllabus → class 5 → Mathematics | 11 ch · 24 topics · 85p, termed |
+| `syllabus_science.xlsx` | Syllabus → class 5 → Science | 11 ch · 26 topics · 82p |
+| `syllabus_english.xlsx` | Syllabus → class 5 → English | 10 ch · 20 topics · 70p |
+| `syllabus_social_studies.xlsx` | Syllabus → class 5 → Social Studies | 11 ch · 22 topics · 72p |
+| `syllabus_hindi.xlsx` | Syllabus → class 5 → Hindi | 10 ch · 20 topics · 62p |
+| `syllabus_it.xlsx` | Syllabus → class 5 → IT | 9 ch · 18 topics · 60p |
+
+Classes 6 and 7 get their syllabus via **Copy from 5** (one click each).

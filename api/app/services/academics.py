@@ -9,7 +9,7 @@ org filter so nothing can point across tenants.
 import uuid
 
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
@@ -34,6 +34,8 @@ from app.schemas.academics import (
     ClassSubjectOut,
     ClassSubjectUpdate,
     ClassUpdate,
+    CopySubjectsIn,
+    CopySubjectsOut,
     SubjectCreate,
     SubjectOut,
     TermCreate,
@@ -255,6 +257,62 @@ class AcademicService:
 
     def delete_class_subject(self, m: CurrentMember, cs_id: uuid.UUID) -> None:
         self.db.delete(self._scoped(ClassSubject, m.org_id, cs_id))
+
+    # ── copy a class's setup onto a sibling section ───────────────────────────
+    def copy_class_subjects(self, m: CurrentMember, class_id: uuid.UUID,
+                            body: CopySubjectsIn) -> CopySubjectsOut:
+        """Copy 6-A's subjects (teacher + periods/week) — and optionally each
+        subject's syllabus — onto 6-B. Additive and idempotent: a subject the
+        target already has is left untouched, and syllabus is only copied onto a
+        subject whose syllabus is still empty (never merged, never overwritten)."""
+        target = self._scoped(SchoolClass, m.org_id, class_id)
+        source = self._scoped(SchoolClass, m.org_id, body.from_class_id)
+        if target.id == source.id:
+            raise ValidationError("Pick a different class to copy from.")
+
+        src_rows = list(self.db.scalars(select(ClassSubject).where(
+            ClassSubject.org_id == m.org_id, ClassSubject.class_id == source.id)))
+        existing = {cs.subject_id: cs for cs in self.db.scalars(select(ClassSubject).where(
+            ClassSubject.org_id == m.org_id, ClassSubject.class_id == target.id))}
+
+        subjects_added = units_copied = topics_copied = 0
+        for src in src_rows:
+            dst = existing.get(src.subject_id)
+            if dst is None:
+                dst = ClassSubject(
+                    org_id=m.org_id, class_id=target.id, subject_id=src.subject_id,
+                    teacher_member_id=src.teacher_member_id,
+                    periods_per_week=src.periods_per_week)
+                self.db.add(dst)
+                self.db.flush()
+                subjects_added += 1
+            if not body.include_syllabus:
+                continue
+            has_units = self.db.scalar(select(SyllabusUnit.id).where(
+                SyllabusUnit.org_id == m.org_id,
+                SyllabusUnit.class_subject_id == dst.id).limit(1))
+            if has_units:
+                continue
+            src_units = self.db.scalars(
+                select(SyllabusUnit)
+                .where(SyllabusUnit.org_id == m.org_id,
+                       SyllabusUnit.class_subject_id == src.id)
+                .options(selectinload(SyllabusUnit.topics))
+                .order_by(SyllabusUnit.position))
+            for u in src_units:
+                nu = SyllabusUnit(org_id=m.org_id, class_subject_id=dst.id, title=u.title,
+                                  position=u.position, term_id=u.term_id)
+                self.db.add(nu)
+                self.db.flush()
+                units_copied += 1
+                for t in sorted(u.topics, key=lambda t: t.position):
+                    self.db.add(SyllabusTopic(
+                        org_id=m.org_id, unit_id=nu.id, title=t.title,
+                        position=t.position, est_periods=t.est_periods))
+                    topics_copied += 1
+        self.db.flush()
+        return CopySubjectsOut(subjects_added=subjects_added, units_copied=units_copied,
+                               topics_copied=topics_copied)
 
     # ── class allocation (the week's period budget) ──────────────────────────
     # periods_per_week stays *entered, never generated* (§11 fence): `suggested`

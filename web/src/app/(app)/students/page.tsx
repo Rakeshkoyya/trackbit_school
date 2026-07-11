@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -88,8 +88,75 @@ function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: 
   );
 }
 
+function EditStudentForm({ data, onSaved }: { data: import("@/lib/school-types").StudentDetail; onSaved: () => void }) {
+  const qc = useQueryClient();
+  const { yearId } = useYear();
+  const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId ?? undefined), enabled: !!yearId });
+  const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: schoolApi.categories });
+  const [form, setForm] = useState({
+    full_name: data.full_name,
+    roll_no: data.roll_no ?? "",
+    class_id: data.class_id ?? "",
+    category_id: data.category_id ?? "",
+    status: data.status,
+  });
+
+  const save = useMutation({
+    mutationFn: () => schoolApi.updateStudent(data.id, {
+      full_name: form.full_name.trim(),
+      roll_no: form.roll_no.trim() || null,
+      class_id: form.class_id || null,
+      category_id: form.category_id || null,
+      status: form.status,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["students"] });
+      qc.invalidateQueries({ queryKey: ["student", data.id] });
+      toast.success("Saved");
+      onSaved();
+    },
+    onError: (e) => showApiError(e, "Could not save"),
+  });
+
+  return (
+    <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (form.full_name.trim()) save.mutate(); }}>
+      <div><Label>Full name</Label><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required /></div>
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label>Roll no.</Label><Input value={form.roll_no} onChange={(e) => setForm({ ...form, roll_no: e.target.value })} /></div>
+        <div>
+          <Label>Status</Label>
+          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="active">active</option>
+            <option value="left">left</option>
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <Label>Class</Label>
+          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={form.class_id} onChange={(e) => setForm({ ...form, class_id: e.target.value })}>
+            <option value="">Unassigned</option>
+            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label>Category</Label>
+          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+            <option value="">—</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <Button type="submit" className="w-full" disabled={save.isPending || !form.full_name.trim()}>
+        {save.isPending ? "Saving…" : "Save changes"}
+      </Button>
+    </form>
+  );
+}
+
 function StudentDetailSheet({ id, onClose, canEdit }: { id: string | null; onClose: () => void; canEdit: boolean }) {
   const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
   const { data } = useQuery({ queryKey: ["student", id], queryFn: () => schoolApi.student(id!), enabled: !!id });
   const remove = useMutation({
     mutationFn: () => schoolApi.deleteStudent(id!),
@@ -97,8 +164,10 @@ function StudentDetailSheet({ id, onClose, canEdit }: { id: string | null; onClo
     onError: (e) => showApiError(e, "Could not remove"),
   });
   return (
-    <Sheet open={!!id} onOpenChange={(v) => { if (!v) onClose(); }} title={data?.full_name ?? "Student"}>
-      {data ? (
+    <Sheet open={!!id} onOpenChange={(v) => { if (!v) { setEditing(false); onClose(); } }} title={data?.full_name ?? "Student"}>
+      {data && editing ? (
+        <EditStudentForm data={data} onSaved={() => setEditing(false)} />
+      ) : data ? (
         <div className="space-y-4 text-sm">
           <div className="flex flex-wrap gap-x-6 gap-y-1">
             <p><span className="text-muted-foreground">Admission</span> {data.admission_no}</p>
@@ -107,6 +176,11 @@ function StudentDetailSheet({ id, onClose, canEdit }: { id: string | null; onClo
             <p><span className="text-muted-foreground">Category</span> {data.category_name ?? "—"}</p>
             <p><Badge tone={data.status === "active" ? "primary" : "neutral"}>{data.status}</Badge></p>
           </div>
+          {canEdit ? (
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+              <Pencil className="h-3.5 w-3.5" /> Edit details
+            </Button>
+          ) : null}
           <div>
             <p className="mb-1 font-medium">Guardians</p>
             {data.guardians.length === 0 ? (
@@ -242,15 +316,28 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
 
 function StudentsInner() {
   const { me } = useAuth();
+  const { yearId } = useYear();
   const canEdit = me?.org_role === "admin";
   const [query, setQuery] = useState("");
+  const [classFilter, setClassFilter] = useState(""); // "" all · "none" unassigned · class id
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const { data: students = [] } = useQuery({
+  const { data: all = [] } = useQuery({
     queryKey: ["students", query],
     queryFn: () => schoolApi.students({ q: query.trim() || undefined }),
   });
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", yearId],
+    queryFn: () => schoolApi.classes(yearId ?? undefined),
+    enabled: !!yearId,
+  });
+  const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: schoolApi.categories });
+
+  const classLabel = new Map(classes.map((c) => [c.id, c.name + (c.section ? `-${c.section}` : "")]));
+  const catLabel = new Map(categories.map((c) => [c.id, c.name]));
+  const students = all.filter((s) =>
+    classFilter === "" ? true : classFilter === "none" ? !s.class_id : s.class_id === classFilter);
 
   return (
     <div>
@@ -263,26 +350,67 @@ function StudentsInner() {
           </div>
         ) : null}
       </div>
-      <div className="relative mb-4">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Search by name or admission no.…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-56 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input className="pl-9" placeholder="Search by name or admission no.…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+        <select
+          aria-label="Filter by class"
+          className="h-10 rounded-md border border-border bg-card px-2 text-sm"
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value)}
+        >
+          <option value="">All classes</option>
+          {classes.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>
+          ))}
+          <option value="none">Unassigned</option>
+        </select>
       </div>
       {students.length === 0 ? (
         <EmptyState icon={Plus} title="No students yet" body="Add students to build the roster fees and academics both run on." />
       ) : (
-        <div className="space-y-2">
-          {students.map((s: StudentListItem) => (
-            <button key={s.id} onClick={() => setDetailId(s.id)} className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-muted/40">
-              <Avatar name={s.full_name} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{s.full_name}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  Adm. {s.admission_no}{s.roll_no ? ` · Roll ${s.roll_no}` : ""}
-                </p>
-              </div>
-              {s.status !== "active" ? <Badge tone="neutral">{s.status}</Badge> : null}
-            </button>
-          ))}
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">Adm. no</th>
+                <th className="px-3 py-2 font-medium">Roll</th>
+                <th className="px-3 py-2 font-medium">Class</th>
+                <th className="px-3 py-2 font-medium">Category</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s: StudentListItem) => (
+                <tr
+                  key={s.id}
+                  onClick={() => setDetailId(s.id)}
+                  className="cursor-pointer border-b border-border/60 bg-card last:border-0 hover:bg-muted/40"
+                >
+                  <td className="px-3 py-2">
+                    <span className="flex items-center gap-2">
+                      <Avatar name={s.full_name} />
+                      <span className="font-medium">{s.full_name}</span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">{s.admission_no}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{s.roll_no ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    {s.class_id ? classLabel.get(s.class_id) ?? "?" : <Badge tone="warning">unassigned</Badge>}
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {s.category_id ? catLabel.get(s.category_id) ?? "—" : "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {s.status === "active" ? <span className="text-muted-foreground">active</span> : <Badge tone="neutral">{s.status}</Badge>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       <AddStudentSheet open={addOpen} onOpenChange={setAddOpen} />

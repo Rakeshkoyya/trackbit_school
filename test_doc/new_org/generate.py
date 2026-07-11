@@ -1,15 +1,17 @@
 """Generate the new-org setup test pack (run: cd api && uv run python ../test_doc/new_org/generate.py).
 
-A self-consistent set of documents for walking a FRESH organisation through the whole
-setup wizard — including the V2-P12 features: x6 periods/week in staff assignments,
-class allocation vs capacity, whole-school timetable generation, term-wise syllabus
-with unsized Term-2 chapters, and the exam-gap fit panel.
+Clean, self-consistent mock data for walking a FRESH organisation through the whole
+setup — no deliberate failure rows this time; every import should land 100%.
 
-Assumes the org will be set up with:
-  year   2026-27 (2026-06-15 → 2027-04-15), Mon–Sat, 8 periods/day  → capacity 48/week
-  terms  Term 1 (2026-06-15 → 2026-10-31) · Term 2 (2026-11-01 → 2027-04-15)
-  classes  6-A · 6-B · 7-A
-  subjects English · Mathematics · Science · Social Studies · Hindi
+The org this pack assumes (see README.md for the step-by-step):
+  year     2026-27 (2026-06-15 → 2027-04-15), Mon–Sat, 8 periods/day → 48 periods/week
+  terms    Term 1 (2026-06-15 → 2026-10-31) · Term 2 (2026-11-01 → 2027-04-15)
+  classes  5 · 6 · 7  (no sections)
+  subjects Mathematics · Science · English · Social Studies · Hindi · IT
+
+Periods/week per class: Math 9 + Sci 9 + Eng 8 + Soc 8 + Hin 7 + IT 7 = 48 (exactly full).
+Five teachers, all weekly loads ≤ 48; Anil Kumar carries TWO subjects (Math + Science on
+class 5). Every one of the 18 class-subjects has a teacher.
 """
 
 from pathlib import Path
@@ -29,131 +31,131 @@ def sheet(path: str, header: list[str], rows: list[list]):
     print(f"wrote {path} ({len(rows)} rows)")
 
 
-# ── 1. staff: per class the x-numbers sum to exactly 48 (6 days × 8 periods) ──
+# ── 1. staff — 5 teachers · 18 assignments · every class sums to 48/48 ────────
 sheet("teachers_staff.xlsx",
       ["Teacher Name", "Email", "Mobile", "Assignments"],
       [
-          ["Suresh Menon", "suresh.menon@example.com", "9811100001",
-           "6-A Mathematics x10; 6-B Mathematics x10; 7-A Mathematics x10"],
-          ["Kavitha Rao", "kavitha.rao@example.com", "9811100002",
-           "6-A Science x10; 6-B Science x10; 7-A Science x10"],
-          ["Arjun Das", "arjun.das@example.com", "9811100003",
-           "6-A English x10; 6-B English x10; 7-A English x10"],
-          ["Meera Pillai", "meera.pillai@example.com", "9811100004",
-           "6-A Social Studies x9; 6-B Social Studies x9; 7-A Social Studies x9"],
-          ["Farhan Sheikh", "farhan.sheikh@example.com", "9811100005",
-           "6-A Hindi x9; 6-B Hindi x9"],
-          # 9-C Astronomy must come back in `unresolved`; 7-A Hindi still lands.
-          ["Divya Nair", "divya.nair@example.com", "9811100006",
-           "9-C Astronomy x4; 7-A Hindi x9"],
-          # No name → must land in `errors`, everything else still imports.
-          [None, "ghost@example.com", "9811100007", "6-A English x2"],
+          # THE two-subject teacher: Maths + Science on class 5 (18 periods/week).
+          ["Anil Kumar", "anil.kumar@example.com", "9811100001",
+           "5 Mathematics x9; 5 Science x9"],
+          ["Sunita Verma", "sunita.verma@example.com", "9811100002",
+           "6 Mathematics x9; 7 Mathematics x9"],
+          ["Rajesh Gupta", "rajesh.gupta@example.com", "9811100003",
+           "6 Science x9; 7 Science x9; 5 IT x7"],
+          ["Priya Nair", "priya.nair@example.com", "9811100004",
+           "5 English x8; 6 English x8; 7 English x8; 5 Hindi x7; 6 Hindi x7; 7 Hindi x7"],
+          ["Mohan Reddy", "mohan.reddy@example.com", "9811100005",
+           "5 Social Studies x8; 6 Social Studies x8; 7 Social Studies x8; 6 IT x7; 7 IT x7"],
       ])
 
-# ── 2. students: 10 per class + 3 deliberate failures ─────────────────────────
+# ── 2. students — exactly 10 per class, all rows valid ────────────────────────
 first = ["Aarav", "Diya", "Vihaan", "Ananya", "Kabir", "Ishita", "Reyansh", "Sara",
          "Advait", "Myra"]
 last = ["Sharma", "Patel", "Reddy", "Iyer", "Khan", "Das", "Gupta", "Nair", "Mehta", "Roy"]
 rows = []
 n = 1
-for cname, section in (("6", "A"), ("6", "B"), ("7", "A")):
+for cname in ("5", "6", "7"):
     for i in range(10):
         rows.append([
-            f"{first[i]} {last[(i + n) % 10]}", f"NG{1000 + n}", str(i + 1), cname, section,
+            f"{first[i]} {last[(i + n) % 10]}", f"NG{1000 + n}", str(i + 1), cname, None,
             "Day Scholar" if i % 3 else "Hosteller",
             f"Mr {last[(i + n) % 10]}", f"98220{10000 + n}",
             f"Mrs {last[(i + n) % 10]}", f"98330{10000 + n}",
         ])
         n += 1
-rows += [
-    # Class 8-A doesn't exist → imports UNASSIGNED (visible in Students → no class).
-    ["Zoya Ansari", "NG1901", "1", "8", "A", "Day Scholar",
-     "Mr Ansari", "9822099001", "Mrs Ansari", "9833099001"],
-    # Missing name → errors.
-    [None, "NG1902", "2", "6", "A", "Day Scholar", "Mr X", "9822099002", None, None],
-    # Missing admission no → errors.
-    ["Rohan Kulkarni", None, "3", "6", "B", "Day Scholar", "Mr Kulkarni", "9822099003", None, None],
-]
 sheet("students_roster.xlsx",
       ["Student Name", "Admission No", "Roll No", "Class", "Section", "Category",
        "Father's Name", "Father's Mobile", "Mother's Name", "Mother's Mobile"],
       rows)
 
-# ── 3. syllabus: maths, term-wise — Term 2 deliberately UNSIZED ───────────────
-# Import against each class's Mathematics. Term 1 ≈ 52 periods; Term 2 has blank
-# Periods cells → est_periods NULL → V6 reports them, forecast says `unplanned`,
-# and the wizard finishes with those plans open (size them when Term 2 begins).
-maths = [
-    ("Knowing Our Numbers", ["Comparing large numbers", "Estimation", "Roman numerals"],
-     [4, 3, 2], "Term 1"),
-    ("Whole Numbers", ["Number line", "Properties of operations"], [3, 4], "Term 1"),
-    ("Playing with Numbers", ["Factors and multiples", "Divisibility rules", "HCF and LCM"],
-     [3, 3, 5], "Term 1"),
-    ("Basic Geometrical Ideas", ["Points, lines, curves", "Polygons and circles"], [3, 4], "Term 1"),
-    ("Integers", ["Negative numbers", "Addition and subtraction of integers"], [4, 4], "Term 1"),
-    ("Fractions", ["Types of fractions", "Operations on fractions"], [5, 5], "Term 1"),
-    ("Decimals", ["Place value", "Operations on decimals"], [None, None], "Term 2"),
-    ("Data Handling", ["Pictographs", "Bar graphs"], [None, None], "Term 2"),
-    ("Mensuration", ["Perimeter", "Area"], [None, None], "Term 2"),
-    ("Algebra", ["Variables", "Simple equations"], [None, None], "Term 2"),
-    ("Ratio and Proportion", ["Ratio", "Unitary method"], [None, None], "Term 2"),
-]
-sheet("syllabus_maths_termwise.xlsx",
-      ["Chapter", "Topic", "Periods", "Term"],
-      [[ch if i == 0 else None, t, p, term if i == 0 else None]
-       for ch, topics, per, term in maths
-       for i, (t, p) in enumerate(zip(topics, per))])
 
-# ── 4. syllabus: science — fully sized, whole year (≈84 periods) ──────────────
-science = [
-    ("Food: Where Does It Come From?", ["Food sources", "Plant and animal products"], [3, 3]),
-    ("Components of Food", ["Nutrients", "Balanced diet", "Deficiency diseases"], [3, 3, 3]),
-    ("Fibre to Fabric", ["Plant fibres", "Spinning and weaving"], [3, 3]),
-    ("Sorting Materials", ["Properties of materials", "Grouping"], [3, 2]),
-    ("Separation of Substances", ["Sieving and winnowing", "Filtration and evaporation"], [3, 4]),
-    ("Changes Around Us", ["Reversible changes", "Irreversible changes"], [3, 3]),
-    ("Getting to Know Plants", ["Parts of a plant", "Leaf, stem and root", "Flower"], [3, 3, 3]),
-    ("Body Movements", ["Joints", "Skeleton", "Animal movement"], [3, 3, 2]),
-    ("Living Organisms", ["Habitats", "Adaptation"], [4, 3]),
-    ("Light, Shadows and Reflections", ["Sources of light", "Shadows", "Reflection"], [3, 3, 3]),
-    ("Electricity and Circuits", ["Cells and bulbs", "Conductors and insulators"], [4, 4]),
-]
-sheet("syllabus_science.xlsx",
-      ["Chapter", "Topic", "Periods"],
-      [[ch if i == 0 else None, t, p]
-       for ch, topics, per in science for i, (t, p) in enumerate(zip(topics, per))])
+# ── 3. syllabus — one file per subject, reused on classes 5/6/7 ───────────────
+# All topics sized so the final generate step locks everything cleanly. Each file
+# carries a Term column (Term 1 / Term 2) so term-scoped planning has real data.
+def syllabus(path: str, chapters: list[tuple[str, list[tuple[str, int]], str]]):
+    body = []
+    for ch, topics, term in chapters:
+        for i, (t, p) in enumerate(topics):
+            body.append([ch if i == 0 else None, t, p, term if i == 0 else None])
+    sheet(path, ["Chapter", "Topic", "Periods", "Term"], body)
 
-# ── 5. syllabus: generic, reusable for English / Social Studies / Hindi ───────
-generic = [
-    ("Unit 1", ["Introduction and reading", "Vocabulary building", "Writing practice"], [4, 3, 3]),
-    ("Unit 2", ["Comprehension", "Grammar focus", "Speaking activity"], [4, 3, 3]),
-    ("Unit 3", ["Reading and discussion", "Grammar focus", "Writing practice"], [4, 3, 3]),
-    ("Unit 4", ["Comprehension", "Vocabulary building", "Project work"], [4, 3, 4]),
-    ("Unit 5", ["Reading and discussion", "Grammar focus", "Revision"], [4, 3, 3]),
-    ("Unit 6", ["Comprehension", "Writing practice", "Assessment prep"], [4, 3, 3]),
-    ("Unit 7", ["Reading and discussion", "Speaking activity", "Revision"], [4, 3, 3]),
-]
-sheet("syllabus_generic.xlsx",
-      ["Chapter", "Topic", "Periods"],
-      [[ch if i == 0 else None, t, p]
-       for ch, topics, per in generic for i, (t, p) in enumerate(zip(topics, per))])
 
-# ── 6. syllabus paste-text path: trailing (n) → est_periods ───────────────────
-(HERE / "syllabus_hindi.txt").write_text("""Chapter 1: Varnamala
-Swar aur vyanjan (3)
-Matra parichay (4)
-Chapter 2: Shabd Rachna
-Shabd banana (3)
-Vakya rachna (4)
-Chapter 3: Kahani Path
-Kahani vachan (4)
-Prashn uttar (3)
-Chapter 4: Vyakaran
-Sangya (3)
-Sarvanam (3)
-Kriya (3)
-Chapter 5: Rachnatmak Lekhan
-Patra lekhan (4)
-Anuchchhed lekhan (4)
-""", encoding="utf-8")
-print("wrote syllabus_hindi.txt")
+syllabus("syllabus_mathematics.xlsx", [  # 85 periods
+    ("Knowing Our Numbers", [("Comparing large numbers", 4), ("Estimation", 3), ("Roman numerals", 2)], "Term 1"),
+    ("Whole Numbers", [("Number line", 3), ("Properties of operations", 4)], "Term 1"),
+    ("Playing with Numbers", [("Factors and multiples", 3), ("Divisibility rules", 3), ("HCF and LCM", 5)], "Term 1"),
+    ("Basic Geometrical Ideas", [("Points, lines and curves", 3), ("Polygons and circles", 4)], "Term 1"),
+    ("Integers", [("Negative numbers", 4), ("Operations on integers", 4)], "Term 1"),
+    ("Fractions", [("Types of fractions", 5), ("Operations on fractions", 5)], "Term 2"),
+    ("Decimals", [("Place value", 4), ("Operations on decimals", 4)], "Term 2"),
+    ("Data Handling", [("Pictographs", 3), ("Bar graphs", 3)], "Term 2"),
+    ("Mensuration", [("Perimeter", 4), ("Area", 4)], "Term 2"),
+    ("Algebra", [("Variables", 3), ("Simple equations", 4)], "Term 2"),
+    ("Ratio and Proportion", [("Ratio", 3), ("Unitary method", 3)], "Term 2"),
+])
+
+syllabus("syllabus_science.xlsx", [  # 82 periods
+    ("Food: Where Does It Come From?", [("Food sources", 3), ("Plant and animal products", 3)], "Term 1"),
+    ("Components of Food", [("Nutrients", 3), ("Balanced diet", 3), ("Deficiency diseases", 3)], "Term 1"),
+    ("Fibre to Fabric", [("Plant fibres", 3), ("Spinning and weaving", 3)], "Term 1"),
+    ("Sorting Materials", [("Properties of materials", 3), ("Grouping", 2)], "Term 1"),
+    ("Separation of Substances", [("Sieving and winnowing", 3), ("Filtration and evaporation", 4)], "Term 1"),
+    ("Changes Around Us", [("Reversible changes", 3), ("Irreversible changes", 3)], "Term 1"),
+    ("Getting to Know Plants", [("Parts of a plant", 3), ("Leaf, stem and root", 3), ("Flower", 3)], "Term 2"),
+    ("Body Movements", [("Joints", 3), ("Skeleton", 3), ("Animal movement", 2)], "Term 2"),
+    ("Living Organisms", [("Habitats", 4), ("Adaptation", 3)], "Term 2"),
+    ("Light, Shadows and Reflections", [("Sources of light", 3), ("Shadows", 3), ("Reflection", 3)], "Term 2"),
+    ("Electricity and Circuits", [("Cells and bulbs", 4), ("Conductors and insulators", 4)], "Term 2"),
+])
+
+syllabus("syllabus_english.xlsx", [  # 70 periods
+    ("Prose: A Tale of Two Birds", [("Reading and comprehension", 4), ("Vocabulary", 3)], "Term 1"),
+    ("Grammar: Nouns and Pronouns", [("Kinds of nouns", 3), ("Pronoun usage", 3)], "Term 1"),
+    ("Prose: The Friendly Mongoose", [("Reading and comprehension", 4), ("Character discussion", 3)], "Term 1"),
+    ("Writing: Paragraphs", [("Structure of a paragraph", 3), ("Guided writing", 4)], "Term 1"),
+    ("Poetry: A House, A Home", [("Recitation and meaning", 3), ("Appreciation", 2)], "Term 1"),
+    ("Grammar: Verbs and Tenses", [("Simple tenses", 4), ("Subject-verb agreement", 3)], "Term 2"),
+    ("Prose: The Shepherd's Treasure", [("Reading and comprehension", 4), ("Retelling", 3)], "Term 2"),
+    ("Writing: Letters", [("Informal letters", 4), ("Formal letters", 4)], "Term 2"),
+    ("Grammar: Adjectives and Adverbs", [("Degrees of comparison", 3), ("Adverb placement", 3)], "Term 2"),
+    ("Poetry: The Kite", [("Recitation and meaning", 3), ("Imagery", 2)], "Term 2"),
+])
+
+syllabus("syllabus_social_studies.xlsx", [  # 72 periods
+    ("History: What, Where, How and When", [("Sources of history", 3), ("Timelines", 3)], "Term 1"),
+    ("History: Earliest Societies", [("Hunter-gatherers", 3), ("Tools and cave art", 3)], "Term 1"),
+    ("Geography: The Earth in the Solar System", [("Planets and satellites", 3), ("The moon", 2)], "Term 1"),
+    ("Geography: Globe — Latitudes and Longitudes", [("The grid", 4), ("Heat zones", 3)], "Term 1"),
+    ("Civics: Understanding Diversity", [("Diversity around us", 3), ("Unity in diversity", 3)], "Term 1"),
+    ("History: First Farmers and Herders", [("Beginnings of agriculture", 3), ("Settled life", 3)], "Term 2"),
+    ("Geography: Motions of the Earth", [("Rotation and revolution", 4), ("Seasons", 3)], "Term 2"),
+    ("Civics: Government", [("Levels of government", 3), ("Democratic government", 3)], "Term 2"),
+    ("History: Kingdoms and an Early Republic", [("Janapadas", 3), ("Mahajanapadas", 3)], "Term 2"),
+    ("Geography: Maps", [("Kinds of maps", 3), ("Map reading", 4)], "Term 2"),
+    ("Civics: Panchayati Raj", [("Gram sabha", 3), ("Panchayat work", 3)], "Term 2"),
+])
+
+syllabus("syllabus_hindi.xlsx", [  # 62 periods
+    ("Vah Chidiya Jo", [("Kavita vachan", 3), ("Bhavarth", 3)], "Term 1"),
+    ("Bachpan", [("Path vachan", 3), ("Prashn uttar", 3)], "Term 1"),
+    ("Vyakaran: Sangya aur Sarvanam", [("Sangya ke bhed", 3), ("Sarvanam prayog", 3)], "Term 1"),
+    ("Nadaan Dost", [("Path vachan", 3), ("Charcha", 3)], "Term 1"),
+    ("Lekhan: Anuchchhed", [("Anuchchhed lekhan", 3), ("Abhyas", 3)], "Term 1"),
+    ("Chaand Se Thodi Si Gappe", [("Kavita vachan", 3), ("Bhavarth", 3)], "Term 2"),
+    ("Vyakaran: Kriya aur Visheshan", [("Kriya ke bhed", 3), ("Visheshan prayog", 3)], "Term 2"),
+    ("Saathi Haath Badhana", [("Geet vachan", 3), ("Charcha", 2)], "Term 2"),
+    ("Lekhan: Patra", [("Anaupcharik patra", 4), ("Aupcharik patra", 4)], "Term 2"),
+    ("Jo Dekhkar Bhi Nahin Dekhte", [("Path vachan", 3), ("Prashn uttar", 3)], "Term 2"),
+])
+
+syllabus("syllabus_it.xlsx", [  # 60 periods
+    ("Introduction to Computers", [("Parts of a computer", 3), ("Uses of computers", 2)], "Term 1"),
+    ("Operating the Computer", [("Desktop and files", 3), ("Keyboard and mouse skills", 3)], "Term 1"),
+    ("Word Processing Basics", [("Creating a document", 4), ("Formatting text", 4)], "Term 1"),
+    ("Paint and Drawing Tools", [("Drawing shapes", 3), ("Editing pictures", 3)], "Term 1"),
+    ("Introduction to the Internet", [("What is the internet", 3), ("Safe browsing", 3)], "Term 2"),
+    ("Spreadsheets Basics", [("Rows, columns and cells", 4), ("Simple formulas", 4)], "Term 2"),
+    ("Presentations", [("Creating slides", 4), ("Presenting ideas", 3)], "Term 2"),
+    ("Typing Practice", [("Home row practice", 3), ("Speed building", 3)], "Term 2"),
+    ("Being Safe Online", [("Passwords and privacy", 3), ("Cyber etiquette", 2)], "Term 2"),
+])
