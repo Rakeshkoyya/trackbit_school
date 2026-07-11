@@ -7,6 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { TIER_TONE } from "@/components/school/assessments";
 import { Dropdown } from "@/components/school/student-table";
 import { TimelineBlock } from "@/components/students/timeline-block";
 import { Avatar } from "@/components/ui/avatar";
@@ -279,7 +280,7 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
 }
 
 const GROUP_COLORS = ["#6b7fd7", "#3f8f6b", "#c98a3d", "#b05f8a", "#5b9aa9", "#8a6bbf"];
-type DirGroupBy = "class" | "category" | "status" | "none";
+type DirGroupBy = "class" | "category" | "status" | "band" | "none";
 
 function StudentsInner() {
   const router = useRouter();
@@ -304,6 +305,8 @@ function StudentsInner() {
     enabled: !!yearId,
   });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: schoolApi.categories });
+  // Current support tier per student (SC-3) — a staff-only chip, never guardian-facing (P4).
+  const { data: bandMap = {} } = useQuery({ queryKey: ["current-bands"], queryFn: schoolApi.currentBands });
 
   const classLabel = new Map(classes.map((c) => [c.id, c.name + (c.section ? `-${c.section}` : "")]));
   const catLabel = new Map(categories.map((c) => [c.id, c.name]));
@@ -317,7 +320,8 @@ function StudentsInner() {
     groupBy === "class" ? (s.class_id ? classLabel.get(s.class_id) ?? "?" : "Unassigned")
       : groupBy === "category" ? (s.category_id ? catLabel.get(s.category_id) ?? "—" : "No category")
         : groupBy === "status" ? s.status
-          : "";
+          : groupBy === "band" ? (bandMap[s.id] ? `Band ${bandMap[s.id]}` : "No band")
+            : "";
   const groups = new Map<string, StudentListItem[]>();
   for (const s of students) {
     const k = keyOf(s);
@@ -336,6 +340,7 @@ function StudentsInner() {
             <th className="px-3 py-2 font-medium">Roll</th>
             <th className="px-3 py-2 font-medium">Class</th>
             <th className="px-3 py-2 font-medium">Category</th>
+            <th className="px-3 py-2 font-medium">Band</th>
             <th className="px-3 py-2 font-medium">Status</th>
             {canEdit ? <th className="px-3 py-2" /> : null}
           </tr>
@@ -360,6 +365,9 @@ function StudentsInner() {
               </td>
               <td className="px-3 py-2 text-muted-foreground">
                 {s.category_id ? catLabel.get(s.category_id) ?? "—" : "—"}
+              </td>
+              <td className="px-3 py-2">
+                {bandMap[s.id] ? <Badge tone={TIER_TONE[bandMap[s.id]]}>{bandMap[s.id]}</Badge> : <span className="text-muted-foreground">—</span>}
               </td>
               <td className="px-3 py-2">
                 {s.status === "active" ? <span className="text-muted-foreground">active</span> : <Badge tone="neutral">{s.status}</Badge>}
@@ -400,7 +408,7 @@ function StudentsInner() {
           <Input className="pl-9" placeholder="Search by name or admission no.…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <Dropdown label="Group by" value={groupBy}
-          options={[["class", "Class"], ["category", "Category"], ["status", "Status"], ["none", "None"]]}
+          options={[["class", "Class"], ["category", "Category"], ["status", "Status"], ["band", "Band"], ["none", "None"]]}
           onChange={(v) => setGroupBy(v as DirGroupBy)} />
         <Dropdown label="Class" value={classFilter}
           options={[["all", "All"], ...classes.map((c): [string, string] =>

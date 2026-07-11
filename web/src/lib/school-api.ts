@@ -330,13 +330,34 @@ export const schoolApi = {
   createSkill: (name: string) => api.post<import("@/lib/school-types").SkillArea>("/assessments/skill-areas", { name }),
   deleteSkill: (id: string) => api.del<{ message: string }>(`/assessments/skill-areas/${id}`),
   cycles: (termId?: string) => api.get<import("@/lib/school-types").Cycle[]>(`/assessments/cycles${qs({ term_id: termId })}`),
-  createCycle: (b: { term_id: string; type: string; name: string; date: string }) =>
+  createCycle: (b: { term_id?: string; type: string; name: string; date: string; class_id?: string; subject_id?: string }) =>
     api.post<import("@/lib/school-types").Cycle>("/assessments/cycles", b),
+  // photo score capture (SC-2): photo → AI transcription → deterministic match →
+  // human review grid → confirm. Scores persist only on confirm.
+  createCapture: (b: { cycle_id: string; class_id: string; subject_id?: string; skill_area_id?: string }) =>
+    api.post<import("@/lib/school-types").Capture>("/assessments/captures", b),
+  capture: (id: string) => api.get<import("@/lib/school-types").Capture>(`/assessments/captures/${id}`),
+  captures: (opts?: { cycleId?: string; classId?: string }) =>
+    api.get<import("@/lib/school-types").CaptureSummary[]>(`/assessments/captures${qs({ cycle_id: opts?.cycleId, class_id: opts?.classId })}`),
+  uploadCapturePage: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<import("@/lib/school-types").Capture>(`/assessments/captures/${id}/pages`, form);
+  },
+  parseCapture: (id: string) => api.post<import("@/lib/school-types").Capture>(`/assessments/captures/${id}/parse`),
+  confirmCapture: (id: string, rows: { student_id: string; score: number; max_score: number }[]) =>
+    api.post<import("@/lib/school-types").Capture>(`/assessments/captures/${id}/confirm`, { rows }),
+  discardCapture: (id: string) => api.post<{ message: string }>(`/assessments/captures/${id}/discard`),
   scoreGrid: (cycleId: string, classId: string) =>
     api.get<import("@/lib/school-types").ScoreGrid>(`/assessments/cycles/${cycleId}/grid${qs({ class_id: classId })}`),
   saveScores: (cycleId: string, rows: { student_id: string; subject_id?: string; skill_area_id?: string; score: number; max_score: number }[]) =>
     api.post<{ message: string }>(`/assessments/cycles/${cycleId}/scores`, { rows }),
   verifyScores: (cycleId: string) => api.post<{ message: string }>(`/assessments/cycles/${cycleId}/verify`),
+  applyBandSuggestions: (b: { class_id: string; term_id: string }) =>
+    api.post<{ applied: number }>("/assessments/bands/apply-suggestions", b),
+  currentBands: () => api.get<Record<string, string>>("/assessments/bands/current"),
+  classAnalysis: (classId: string) =>
+    api.get<import("@/lib/school-types").ClassAnalysis>(`/assessments/classes/${classId}/analysis`),
   bandBoard: (classId: string, termId?: string) =>
     api.get<import("@/lib/school-types").BandBoard>(`/assessments/bands${qs({ class_id: classId, term_id: termId })}`),
   setBand: (b: { student_id: string; term_id: string; tier: string; note?: string | null }) =>

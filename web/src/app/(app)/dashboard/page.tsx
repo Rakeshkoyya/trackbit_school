@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CalendarClock, FileText, IndianRupee, RefreshCw, Send, Wand2 } from "lucide-react";
+import { AlertTriangle, BookOpen, CalendarClock, Camera, FileText, IndianRupee, RefreshCw, Send, Wand2 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -156,6 +157,11 @@ function InsightsInner() {
   const [alertFor, setAlertFor] = useState<DashboardAlert | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
   const { data } = useQuery({ queryKey: ["dashboard", yearId], queryFn: () => schoolApi.dashboard(yearId ?? undefined), enabled: !!yearId });
+  const { data: pendingCaptures = [] } = useQuery({
+    queryKey: ["captures", "pending"],
+    queryFn: () => schoolApi.captures(),
+    select: (rows) => rows.filter((r) => r.status === "uploaded" || r.status === "parsed"),
+  });
 
   return (
     <div>
@@ -169,6 +175,18 @@ function InsightsInner() {
       </div>
 
       <ReportView />
+
+      {/* Photo score captures waiting on a human (SC-4) — a pending review is actionable. */}
+      {pendingCaptures.length > 0 ? (
+        <Link href="/students/scores"
+          className="mb-6 flex items-center gap-3 rounded-lg border border-[color:var(--warning,#8a6d1a)]/40 bg-[color:var(--warning,#8a6d1a)]/5 px-4 py-3 text-sm hover:bg-[color:var(--warning,#8a6d1a)]/10">
+          <Camera className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{pendingCaptures.length} photo capture{pendingCaptures.length === 1 ? "" : "s"} waiting for review</span>
+            <span className="ml-1 text-muted-foreground">— test scores aren’t saved until someone confirms them.</span>
+          </span>
+        </Link>
+      ) : null}
 
       {/* RAG + fees + homework summary */}
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">

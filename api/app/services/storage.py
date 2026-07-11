@@ -129,6 +129,20 @@ def object_stat(key: str) -> tuple[int, str] | None:
         return None
 
 
+def get_bytes(key: str) -> bytes | None:
+    """Object bytes for server-side processing (AI parse of captured score pages).
+    None when the object doesn't exist or the fetch fails."""
+    if not settings.storage_configured:
+        path = Path(settings.MEDIA_DIR) / key
+        return path.read_bytes() if path.is_file() else None
+    try:
+        obj = _r2_client().get_object(Bucket=settings.R2_BUCKET, Key=key)
+        return obj["Body"].read()
+    except Exception:  # noqa: BLE001 — missing key or transient error
+        logger.exception("get_bytes failed for %s", key)
+        return None
+
+
 def delete_object(key: str) -> None:
     """Best-effort delete; an orphaned object is preferable to a failed request."""
     try:

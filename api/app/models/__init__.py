@@ -14,6 +14,8 @@ from app.models.assessments import (
     AssessmentScore,
     Intervention,
     InterventionItem,
+    ScoreCapture,
+    ScoreCapturePage,
     SkillArea,
     StudentBand,
 )
@@ -102,6 +104,8 @@ __all__ = [
     "PlanComment",
     "PlanEntry",
     "SchoolClass",
+    "ScoreCapture",
+    "ScoreCapturePage",
     "Session",
     "SessionAttendance",
     "SessionClass",

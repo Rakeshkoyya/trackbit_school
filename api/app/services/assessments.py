@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AssessmentCycle,
     AssessmentScore,
@@ -27,8 +27,11 @@ from app.models import (
     Term,
 )
 from app.schemas.assessments import (
+    AnalysisCyclePoint,
+    AnalysisMover,
     BandBoard,
     BandRow,
+    ClassAnalysis,
     CycleCreate,
     CycleOut,
     GridCell,
@@ -101,11 +104,33 @@ class AssessmentService:
         return [CycleOut.model_validate(c) for c in self.db.scalars(q)]
 
     def create_cycle(self, m: CurrentMember, body: CycleCreate) -> CycleOut:
-        if not self.db.scalar(select(Term.id).where(
-                Term.id == body.term_id, Term.org_id == m.org_id)):
+        term_id = body.term_id
+        if term_id is None:
+            # Quick create (daily tests): derive the term covering the date.
+            term_id = self.db.scalar(select(Term.id).where(
+                Term.org_id == m.org_id, Term.start_date <= body.date,
+                Term.end_date >= body.date).order_by(Term.start_date.desc()).limit(1))
+            if term_id is None:
+                raise ValidationError("No term covers that date — set up terms first.",
+                                      code="no_term")
+        elif not self.db.scalar(select(Term.id).where(
+                Term.id == term_id, Term.org_id == m.org_id)):
             raise NotFoundError("Term")
-        cycle = AssessmentCycle(org_id=m.org_id, term_id=body.term_id, type=body.type,
-                                name=body.name, date=body.date)
+        if body.class_id and not self.db.scalar(select(SchoolClass.id).where(
+                SchoolClass.id == body.class_id, SchoolClass.org_id == m.org_id)):
+            raise NotFoundError("Class")
+        if body.subject_id and not self.db.scalar(select(Subject.id).where(
+                Subject.id == body.subject_id, Subject.org_id == m.org_id)):
+            raise NotFoundError("Subject")
+        if not m.is_coordinator_up:
+            # A teacher may only quick-create a class-scoped daily test they teach.
+            if body.type != "daily_test" or body.class_id is None:
+                raise ForbiddenError("Only admins create org-wide cycles.", code="admin_only")
+            from app.services.periods import assert_can_take_class  # noqa: PLC0415
+            assert_can_take_class(self.db, m, body.class_id, None)
+        cycle = AssessmentCycle(org_id=m.org_id, term_id=term_id, type=body.type,
+                                name=body.name, date=body.date,
+                                class_id=body.class_id, subject_id=body.subject_id)
         self.db.add(cycle)
         self.db.flush()
         return CycleOut.model_validate(cycle)
@@ -130,9 +155,11 @@ class AssessmentService:
         if cycle.type == "diagnostic":
             cols = [GridColumn(id=s.id, name=s.name, kind="skill") for s in self.list_skills(m)]
         else:
-            subs = self.db.scalars(select(Subject).where(Subject.org_id == m.org_id)
-                                   .order_by(Subject.name))
-            cols = [GridColumn(id=s.id, name=s.name, kind="subject") for s in subs]
+            q = select(Subject).where(Subject.org_id == m.org_id).order_by(Subject.name)
+            if cycle.subject_id:  # subject-scoped cycle (daily test): one column
+                q = q.where(Subject.id == cycle.subject_id)
+            cols = [GridColumn(id=s.id, name=s.name, kind="subject")
+                    for s in self.db.scalars(q)]
         students = list(self.db.scalars(
             select(Student).where(Student.org_id == m.org_id, Student.class_id == class_id)
             .order_by(Student.full_name)))
@@ -186,37 +213,107 @@ class AssessmentService:
     # ── bands ────────────────────────────────────────────────────────────────
     def _latest_pct(self, m: CurrentMember, student_id: uuid.UUID) -> float | None:
         """Average pct across the student's most recent cycle with scores."""
-        latest = self.db.execute(
-            select(AssessmentCycle.id).join(
-                AssessmentScore, AssessmentScore.cycle_id == AssessmentCycle.id)
-            .where(AssessmentCycle.org_id == m.org_id, AssessmentScore.student_id == student_id)
-            .order_by(AssessmentCycle.date.desc()).limit(1)).scalar_one_or_none()
-        if latest is None:
-            return None
-        rows = list(self.db.execute(
-            select(AssessmentScore.score, AssessmentScore.max_score).where(
-                AssessmentScore.cycle_id == latest, AssessmentScore.student_id == student_id)).all())
-        tot = sum(float(mx) for _, mx in rows)
-        return round(sum(float(s) for s, _ in rows) / tot, 4) if tot else None
+        got = self._latest_pcts(m, [student_id]).get(student_id)
+        return got[0] if got else None
+
+    def _latest_pcts(
+        self, m: CurrentMember, sids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, tuple[float, str]]:
+        """student -> (avg pct across their most recent cycle, that cycle's name).
+
+        One query for the whole roster — the remote DB makes per-student queries
+        the dominant cost of the band board."""
+        if not sids:
+            return {}
+        rows = self.db.execute(
+            select(AssessmentScore.student_id, AssessmentScore.score, AssessmentScore.max_score,
+                   AssessmentCycle.id, AssessmentCycle.date, AssessmentCycle.name)
+            .join(AssessmentCycle, AssessmentCycle.id == AssessmentScore.cycle_id)
+            .where(AssessmentScore.org_id == m.org_id,
+                   AssessmentScore.student_id.in_(sids))).all()
+        by_student: dict[uuid.UUID, dict] = {}
+        for sid, score, mx, cid, cdate, cname in rows:
+            by_student.setdefault(sid, {}).setdefault(
+                (cdate, str(cid), cname), []).append((float(score), float(mx)))
+        out: dict[uuid.UUID, tuple[float, str]] = {}
+        for sid, cycles in by_student.items():
+            (_, _, cname), scores = max(cycles.items(), key=lambda kv: (kv[0][0], kv[0][1]))
+            tot = sum(mx for _, mx in scores)
+            if tot:
+                out[sid] = (round(sum(s for s, _ in scores) / tot, 4), cname)
+        return out
+
+    def _current_tiers(
+        self, m: CurrentMember, sids: list[uuid.UUID], term_id: uuid.UUID | None,
+    ) -> dict[uuid.UUID, str]:
+        """student -> newest overall tier, batched (newest-first, first seen wins)."""
+        if not sids:
+            return {}
+        q = (select(StudentBand).where(
+                StudentBand.org_id == m.org_id, StudentBand.student_id.in_(sids),
+                StudentBand.scope_skill_area_id.is_(None))
+             .order_by(StudentBand.created_at.desc()))
+        if term_id:
+            q = q.where(StudentBand.term_id == term_id)
+        tiers: dict[uuid.UUID, str] = {}
+        for b in self.db.scalars(q):
+            tiers.setdefault(b.student_id, b.tier)
+        return tiers
 
     def band_board(self, m: CurrentMember, class_id: uuid.UUID, term_id: uuid.UUID | None) -> BandBoard:
         students = list(self.db.scalars(
             select(Student).where(Student.org_id == m.org_id, Student.class_id == class_id)
             .order_by(Student.full_name)))
+        sids = [s.id for s in students]
+        tiers = self._current_tiers(m, sids, term_id)
+        pcts = self._latest_pcts(m, sids)
         rows: list[BandRow] = []
         for st in students:
-            current = self.db.scalar(
-                select(StudentBand.tier).where(
-                    StudentBand.org_id == m.org_id, StudentBand.student_id == st.id,
-                    StudentBand.scope_skill_area_id.is_(None),
-                    *([StudentBand.term_id == term_id] if term_id else []))
-                .order_by(StudentBand.created_at.desc()).limit(1))
-            pct = self._latest_pct(m, st.id)
+            pct = pcts.get(st.id, (None, None))[0]
             rows.append(BandRow(
-                student_id=st.id, full_name=st.full_name, current_tier=current,
+                student_id=st.id, full_name=st.full_name, current_tier=tiers.get(st.id),
                 suggested_tier=_tier_for(pct) if pct is not None else None,
                 latest_pct=round(pct * 100, 1) if pct is not None else None))
         return BandBoard(class_id=class_id, term_id=term_id, rows=rows)
+
+    def apply_band_suggestions(self, m: CurrentMember, class_id: uuid.UUID,
+                               term_id: uuid.UUID) -> int:
+        """One tap after a categorization test: append a band row for every student
+        whose suggested tier differs from their current one (SC-3). Append-only —
+        the movement history stays intact — and each row records its source cycle,
+        so the history explains itself. Returns how many students moved."""
+        if not self.db.scalar(select(Term.id).where(
+                Term.id == term_id, Term.org_id == m.org_id)):
+            raise NotFoundError("Term")
+        sids = list(self.db.scalars(select(Student.id).where(
+            Student.org_id == m.org_id, Student.class_id == class_id,
+            Student.status == "active")))
+        tiers = self._current_tiers(m, sids, term_id)
+        pcts = self._latest_pcts(m, sids)
+        applied = 0
+        for sid, (pct, cycle_name) in pcts.items():
+            suggested = _tier_for(pct)
+            if tiers.get(sid) == suggested:
+                continue
+            self.db.add(StudentBand(
+                org_id=m.org_id, student_id=sid, term_id=term_id, tier=suggested,
+                set_by=m.user_id, note=f"auto from {cycle_name}"))
+            applied += 1
+        self.db.flush()
+        return applied
+
+    def current_band_map(self, m: CurrentMember) -> dict[str, str]:
+        """student_id -> newest overall tier for the whole org, one query.
+        Staff-only surfaces (directory chips, filters) — P4 keeps it off anything
+        guardian-facing."""
+        tiers: dict[str, str] = {}
+        for b in self.db.scalars(
+                select(StudentBand).where(
+                    StudentBand.org_id == m.org_id,
+                    StudentBand.scope_skill_area_id.is_(None))
+                .order_by(StudentBand.created_at.desc())):
+            tiers.setdefault(str(b.student_id), b.tier)
+        return tiers
 
     def set_band(self, m: CurrentMember, body) -> None:
         # Append-only — a new row per change keeps the movement history (P4).
@@ -254,6 +351,93 @@ class AssessmentService:
             if scores:
                 out_cycles.append(SkillProfileCycle(cycle_id=c.id, name=c.name, date=c.date, scores=scores))
         return SkillProfile(student_id=student_id, skills=list(skills.values()), cycles=out_cycles)
+
+    def class_analysis(self, m: CurrentMember, class_id: uuid.UUID) -> ClassAnalysis:
+        """The class at a glance (SC-4): per-cycle averages, band distribution,
+        biggest movers between the last two test cycles, latest-test histogram.
+        Everything is computed from scores already captured — no new capture —
+        and batched into four queries (remote-DB latency rule)."""
+        students = list(self.db.scalars(
+            select(Student).where(Student.org_id == m.org_id, Student.class_id == class_id,
+                                  Student.status == "active")))
+        sids = [s.id for s in students]
+        names = {s.id: s.full_name for s in students}
+
+        tiers = self._current_tiers(m, sids, None)
+        band_counts = {"A": 0, "B": 0, "C": 0, "unset": 0}
+        for sid in sids:
+            band_counts[tiers.get(sid, "unset")] += 1
+
+        rows = []
+        if sids:
+            rows = self.db.execute(
+                select(AssessmentScore.student_id, AssessmentScore.score,
+                       AssessmentScore.max_score, AssessmentScore.subject_id,
+                       AssessmentCycle.id, AssessmentCycle.name, AssessmentCycle.date,
+                       AssessmentCycle.type)
+                .join(AssessmentCycle, AssessmentCycle.id == AssessmentScore.cycle_id)
+                .where(AssessmentScore.org_id == m.org_id,
+                       AssessmentScore.student_id.in_(sids),
+                       AssessmentScore.subject_id.isnot(None))).all()
+        subject_names = {s.id: s.name for s in self.db.scalars(
+            select(Subject).where(Subject.org_id == m.org_id))}
+
+        # cycle -> {meta, per-subject sums, per-student sums}
+        cycles: dict[uuid.UUID, dict] = {}
+        for sid, score, mx, subj_id, cid, cname, cdate, ctype in rows:
+            c = cycles.setdefault(cid, {
+                "name": cname, "date": cdate, "type": ctype,
+                "subj": {}, "students": {}, "tot": [0.0, 0.0]})
+            s, x = float(score), float(mx)
+            c["tot"][0] += s
+            c["tot"][1] += x
+            sub = c["subj"].setdefault(subj_id, [0.0, 0.0])
+            sub[0] += s
+            sub[1] += x
+            st = c["students"].setdefault(sid, [0.0, 0.0])
+            st[0] += s
+            st[1] += x
+
+        def pct(pair: list[float]) -> float | None:
+            return round(pair[0] / pair[1] * 100, 1) if pair[1] else None
+
+        ordered = sorted(cycles.items(), key=lambda kv: (kv[1]["date"], str(kv[0])))
+        points = [AnalysisCyclePoint(
+            cycle_id=cid, name=c["name"], date=c["date"], type=c["type"],
+            avg_pct=pct(c["tot"]),
+            subjects=[{"subject_id": str(sub_id), "name": subject_names.get(sub_id, "?"),
+                       "avg_pct": pct(pair)}
+                      for sub_id, pair in sorted(
+                          c["subj"].items(), key=lambda kv: subject_names.get(kv[0], ""))],
+        ) for cid, c in ordered]
+
+        movers: list[AnalysisMover] = []
+        histogram: list[dict] = []
+        latest_name: str | None = None
+        if ordered:
+            latest = ordered[-1][1]
+            latest_name = latest["name"]
+            buckets = [0, 0, 0, 0]  # <25, <50, <75, ≤100
+            for pair in latest["students"].values():
+                p = pct(pair)
+                if p is not None:
+                    buckets[min(3, int(p // 25))] += 1
+            histogram = [{"bucket": b, "count": n} for b, n in
+                         zip(["0–25%", "25–50%", "50–75%", "75–100%"], buckets, strict=True)]
+            if len(ordered) > 1:
+                prev = ordered[-2][1]
+                for sid, pair in latest["students"].items():
+                    p_now, p_prev = pct(pair), pct(prev["students"].get(sid, [0.0, 0.0]))
+                    if p_now is not None and p_prev is not None:
+                        movers.append(AnalysisMover(
+                            student_id=sid, full_name=names.get(sid, "?"),
+                            latest_pct=p_now, prev_pct=p_prev,
+                            delta=round(p_now - p_prev, 1)))
+                movers.sort(key=lambda mv: mv.delta)
+
+        return ClassAnalysis(class_id=class_id, band_counts=band_counts, cycles=points,
+                             movers=movers, histogram=histogram,
+                             latest_cycle_name=latest_name)
 
     def trends(self, m: CurrentMember, class_id: uuid.UUID) -> list[SubjectTrend]:
         sids = [s for s in self.db.scalars(select(Student.id).where(

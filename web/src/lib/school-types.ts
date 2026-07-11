@@ -698,8 +698,52 @@ export interface Digest {
 // â”€â”€ assessments & bands (M3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface SkillArea { id: string; name: string; position: number }
 
-export type CycleType = "diagnostic" | "unit_test" | "term_exam";
-export interface Cycle { id: string; term_id: string; type: CycleType; name: string; date: string }
+export type CycleType = "diagnostic" | "unit_test" | "term_exam" | "daily_test";
+export interface Cycle {
+  id: string;
+  term_id: string;
+  type: CycleType;
+  name: string;
+  date: string;
+  class_id: string | null;
+  subject_id: string | null;
+}
+
+// ── photo score capture (SC-2) ───────────────────────────────────────────────
+export interface CapturePage { id: string; page_no: number; url: string; content_type: string }
+export interface CaptureParsedRow {
+  name_text: string;
+  roll_text: string | null;
+  score: number;
+  max_score: number | null;
+  student_id: string | null;
+  confidence: "roll" | "exact" | "fuzzy" | null;
+  candidates: { student_id: string; full_name: string }[];
+}
+export interface CaptureRosterRow { student_id: string; full_name: string; roll_no: string | null }
+export interface Capture {
+  id: string;
+  cycle_id: string;
+  class_id: string;
+  subject_id: string | null;
+  skill_area_id: string | null;
+  status: "uploaded" | "parsed" | "confirmed" | "discarded";
+  parse_error: string | null;
+  pages: CapturePage[];
+  parsed_rows: CaptureParsedRow[] | null;
+  roster: CaptureRosterRow[];
+  created_at: string;
+}
+export interface CaptureSummary {
+  id: string;
+  cycle_id: string;
+  class_id: string;
+  subject_id: string | null;
+  skill_area_id: string | null;
+  status: string;
+  page_count: number;
+  created_at: string;
+}
 
 export interface GridColumn { id: string; name: string; kind: "subject" | "skill" }
 export interface GridCell { student_id: string; column_id: string; score: number; max_score: number }
@@ -736,6 +780,31 @@ export interface SubjectTrend {
   subject_name: string;
   points: { cycle_name: string; date: string; avg_pct: number }[];
   weak: boolean;
+}
+
+// ── class analysis (SC-4) ────────────────────────────────────────────────────
+export interface AnalysisCyclePoint {
+  cycle_id: string;
+  name: string;
+  date: string;
+  type: string;
+  avg_pct: number | null;
+  subjects: { subject_id: string; name: string; avg_pct: number | null }[];
+}
+export interface AnalysisMover {
+  student_id: string;
+  full_name: string;
+  latest_pct: number;
+  prev_pct: number;
+  delta: number;
+}
+export interface ClassAnalysis {
+  class_id: string;
+  band_counts: Record<string, number>;
+  cycles: AnalysisCyclePoint[];
+  movers: AnalysisMover[];
+  histogram: { bucket: string; count: number }[];
+  latest_cycle_name: string | null;
 }
 
 export interface InterventionItem { id: string; text: string; task_instance_id: string | null; done: boolean }

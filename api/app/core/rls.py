@@ -135,6 +135,12 @@ SCHOOL_WIZARD_TABLES = (
     "plan_comments",
 )
 
+# SC-1 photo score capture — engaged in migration fae1f2a3b4c5.
+SCHOOL_CAPTURE_TABLES = (
+    "score_captures",
+    "score_capture_pages",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

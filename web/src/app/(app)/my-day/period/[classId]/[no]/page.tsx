@@ -6,7 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BookOpen, Check, ChevronDown, ChevronRight, ListChecks, Plus,
+  ArrowLeft, BookOpen, Camera, Check, ChevronDown, ChevronRight, ListChecks, Plus,
   Send, UserCheck, Users, X,
 } from "lucide-react";
 import Link from "next/link";
@@ -15,6 +15,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { CaptureReview, useStartCapture } from "@/components/school/score-capture";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -517,6 +518,41 @@ function DeepLogSection({ card }: { card: PeriodCard }) {
 }
 
 // ── page ─────────────────────────────────────────────────────────────────────
+// ── test capture (SC-2) — photograph today's evaluated test, confirm scores ──
+function TestCaptureSection({ card }: { card: PeriodCard }) {
+  const [captureId, setCaptureId] = useState<string | null>(null);
+  const { data: classSubjects = [] } = useQuery({
+    queryKey: ["class-subjects", card.class_id],
+    queryFn: () => schoolApi.classSubjects(card.class_id),
+    enabled: card.class_subject_id != null,
+  });
+  const subjectId = classSubjects.find((cs) => cs.id === card.class_subject_id)?.subject_id;
+  const start = useStartCapture(setCaptureId);
+  if (card.class_subject_id == null) return null;
+
+  return (
+    <Section title="Today's test" icon={<Camera className="h-4 w-4" />}
+      aside={!captureId ? (
+        <Button size="sm" variant="outline" disabled={!subjectId || start.isPending}
+          onClick={() => start.mutate({
+            cycle: { type: "daily_test", name: `${card.subject_name ?? "Test"} · ${card.date}`,
+              date: card.date, class_id: card.class_id, subject_id: subjectId },
+            class_id: card.class_id, subject_id: subjectId })}>
+          {start.isPending ? "Starting…" : "Record a test"}
+        </Button>
+      ) : null}>
+      {captureId ? (
+        <CaptureReview captureId={captureId} onDone={() => setCaptureId(null)} />
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Took a test this period? Photograph the evaluated papers — the scores read
+          themselves; you just confirm.
+        </p>
+      )}
+    </Section>
+  );
+}
+
 function PeriodPageInner() {
   const params = useParams<{ classId: string; no: string }>();
   const classId = params.classId;
@@ -620,6 +656,7 @@ function PeriodPageInner() {
           <TopicSection card={card} onSaved={refresh} />
           <HomeworkSection card={card} onSaved={refresh} />
           <ChecksSection card={card} />
+          <TestCaptureSection card={card} />
           <DeepLogSection card={card} />
           {!card.closed ? (
             <Button className="w-full" size="lg" disabled={closeSession.isPending}
