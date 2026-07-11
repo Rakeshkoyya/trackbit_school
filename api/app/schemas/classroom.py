@@ -114,6 +114,57 @@ class HomeworkCheckIn(BaseModel):
     total_count: int = Field(ge=0)
 
 
+# ── deep log — lesson observations (teacher-view redesign) ──────────────────
+class ObservationStudentIn(BaseModel):
+    """One tapped deviation — the only per-student rows that exist (P1v2)."""
+
+    student_id: uuid.UUID
+    rating: str = Field(pattern="^(excellent|needs_work)$")
+    note: str | None = Field(default=None, max_length=300)
+
+
+class ObservationConceptIn(BaseModel):
+    concept: str = Field(min_length=1, max_length=80)
+    students: list[ObservationStudentIn] = []
+
+
+class ObservationSectionIn(BaseModel):
+    """Full-replace save of ONE section of a period's deep log ("Vocabulary" with
+    its concepts and tapped students). Saving again with the same section name
+    replaces its rows, like re-marking attendance."""
+
+    class_subject_id: uuid.UUID
+    section: str = Field(min_length=1, max_length=80)
+    date: Date | None = None
+    period_id: uuid.UUID | None = None
+    period_no: int | None = Field(default=None, ge=1)
+    concepts: list[ObservationConceptIn] = []
+
+
+class ObservationStudentOut(BaseModel):
+    student_id: uuid.UUID
+    full_name: str
+    rating: str
+    note: str | None = None
+
+
+class ObservationConceptOut(BaseModel):
+    concept: str | None = None
+    students: list[ObservationStudentOut] = []
+
+
+class ObservationSectionOut(BaseModel):
+    section: str
+    period_id: uuid.UUID | None = None
+    concepts: list[ObservationConceptOut] = []
+
+
+class ObservationsOut(BaseModel):
+    class_subject_id: uuid.UUID
+    date: date
+    sections: list[ObservationSectionOut] = []
+
+
 # ── compliance (CL-4) ────────────────────────────────────────────────────────
 class ComplianceRow(BaseModel):
     class_subject_id: uuid.UUID

@@ -17,7 +17,7 @@ Three new tables:
   (meeting, student). Optional by design: P1v2 forbids mandatory per-student capture.
 
 Revision ID: f8d9e0f1a2b3
-Revises: f7c8d9e0f1a2
+Revises: a8b9c0d1e2f3
 Create Date: 2026-07-11 10:00:00.000000
 """
 from collections.abc import Sequence
@@ -28,7 +28,7 @@ from alembic import op
 from app.core.rls import SCHOOL_HOSTEL_TABLES, disable_rls_sql, enable_rls_sql
 
 revision: str = "f8d9e0f1a2b3"
-down_revision: str | None = "f7c8d9e0f1a2"
+down_revision: str | None = "a8b9c0d1e2f3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

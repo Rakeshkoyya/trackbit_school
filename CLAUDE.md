@@ -177,7 +177,7 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   denominator is now the week's working days, identical for any week wholly inside the window.
   Syllabus importer maps a `Term` column and reports names it can't resolve rather than inventing
   them. `test_term_planning.py`.
-- **HS-1 (hostel sessions) COMPLETE** — migration `f8d9e0f1a2b3` (branches from `f7c8d9e0f1a2`).
+- **HS-1 (hostel sessions) COMPLETE** — migration `f8d9e0f1a2b3` (head, revises `a8b9c0d1e2f3`).
   The sessions module is now the **hostel-timetable unit**: `sessions` gains `kind`
   (study|homework|activity — picks the capture surface), `end_time`, `hostellers_only`; new tables
   `session_classes` (class-linked membership — the roster is **computed**: class students,
@@ -200,6 +200,22 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   strip with photo/video upload on all), My Day gains a **This evening** section. R2 note: set
   `R2_*` in `api/.env` (leave `R2_PUBLIC_BASE_URL` empty to keep the bucket private) and add a
   browser CORS rule (PUT from the web origin) on the bucket for presigned uploads.
+- **Teacher view + student growth (2026-07-11)** — migration `a8b9c0d1e2f3`. My Day is now
+  a clean list of tappable period rows; every action moved to a **period page**
+  (`/my-day/period/[classId]/[no]`, backed by the V2-P6 `GET /periods/card`): attendance
+  (inline tap-cycle + all-present), **topic picked from the syllabus list** (grouped by chapter,
+  ✓/◐ markers) + coverage + note, homework (class-wide or per-student), checks, "not held", and
+  the **optional deep log**: `lesson_observations` — named sections ("Vocabulary") with concepts
+  ("Reading"/"Writing") where the teacher flags ONLY deviating students
+  (needs_work/excellent, exception-only per P1v2; save = full-replace per section, like
+  attendance). `PUT/GET/DELETE /classroom/observations`. **Student growth report**
+  (`GET /students/{id}/growth`, `services/growth.py`, page `/students/[id]` — directory row click
+  opens it, pencil keeps the edit sheet): computed join, **chapter-level default with topic-level
+  drill-down** — per subject: attendance, chapters (topics taught / **missed while absent**,
+  expandable to per-topic taught-date + the student's presence), homework (incl. personal),
+  check flags, observations, test scores; plus skill profile, latest band + history (staff-only,
+  P4 intact) and derived **growth areas** phrases. Access: admin = all students, teacher = only
+  students in classes they teach (`not_your_student` 403). `test_growth.py` (4).
 - **`test_doc/`** — dummy xlsx/txt fixtures for the roster, staff and syllabus importers, plus the
   generator that writes them. Each carries rows meant to fail (missing name, unresolvable
   class-subject, duplicates of seeded rows) so the `errors`/`skipped`/`unresolved` surfaces get

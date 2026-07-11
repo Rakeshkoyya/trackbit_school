@@ -2,10 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Search, Trash2, Upload, UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { TimelineBlock } from "@/components/students/timeline-block";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -209,49 +211,6 @@ function StudentDetailSheet({ id, onClose, canEdit }: { id: string | null; onClo
   );
 }
 
-// §5.7 — the student's day, period-by-period (computed join, no new tables).
-function TimelineBlock({ studentId }: { studentId: string }) {
-  const { data } = useQuery({
-    queryKey: ["timeline", studentId],
-    queryFn: () => schoolApi.studentTimeline(studentId),
-  });
-  if (!data) return null;
-  const tone = (a: string) => a === "absent" ? "text-danger" : a === "late" ? "text-warning" : a === "present" ? "text-[#234a37]" : "text-muted-foreground";
-  return (
-    <div>
-      <p className="mb-1 font-medium">Today’s timeline</p>
-      {data.periods.length === 0 && data.sessions.length === 0 ? (
-        <p className="text-muted-foreground">No timetable or sessions today.</p>
-      ) : (
-        <ul className="space-y-1">
-          {data.periods.map((p) => (
-            <li key={p.period_no} className={`flex items-center gap-2 ${p.gap ? "opacity-60" : ""}`}>
-              <span className="w-6 shrink-0 text-xs font-semibold text-muted-foreground">P{p.period_no}</span>
-              <span className="min-w-0 flex-1 truncate">
-                {p.subject_name ?? "—"}{p.topic ? ` · ${p.topic}` : ""}
-                {p.homework.length ? <span className="text-xs text-muted-foreground"> · hw</span> : null}
-                {p.checks_flagged.length ? <span className="text-xs text-warning"> · flagged</span> : null}
-              </span>
-              <span className={`text-xs ${tone(p.attendance)}`}>{p.attendance}{p.late_minutes ? ` ${p.late_minutes}m` : ""}</span>
-            </li>
-          ))}
-          {data.sessions.map((s, i) => (
-            <li key={`sess-${i}`} className="flex items-center gap-2">
-              <span className="w-6 shrink-0 text-xs font-semibold text-muted-foreground">◷</span>
-              <span className="min-w-0 flex-1 truncate">
-                {s.session_name}
-                {s.log_note ? <span className="text-xs text-muted-foreground"> · {s.log_note}</span> : null}
-                {s.homework_done ? <span className="text-xs text-muted-foreground"> · hw ✓</span> : null}
-              </span>
-              <span className={`text-xs ${tone(s.status)}`}>{s.status}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
   const { yearId } = useYear();
@@ -319,6 +278,7 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
 }
 
 function StudentsInner() {
+  const router = useRouter();
   const { me } = useAuth();
   const { yearId } = useYear();
   const canEdit = me?.org_role === "admin";
@@ -385,13 +345,14 @@ function StudentsInner() {
                 <th className="px-3 py-2 font-medium">Class</th>
                 <th className="px-3 py-2 font-medium">Category</th>
                 <th className="px-3 py-2 font-medium">Status</th>
+                {canEdit ? <th className="px-3 py-2" /> : null}
               </tr>
             </thead>
             <tbody>
               {students.map((s: StudentListItem) => (
                 <tr
                   key={s.id}
-                  onClick={() => setDetailId(s.id)}
+                  onClick={() => router.push(`/students/${s.id}`)}
                   className="cursor-pointer border-b border-border/60 bg-card last:border-0 hover:bg-muted/40"
                 >
                   <td className="px-3 py-2">
@@ -411,6 +372,18 @@ function StudentsInner() {
                   <td className="px-3 py-2">
                     {s.status === "active" ? <span className="text-muted-foreground">active</span> : <Badge tone="neutral">{s.status}</Badge>}
                   </td>
+                  {canEdit ? (
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        aria-label={`Edit ${s.full_name}`}
+                        onClick={(e) => { e.stopPropagation(); setDetailId(s.id); }}
+                        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

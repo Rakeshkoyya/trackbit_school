@@ -1,4 +1,4 @@
-// TrackBit School domain types — mirror app/schemas/{academics,students,fees}.py.
+﻿// TrackBit School domain types â€” mirror app/schemas/{academics,students,fees}.py.
 
 export interface AcademicYear {
   id: string;
@@ -91,7 +91,7 @@ export interface ExamFit {
   exams: ExamFitExam[];
 }
 
-// ── computed week/day schedule (V2-P12) — never stored ───────────────────────
+// â”€â”€ computed week/day schedule (V2-P12) â€” never stored â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface DaySlot {
   period_no: number;
   class_subject_id: string;
@@ -100,7 +100,7 @@ export interface DaySlot {
   topic_id: string | null;
   topic_title: string | null;
   unit_title: string | null;
-  /** actual = logged · planned = projected from remaining syllabus · blocked · past */
+  /** actual = logged Â· planned = projected from remaining syllabus Â· blocked Â· past */
   state: "actual" | "planned" | "blocked" | "past";
 }
 
@@ -212,11 +212,16 @@ export interface MyDayPeriod {
   planned_topic: string | null;
   planned_topic_id: string | null;
   logged: boolean;
+  period_id: string | null;
+  status: "held" | "not_held";
+  opened: boolean;
+  closed: boolean;
   attendance_marked: boolean;
   roster_count: number;
   present_count: number | null;
   absent_count: number | null;
   late_count: number | null;
+  homework_set: boolean;
 }
 
 export interface MyDay {
@@ -226,7 +231,7 @@ export interface MyDay {
   homework_pending: HomeworkPending[];
 }
 
-// ── timetable (V2-P1, SPRD2 §5.3) ────────────────────────────────────────────
+// â”€â”€ timetable (V2-P1, SPRD2 Â§5.3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface TimetableSlot {
   id: string;
   class_id: string;
@@ -385,8 +390,8 @@ export interface SessionWrite {
 
 export type AttendanceStatus = "present" | "late" | "absent";
 
-// ── per-period attendance (V2-P2, SPRD2 §5.4) ────────────────────────────────
-// Exception statuses only — "present" is derived (roster minus exceptions).
+// â”€â”€ per-period attendance (V2-P2, SPRD2 Â§5.4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Exception statuses only â€” "present" is derived (roster minus exceptions).
 export type AttendanceException = "absent" | "late";
 
 export interface AttendanceRosterRow {
@@ -421,7 +426,7 @@ export interface AttendanceMarkResult {
   alerted_count: number;
 }
 
-// ── daily checks / recommendations (V2-P3, SPRD2 §5.5) ───────────────────────
+// â”€â”€ daily checks / recommendations (V2-P3, SPRD2 Â§5.5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface CheckResult {
   student_id: string;
   full_name: string;
@@ -446,7 +451,7 @@ export interface Checks {
   checks: DailyCheck[];
 }
 
-// ── daily report + student timeline (V2-P4, SPRD2 §5.6/§5.7) ─────────────────
+// â”€â”€ daily report + student timeline (V2-P4, SPRD2 Â§5.6/Â§5.7) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface ReportSection {
   heading: string;
   lines: string[];
@@ -497,7 +502,7 @@ export interface StudentTimeline {
   sessions: TimelineSession[];
 }
 
-// ── setup wizard + plan generation (V2-P5, SPRD2 §5.1/§5.2) ──────────────────
+// â”€â”€ setup wizard + plan generation (V2-P5, SPRD2 Â§5.1/Â§5.2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface WizardProgress {
   has_year: boolean;
   terms: number;
@@ -622,7 +627,7 @@ export interface SessionRecord {
   evidence_url: string | null;
 }
 
-// ── director dashboard (M4) ─────────────────────────────────────────────────
+// â”€â”€ director dashboard (M4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface DashboardAlert {
   id: string;
   type: "pace" | "compliance" | "homework";
@@ -663,7 +668,7 @@ export interface Digest {
   wins: string[];
 }
 
-// ── assessments & bands (M3) ────────────────────────────────────────────────
+// â”€â”€ assessments & bands (M3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface SkillArea { id: string; name: string; position: number }
 
 export type CycleType = "diagnostic" | "unit_test" | "term_exam";
@@ -730,16 +735,16 @@ export interface AllocationRow {
   subject_name: string;
   teacher_name: string | null;
   periods_per_week: number;
-  /** Σ est_periods of this subject's sized syllabus topics. */
+  /** Î£ est_periods of this subject's sized syllabus topics. */
   syllabus_periods: number;
-  /** Proportional share of capacity by syllabus size — a proposal, never applied. */
+  /** Proportional share of capacity by syllabus size â€” a proposal, never applied. */
   suggested: number;
 }
 
 export interface ClassAllocation {
   class_id: string;
   class_label: string;
-  /** working weekdays × periods/day. */
+  /** working weekdays Ã— periods/day. */
   capacity: number;
   allocated: number;
   rows: AllocationRow[];
@@ -776,7 +781,7 @@ export interface StudentDetail extends StudentListItem {
   guardians: Guardian[];
 }
 
-/** The roster importer shares the one ingest envelope (see AnalyzeResult) — same
+/** The roster importer shares the one ingest envelope (see AnalyzeResult) â€” same
  *  gap-question flow as staff and syllabus. It used to return only the first four
  *  fields, which crashed the import panel when it read `.length` on the rest. */
 export type RosterAnalyze = AnalyzeResult;
@@ -787,7 +792,7 @@ export interface RosterCommitResult {
   errors: { row: number; reason: string }[];
 }
 
-// ── fees ──────────────────────────────────────────────────────────────────
+// â”€â”€ fees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface FeeTemplate {
   installment_number: number;
   label: string | null;
@@ -872,7 +877,7 @@ export interface FeeSummary {
 }
 
 
-// ── document ingestion (V2-P7, SPRD2 §5.1) ───────────────────────────────────
+// â”€â”€ document ingestion (V2-P7, SPRD2 Â§5.1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /** A gap a deterministic validator found; the model only phrased the question. */
 export interface GapQuestion {
   field: string;
@@ -907,7 +912,7 @@ export interface StaffCommitResult {
 
 export interface SyllabusTopicDraft {
   title: string;
-  /** null when the document didn't state a number — imported unsized, not as 1. */
+  /** null when the document didn't state a number â€” imported unsized, not as 1. */
   est_periods: number | null;
 }
 
@@ -950,7 +955,7 @@ export interface WizardStep {
   complete: boolean;
 }
 
-// ── post-setup read models (V2-P10) — derived on read, never cached ──────────
+// â”€â”€ post-setup read models (V2-P10) â€” derived on read, never cached â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface YearFacts {
   academic_year_id: string;
   label: string;
@@ -995,7 +1000,7 @@ export interface SubjectRow {
   teacher_name: string | null;
   periods_per_week: number;
   timetabled_periods: number;
-  /** The entered budget and the grid disagree — every plan date is off. */
+  /** The entered budget and the grid disagree â€” every plan date is off. */
   periods_mismatch: boolean;
   chapters: number;
   topics: number;
@@ -1025,4 +1030,148 @@ export interface TeacherLoadRow {
   periods_per_week: number;
   classes: number;
   subjects: number;
+}
+
+// â”€â”€ period detail page (V2-P6 card) â€” the teacher's per-class capture surface â”€
+export interface PeriodPlan {
+  planned_topic_id: string | null;
+  planned_topic_title: string | null;
+  planned_unit_title: string | null;
+  logged_topic_id: string | null;
+  logged_coverage: string | null;
+  progress: TopicProgressRow[];
+}
+
+export interface PeriodHomework {
+  id: string;
+  text: string;
+  /** Set when this is a per-student addition rather than class-wide. */
+  student_id: string | null;
+  due_date: string | null;
+}
+
+export interface PeriodCard {
+  class_id: string;
+  class_label: string;
+  period_no: number;
+  date: string;
+  class_subject_id: string | null;
+  subject_name: string | null;
+  period_id: string | null;
+  status: "held" | "not_held";
+  not_held_reason: string | null;
+  opened: boolean;
+  closed: boolean;
+  attendance_marked: boolean;
+  roster: AttendanceRosterRow[];
+  roster_count: number;
+  present_count: number | null;
+  absent_count: number | null;
+  late_count: number | null;
+  plan: PeriodPlan;
+  homework: PeriodHomework[];
+}
+
+// â”€â”€ deep log â€” optional lesson observations (exception-only, P1v2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export interface ObservationStudent {
+  student_id: string;
+  full_name: string;
+  rating: "excellent" | "needs_work";
+  note: string | null;
+}
+
+export interface ObservationConcept {
+  concept: string | null;
+  students: ObservationStudent[];
+}
+
+export interface ObservationSection {
+  section: string;
+  period_id: string | null;
+  concepts: ObservationConcept[];
+}
+
+export interface Observations {
+  class_subject_id: string;
+  date: string;
+  sections: ObservationSection[];
+}
+
+// â”€â”€ student growth report (staff-only; teachers see their own students) â”€â”€â”€â”€â”€â”€
+export interface GrowthAttendance {
+  marked_periods: number;
+  present: number;
+  absent: number;
+  late: number;
+  pct: number | null;
+}
+
+export interface GrowthTopic {
+  topic_id: string;
+  title: string;
+  status: "done" | "in_progress" | "pending";
+  taught_on: string | null;
+  student_attendance: "present" | "absent" | "late" | null;
+}
+
+export interface GrowthChapter {
+  unit_id: string;
+  title: string;
+  topics_total: number;
+  topics_taught: number;
+  topics_missed: number;
+  topics: GrowthTopic[];
+}
+
+export interface GrowthObservation {
+  date: string;
+  section: string;
+  concept: string | null;
+  rating: string;
+  note: string | null;
+}
+
+export interface GrowthScore {
+  cycle_name: string;
+  date: string;
+  score: number;
+  max_score: number;
+}
+
+export interface GrowthSubject {
+  class_subject_id: string;
+  subject_name: string;
+  teacher_name: string | null;
+  attendance: GrowthAttendance;
+  chapters: GrowthChapter[];
+  homework_assigned: number;
+  homework_personal: number;
+  checks_flagged: number;
+  observations: GrowthObservation[];
+  scores: GrowthScore[];
+}
+
+export interface GrowthSkill {
+  skill_area: string;
+  score: number;
+  max_score: number;
+  cycle_name: string;
+}
+
+export interface GrowthBandEntry {
+  tier: string;
+  set_on: string;
+  note: string | null;
+}
+
+export interface StudentGrowth {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  band: string | null;
+  band_history: GrowthBandEntry[];
+  attendance: GrowthAttendance;
+  subjects: GrowthSubject[];
+  skills: GrowthSkill[];
+  growth_areas: string[];
 }

@@ -184,13 +184,48 @@ export const schoolApi = {
 
   // classroom (M2)
   myDay: () => api.get<import("@/lib/school-types").MyDay>("/classroom/my-day"),
-  logLesson: (b: { class_subject_id: string; topic_id?: string | null; coverage: string }) =>
-    api.post<{ id: string }>("/classroom/lesson-logs", b),
+  logLesson: (b: {
+    class_subject_id: string;
+    topic_id?: string | null;
+    coverage: string;
+    note?: string | null;
+    period_id?: string | null;
+    period_no?: number | null;
+  }) => api.post<{ id: string }>("/classroom/lesson-logs", b),
   addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null; student_id?: string | null }) =>
     api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
   checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
     api.post<{ id: string }>(`/classroom/homework/${id}/check`, b),
   compliance: () => api.get<import("@/lib/school-types").Compliance>("/classroom/compliance"),
+
+  // period detail page (V2-P6) — everything for one class-period in one call
+  periodCard: (classId: string, periodNo: number, onDate?: string) =>
+    api.get<import("@/lib/school-types").PeriodCard>(
+      `/periods/card${qs({ class_id: classId, period_no: String(periodNo), on_date: onDate })}`),
+  openPeriod: (b: { class_id: string; period_no: number; class_subject_id?: string | null; date?: string | null }) =>
+    api.post<{ id: string }>("/periods/open", b),
+  periodNotHeld: (periodId: string, reason: string) =>
+    api.post<{ id: string }>(`/periods/${periodId}/not-held`, { reason }),
+
+  // deep log — optional lesson observations (exception-only, P1v2)
+  observations: (csId: string, onDate?: string, periodId?: string) =>
+    api.get<import("@/lib/school-types").Observations>(
+      `/classroom/observations${qs({ class_subject_id: csId, on_date: onDate, period_id: periodId })}`),
+  saveObservationSection: (b: {
+    class_subject_id: string;
+    section: string;
+    date?: string | null;
+    period_id?: string | null;
+    period_no?: number | null;
+    concepts: { concept: string; students: { student_id: string; rating: "excellent" | "needs_work"; note?: string | null }[] }[];
+  }) => api.put<import("@/lib/school-types").Observations>("/classroom/observations", b),
+  deleteObservationSection: (csId: string, section: string, onDate?: string) =>
+    api.del<{ message: string }>(
+      `/classroom/observations${qs({ class_subject_id: csId, section, on_date: onDate })}`),
+
+  // student growth report — staff-only (admin all, teachers their own students)
+  studentGrowth: (studentId: string) =>
+    api.get<import("@/lib/school-types").StudentGrowth>(`/students/${studentId}/growth`),
 
   // attendance (V2-P2, SPRD2 §5.4) — capture-by-exception
   attendanceRoster: (classId: string, periodNo: number, onDate?: string) =>
