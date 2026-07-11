@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageLoading } from "@/components/ui/page-loading";
 import { Sheet } from "@/components/ui/sheet";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
@@ -78,7 +79,8 @@ function CreateSessionSheet({ open, onOpenChange }: { open: boolean; onOpenChang
 function SessionsInner() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const { data: sessions = [] } = useQuery({ queryKey: ["sessions"], queryFn: schoolApi.sessions });
+  const { data: sessions = [], isLoading } = useQuery({ queryKey: ["sessions"], queryFn: schoolApi.sessions });
+  const todayDow = (new Date().getDay() + 6) % 7; // JS Sunday=0 → our Monday=0
 
   return (
     <div>
@@ -86,27 +88,36 @@ function SessionsInner() {
         <h1 className="text-2xl font-semibold tracking-tight">Sessions</h1>
         <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New session</Button>
       </div>
-      {sessions.length === 0 ? (
+      {isLoading ? (
+        <PageLoading label="Loading sessions…" />
+      ) : sessions.length === 0 ? (
         <EmptyState icon={CalendarClock} title="No sessions yet"
           body="Create a homework class or remedial hour, add its students, then capture attendance in under a minute." />
       ) : (
         <div className="space-y-2">
-          {sessions.map((s) => (
-            <button key={s.id} onClick={() => router.push(`/sessions/${s.id}`)}
-              className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-muted/40">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{s.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {s.weekdays.map((d) => DOW[d]).join(", ") || "no days set"}
-                  {s.time ? ` · ${s.time}${s.end_time ? `–${s.end_time}` : ""}` : ""}
-                  {s.class_labels.length > 0 ? ` · ${s.class_labels.join(", ")}` : ""}
-                  {s.teacher_name ? ` · ${s.teacher_name}` : ""}
-                </p>
-              </div>
-              <Badge tone={s.kind === "activity" ? "success" : s.kind === "homework" ? "warning" : "primary"}>{s.kind}</Badge>
-              <Badge tone="neutral"><Users className="h-3 w-3" /> {s.roster_count}</Badge>
-            </button>
-          ))}
+          {sessions.map((s) => {
+            const isToday = s.weekdays.includes(todayDow);
+            return (
+              <button key={s.id} onClick={() => router.push(`/sessions/${s.id}`)}
+                className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/40 active:scale-[0.995]">
+                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${isToday ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>
+                  <CalendarClock className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{s.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {s.weekdays.map((d) => DOW[d]).join(" · ") || "no days set"}
+                    {s.time ? ` · ${s.time.slice(0, 5)}${s.end_time ? `–${s.end_time.slice(0, 5)}` : ""}` : ""}
+                    {s.class_labels.length > 0 ? ` · ${s.class_labels.join(", ")}` : ""}
+                    {s.teacher_name ? ` · ${s.teacher_name}` : ""}
+                  </p>
+                </div>
+                {isToday ? <Badge tone="primary">today</Badge> : null}
+                <Badge tone={s.kind === "activity" ? "success" : s.kind === "homework" ? "warning" : "neutral"}>{s.kind}</Badge>
+                <Badge tone="neutral"><Users className="h-3 w-3" /> {s.roster_count}</Badge>
+              </button>
+            );
+          })}
         </div>
       )}
       <CreateSessionSheet open={open} onOpenChange={setOpen} />

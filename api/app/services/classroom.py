@@ -54,6 +54,7 @@ from app.schemas.classroom import (
 from app.schemas.periods import (
     PeriodCardOut,
     PeriodHomeworkOut,
+    PeriodLogOut,
     PeriodPlanOut,
 )
 from app.services.attendance import AttendanceService
@@ -332,6 +333,16 @@ class ClassroomService:
         self.db.flush()
         return LessonLogOut.model_validate(log)
 
+    def delete_log(self, m: CurrentMember, log_id: uuid.UUID) -> None:
+        """Remove a mis-tapped topic log. Same permission as writing it."""
+        log = self.db.scalar(select(LessonLog).where(
+            LessonLog.id == log_id, LessonLog.org_id == m.org_id))
+        if log is None:
+            raise NotFoundError("Lesson log")
+        self._can_capture(m, self._cs(m.org_id, log.class_subject_id))
+        self.db.delete(log)
+        self.db.flush()
+
     # ── the period card (V2-P6) ──────────────────────────────────────────────
     def period_card(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
                     on_date: date | None = None) -> PeriodCardOut:
@@ -365,22 +376,32 @@ class ClassroomService:
                     select(ClassPeriod).where(
                         ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == class_id,
                         ClassPeriod.date == d))}
-            logs_by_period = {
-                log.period_id: log for log in self.db.scalars(
-                    select(LessonLog).where(
-                        LessonLog.org_id == m.org_id, LessonLog.class_subject_id == cs_id,
-                        LessonLog.date == d, LessonLog.period_id.is_not(None)))}
+            day_logs = list(self.db.scalars(
+                select(LessonLog).where(
+                    LessonLog.org_id == m.org_id, LessonLog.class_subject_id == cs_id,
+                    LessonLog.date == d, LessonLog.period_id.is_not(None))
+                .order_by(LessonLog.created_at)))
+            logs_by_period = {log.period_id: log for log in day_logs}
             assignment = self._assign_topics(m.org_id, monday, slots, period_ids, logs_by_period)
             topic_id, title, unit, logged = assignment.get(
                 (class_id, period_no), (None, None, None, False))
             log = logs_by_period.get(period.id) if period else None
+            progress = PlannerService(self.db).topic_progress(m, cs_id)
+            titles = {r.topic_id: r.topic_title for r in progress}
+            # ALL topics taught this period — a period can hold several, and a
+            # topic continued from yesterday shows up again here (partial → full).
+            period_logs = [x for x in day_logs if period and x.period_id == period.id]
             plan = PeriodPlanOut(
                 planned_topic_id=None if logged else topic_id,
                 planned_topic_title=None if logged else title,
                 planned_unit_title=None if logged else unit,
                 logged_topic_id=log.topic_id if log else None,
                 logged_coverage=log.coverage if log else None,
-                progress=PlannerService(self.db).topic_progress(m, cs_id))
+                logged=[PeriodLogOut(
+                    id=x.id, topic_id=x.topic_id,
+                    topic_title=titles.get(x.topic_id) if x.topic_id else None,
+                    coverage=x.coverage, note=x.note) for x in period_logs],
+                progress=progress)
             homework = [
                 PeriodHomeworkOut(id=h.id, text=h.text, student_id=h.student_id,
                                   due_date=h.due_date)

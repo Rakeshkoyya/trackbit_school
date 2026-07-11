@@ -18,16 +18,10 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageLoading } from "@/components/ui/page-loading";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type {
-  AttendanceException, DailyCheck, ObservationSection, PeriodCard,
-} from "@/lib/school-types";
-
-// Tap cycles a student present → absent → late → present (exception-only capture).
-const NEXT: Record<string, AttendanceException | null> = {
-  present: "absent", absent: "late", late: null,
-};
+import type { DailyCheck, ObservationSection, PeriodCard } from "@/lib/school-types";
 
 function Section({ title, icon, children, aside }: {
   title: string; icon: React.ReactNode; children: React.ReactNode; aside?: React.ReactNode;
@@ -43,161 +37,119 @@ function Section({ title, icon, children, aside }: {
   );
 }
 
-// ── 1 · attendance (inline tap-cycle roster) ─────────────────────────────────
-function AttendanceSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void }) {
-  const [editing, setEditing] = useState(!card.attendance_marked);
-  const [marks, setMarks] = useState<Record<string, AttendanceException>>(() => {
-    const initial: Record<string, AttendanceException> = {};
-    for (const r of card.roster) if (r.status) initial[r.student_id] = r.status;
-    return initial;
-  });
-  const save = useMutation({
-    mutationFn: (exceptions: { student_id: string; status: AttendanceException }[]) =>
-      schoolApi.markAttendance({
-        class_id: card.class_id, period_no: card.period_no,
-        class_subject_id: card.class_subject_id, exceptions,
-      }),
-    onSuccess: (res) => {
-      const alerted = res.alerted_count > 0 ? ` · ${res.alerted_count} parents alerted` : "";
-      toast.success(`Attendance saved · ${res.present_count}/${res.roster_count} present${alerted}`);
-      setEditing(false);
-      onSaved();
-    },
-    onError: (e) => showApiError(e, "Could not save attendance"),
-  });
-
-  const cycle = (id: string) => setMarks((prev) => {
-    const cur = prev[id] ?? "present";
-    const next = NEXT[cur];
-    const out = { ...prev };
-    if (next === null) delete out[id];
-    else out[id] = next;
-    return out;
-  });
-
-  const absent = Object.values(marks).filter((s) => s === "absent").length;
-  const total = card.roster.length;
-
-  if (card.roster.length === 0) {
-    return (
-      <Section title="Attendance" icon={<Users className="h-4 w-4" />}>
-        <p className="text-sm text-muted-foreground">No students on this class’s roster yet.</p>
-      </Section>
-    );
-  }
-
-  if (!editing && card.attendance_marked) {
-    return (
-      <Section title="Attendance" icon={<Users className="h-4 w-4" />}
-        aside={<Button size="sm" variant="ghost" onClick={() => setEditing(true)}>Edit</Button>}>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={card.absent_count ? "warning" : "success"}>
-            {card.present_count}/{card.roster_count} present
-          </Badge>
-          {card.absent_count ? <Badge tone="danger">{card.absent_count} absent</Badge> : null}
-          {card.late_count ? <Badge tone="warning">{card.late_count} late</Badge> : null}
-        </div>
-        {card.absent_count || card.late_count ? (
-          <ul className="mt-2 space-y-0.5 text-sm text-muted-foreground">
-            {card.roster.filter((r) => r.status).map((r) => (
-              <li key={r.student_id}>{r.full_name} — {r.status}{r.late_minutes ? ` (${r.late_minutes}m)` : ""}</li>
-            ))}
-          </ul>
-        ) : null}
-      </Section>
-    );
-  }
-
+// ── 1 · attendance — a tappable row that opens the roll-call page ────────────
+function AttendanceSection({ card }: { card: PeriodCard }) {
   return (
-    <Section title="Attendance" icon={<Users className="h-4 w-4" />}>
-      <p className="mb-2 text-xs text-muted-foreground">
-        Everyone starts present — tap only those absent or late. {total - absent}/{total} present
-      </p>
-      {!card.attendance_marked && Object.keys(marks).length === 0 ? (
-        <Button className="mb-3 w-full" disabled={save.isPending} onClick={() => save.mutate([])}>
-          <UserCheck className="h-4 w-4" /> All present ✓
-        </Button>
-      ) : null}
-      <div className="mb-3 grid gap-1 sm:grid-cols-2">
-        {card.roster.map((r) => {
-          const status = marks[r.student_id];
-          const tone = status === "absent" ? "danger" : status === "late" ? "warning" : "success";
-          return (
-            <button key={r.student_id} type="button" onClick={() => cycle(r.student_id)}
-              className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-left text-sm active:scale-[0.99]">
-              <span className="truncate">{r.roll_no ? `${r.roll_no}. ` : ""}{r.full_name}</span>
-              <Badge tone={tone}>{status ?? "present"}</Badge>
-            </button>
-          );
-        })}
+    <Link href={`/my-day/period/${card.class_id}/${card.period_no}/attendance`}
+      className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]">
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${card.attendance_marked ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]" : "bg-muted text-muted-foreground"}`}>
+        <Users className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">Attendance</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {card.roster_count === 0 ? "No students on the roster yet"
+            : card.attendance_marked
+              ? card.roster.filter((r) => r.status).map((r) =>
+                  `${r.full_name} ${r.status}${r.late_minutes ? ` ${r.late_minutes}m` : ""}`).join(" · ") || "Everyone present"
+              : "Not taken yet — tap to call the roll"}
+        </p>
       </div>
-      <Button className="w-full" disabled={save.isPending}
-        onClick={() => save.mutate(Object.entries(marks).map(([student_id, status]) => ({ student_id, status })))}>
-        <UserCheck className="h-4 w-4" /> {save.isPending ? "Saving…" : "Save attendance"}
-      </Button>
-    </Section>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {card.attendance_marked ? (
+          <>
+            <Badge tone={card.absent_count ? "warning" : "success"}>
+              <UserCheck className="h-3 w-3" /> {card.present_count}/{card.roster_count}
+            </Badge>
+            {card.late_count ? <Badge tone="warning">{card.late_count} late</Badge> : null}
+          </>
+        ) : (
+          <Badge tone="neutral">take now</Badge>
+        )}
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+      </div>
+    </Link>
   );
 }
 
-// ── 2 · topic — pick from the syllabus list, confirm coverage ────────────────
+// ── 2 · topics — pick from the list and it's saved instantly; delete to undo ─
 function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void }) {
   const { plan } = card;
-  const logged = plan.logged_topic_id != null || plan.logged_coverage != null;
-  const [changing, setChanging] = useState(false);
-  const [topicId, setTopicId] = useState(plan.logged_topic_id ?? plan.planned_topic_id ?? "");
-  const [note, setNote] = useState("");
   const log = useMutation({
-    mutationFn: (coverage: string) => schoolApi.logLesson({
-      class_subject_id: card.class_subject_id!, topic_id: topicId || null, coverage,
-      note: note.trim() || null, period_no: card.period_no,
+    mutationFn: (topicId: string) => schoolApi.logLesson({
+      class_subject_id: card.class_subject_id!, topic_id: topicId, coverage: "full",
+      period_no: card.period_no,
     }),
-    onSuccess: () => { toast.success("Topic logged"); setChanging(false); onSaved(); },
-    onError: (e) => showApiError(e, "Could not log"),
+    onSuccess: () => { toast.success("Added — taught today"); onSaved(); },
+    onError: (e) => showApiError(e, "Could not add"),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => schoolApi.deleteLog(id),
+    onSuccess: () => { toast.success("Removed"); onSaved(); },
+    onError: (e) => showApiError(e, "Could not remove"),
   });
 
-  // Group the syllabus list by chapter so the picker reads like the plan.
+  // Group the syllabus list by chapter; hide topics already added to THIS period.
+  const inPeriod = new Set(plan.logged.map((l) => l.topic_id));
   const byUnit = new Map<string, typeof plan.progress>();
   for (const row of plan.progress) {
+    if (inPeriod.has(row.topic_id)) continue;
     if (!byUnit.has(row.unit_title)) byUnit.set(row.unit_title, []);
     byUnit.get(row.unit_title)!.push(row);
   }
-  const loggedTitle = plan.progress.find((r) => r.topic_id === plan.logged_topic_id)?.topic_title;
 
   if (card.class_subject_id == null) {
     return (
-      <Section title="Topic" icon={<Check className="h-4 w-4" />}>
+      <Section title="Topics taught" icon={<Check className="h-4 w-4" />}>
         <p className="text-sm text-muted-foreground">No subject is timetabled for this period.</p>
       </Section>
     );
   }
 
-  if (logged && !changing) {
-    return (
-      <Section title="Topic" icon={<Check className="h-4 w-4" />}
-        aside={<Button size="sm" variant="ghost" onClick={() => setChanging(true)}>Change</Button>}>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge tone="success">logged</Badge>
-          <span>{loggedTitle ?? "Topic"}</span>
-          {plan.logged_coverage ? <span className="text-muted-foreground">· {plan.logged_coverage === "full" ? "covered" : "partially"}</span> : null}
-        </div>
-      </Section>
-    );
-  }
-
   return (
-    <Section title="Topic" icon={<Check className="h-4 w-4" />}>
-      {plan.planned_topic_title ? (
-        <p className="mb-2 text-xs text-muted-foreground">
-          Planned this week: <span className="font-medium text-foreground">{plan.planned_topic_title}</span>
-          {plan.planned_unit_title ? ` (${plan.planned_unit_title})` : ""}
-        </p>
+    <Section title="Topics taught" icon={<Check className="h-4 w-4" />}
+      aside={log.isPending ? <span className="text-xs text-muted-foreground">saving…</span> : null}>
+
+      {plan.logged.length > 0 ? (
+        <ul className="mb-3 space-y-1">
+          {plan.logged.map((l) => (
+            <li key={l.id} className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
+              <Check className="h-4 w-4 shrink-0 text-[color:var(--success,#234a37)]" />
+              <span className="min-w-0 flex-1 truncate font-medium">{l.topic_title ?? "No specific topic"}</span>
+              <Badge tone="success">taught today</Badge>
+              <button type="button" aria-label="Remove topic" onClick={() => remove.mutate(l.id)}
+                disabled={remove.isPending}
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-2 text-sm text-muted-foreground">Nothing added yet — pick from the syllabus below.</p>
+      )}
+
+      {plan.planned_topic_title && !inPeriod.has(plan.planned_topic_id) ? (
+        <button type="button" disabled={log.isPending}
+          onClick={() => plan.planned_topic_id && log.mutate(plan.planned_topic_id)}
+          className="mb-2 flex w-full items-center gap-2 rounded-lg border border-dashed border-primary/50 px-3 py-2 text-left text-sm hover:bg-accent/50">
+          <Plus className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 truncate">
+            Planned this week: <span className="font-medium">{plan.planned_topic_title}</span>
+            {plan.planned_unit_title ? <span className="text-muted-foreground"> ({plan.planned_unit_title})</span> : null}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">tap to add</span>
+        </button>
       ) : null}
+
       {plan.progress.length > 0 ? (
         <select
-          aria-label="Topic taught"
-          className="mb-2 h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
-          value={topicId} onChange={(e) => setTopicId(e.target.value)}>
-          <option value="">No specific topic</option>
+          aria-label="Add a topic from the syllabus"
+          className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+          value=""
+          disabled={log.isPending}
+          onChange={(e) => { if (e.target.value) log.mutate(e.target.value); }}>
+          <option value="">+ Add a topic from the syllabus…</option>
           {[...byUnit.entries()].map(([unit, rows]) => (
             <optgroup key={unit} label={unit}>
               {rows.map((r) => (
@@ -209,14 +161,12 @@ function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void
           ))}
         </select>
       ) : (
-        <p className="mb-2 text-sm text-muted-foreground">No syllabus loaded for this subject yet.</p>
+        <p className="text-sm text-muted-foreground">No syllabus loaded for this subject yet.</p>
       )}
-      <Input className="mb-3" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-      <div className="flex gap-2">
-        <Button className="flex-1" onClick={() => log.mutate("full")} disabled={log.isPending}>Covered</Button>
-        <Button className="flex-1" variant="outline" onClick={() => log.mutate("partial")} disabled={log.isPending}>Partially</Button>
-        {changing ? <Button variant="ghost" onClick={() => setChanging(false)}>Cancel</Button> : null}
-      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Picking a topic saves it instantly. The same topic can be added again on another day
+        if it takes longer than one class.
+      </p>
     </Section>
   );
 }
@@ -597,8 +547,27 @@ function PeriodPageInner() {
     onError: (e) => showApiError(e, "Could not update"),
   });
 
+  // "Save session" = close the period (drives the reminders + daily report).
+  // It stays editable — "Edit session" reopens it.
+  const closeSession = useMutation({
+    mutationFn: async () => {
+      const periodId = card!.period_id
+        ?? (await schoolApi.openPeriod({
+          class_id: classId, period_no: periodNo, class_subject_id: card!.class_subject_id,
+        })).id;
+      return schoolApi.closePeriod(periodId);
+    },
+    onSuccess: () => { toast.success("Session saved"); refresh(); },
+    onError: (e) => showApiError(e, "Could not save session"),
+  });
+  const reopen = useMutation({
+    mutationFn: () => schoolApi.reopenPeriod(card!.period_id!),
+    onSuccess: () => { toast.success("Session reopened — make your changes"); refresh(); },
+    onError: (e) => showApiError(e, "Could not reopen"),
+  });
+
   if (isLoading || !card) {
-    return <p className="py-12 text-center text-sm text-muted-foreground">Loading period…</p>;
+    return <PageLoading label="Loading period…" />;
   }
 
   return (
@@ -636,11 +605,28 @@ function PeriodPageInner() {
         </p>
       ) : (
         <div className="space-y-3">
-          <AttendanceSection key={`att-${card.attendance_marked}`} card={card} onSaved={refresh} />
-          <TopicSection key={`topic-${card.plan.logged_topic_id ?? ""}-${card.plan.logged_coverage ?? ""}`} card={card} onSaved={refresh} />
+          {card.closed ? (
+            <div className="flex items-center justify-between rounded-xl border border-[color:var(--success,#234a37)]/40 bg-[color:var(--success,#234a37)]/5 px-4 py-3">
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                <Check className="h-4 w-4 text-[color:var(--success,#234a37)]" /> Session saved
+              </p>
+              <Button size="sm" variant="outline" disabled={reopen.isPending}
+                onClick={() => reopen.mutate()}>
+                {reopen.isPending ? "Opening…" : "Edit session"}
+              </Button>
+            </div>
+          ) : null}
+          <AttendanceSection card={card} />
+          <TopicSection card={card} onSaved={refresh} />
           <HomeworkSection card={card} onSaved={refresh} />
           <ChecksSection card={card} />
           <DeepLogSection card={card} />
+          {!card.closed ? (
+            <Button className="w-full" size="lg" disabled={closeSession.isPending}
+              onClick={() => closeSession.mutate()}>
+              {closeSession.isPending ? "Saving…" : "Save session ✓"}
+            </Button>
+          ) : null}
         </div>
       )}
     </div>

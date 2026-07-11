@@ -192,6 +192,7 @@ export const schoolApi = {
     period_id?: string | null;
     period_no?: number | null;
   }) => api.post<{ id: string }>("/classroom/lesson-logs", b),
+  deleteLog: (id: string) => api.del<{ message: string }>(`/classroom/lesson-logs/${id}`),
   addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null; student_id?: string | null }) =>
     api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
   checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
@@ -206,6 +207,8 @@ export const schoolApi = {
     api.post<{ id: string }>("/periods/open", b),
   periodNotHeld: (periodId: string, reason: string) =>
     api.post<{ id: string }>(`/periods/${periodId}/not-held`, { reason }),
+  closePeriod: (periodId: string) => api.post<{ id: string }>(`/periods/${periodId}/close`),
+  reopenPeriod: (periodId: string) => api.post<{ id: string }>(`/periods/${periodId}/reopen`),
 
   // deep log — optional lesson observations (exception-only, P1v2)
   observations: (csId: string, onDate?: string, periodId?: string) =>

@@ -16,6 +16,7 @@ import { useState } from "react";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { TimelineBlock } from "@/components/students/timeline-block";
 import { Badge } from "@/components/ui/badge";
+import { PageLoading } from "@/components/ui/page-loading";
 import { schoolApi } from "@/lib/school-api";
 import type { GrowthChapter, GrowthSubject } from "@/lib/school-types";
 
@@ -159,7 +160,7 @@ function GrowthInner() {
     retry: false,
   });
 
-  if (isLoading) return <p className="py-12 text-center text-sm text-muted-foreground">Loading report…</p>;
+  if (isLoading) return <PageLoading label="Loading report…" />;
   if (error || !data) {
     return (
       <div className="py-12 text-center text-sm text-muted-foreground">
