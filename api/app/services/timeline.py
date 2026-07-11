@@ -135,17 +135,25 @@ class StudentTimelineService:
 
     def _sessions(self, org_id: uuid.UUID, student_id: uuid.UUID, d: date) -> list[TimelineSession]:
         rows = self.db.execute(
-            select(SessionModel.name, SessionModel.kind, SessionAttendance.status,
-                   SessionAttendance.homework_done, SessionStudentLog.note)
+            select(SessionMeeting.id, SessionModel.name, SessionModel.kind,
+                   SessionAttendance.status, SessionAttendance.homework_done)
             .join(SessionMeeting, SessionMeeting.session_id == SessionModel.id)
             .join(SessionAttendance, SessionAttendance.meeting_id == SessionMeeting.id)
-            .outerjoin(SessionStudentLog,
-                       (SessionStudentLog.meeting_id == SessionMeeting.id)
-                       & (SessionStudentLog.student_id == student_id))
             .where(SessionModel.org_id == org_id, SessionMeeting.date == d,
                    SessionAttendance.student_id == student_id)
             .order_by(SessionModel.time, SessionModel.name)
         ).all()
+        meeting_ids = [mid for mid, *_ in rows]
+        # HS-2: a student's log is sectioned rows — fold them into one line here.
+        notes: dict[uuid.UUID, list[str]] = {}
+        if meeting_ids:
+            for log in self.db.scalars(
+                    select(SessionStudentLog).where(
+                        SessionStudentLog.meeting_id.in_(meeting_ids),
+                        SessionStudentLog.student_id == student_id)
+                    .order_by(SessionStudentLog.created_at)):
+                notes.setdefault(log.meeting_id, []).append(
+                    f"{log.section}: {log.note}" if log.section else log.note)
         return [TimelineSession(session_name=name, kind=kind, status=status, homework_done=hw,
-                                log_note=note)
-                for name, kind, status, hw, note in rows]
+                                log_note=" · ".join(notes[mid]) if mid in notes else None)
+                for mid, name, kind, status, hw in rows]

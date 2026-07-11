@@ -372,7 +372,11 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     if hostellers:
         db.add(SessionStudentLog(
             org_id=org.id, meeting_id=prep_meeting.id, student_id=hostellers[0].id,
-            note="Finished Maths Ex 4.2; revised Science ch. 3 diagrams",
+            section="Maths", note="Finished Ex 4.2 without help",
+            member_id=mships[anil].id))
+        db.add(SessionStudentLog(
+            org_id=org.id, meeting_id=prep_meeting.id, student_id=hostellers[0].id,
+            section="Science", note="Revised ch. 3 diagrams",
             member_id=mships[anil].id))
     db.flush()
 

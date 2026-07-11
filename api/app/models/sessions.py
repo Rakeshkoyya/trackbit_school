@@ -158,6 +158,11 @@ class SessionMedia(Base, UUIDPKMixin, CreatedAtMixin):
         UUID(as_uuid=True), ForeignKey("session_meetings.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
+    # NULL = whole-class memory. Set = this student's own memory (founder call,
+    # July 2026 — supersedes the batch-only reading of P5 for hostel sessions).
+    student_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=True
+    )
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # photo | video
     object_key: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -173,10 +178,11 @@ class SessionMedia(Base, UUIDPKMixin, CreatedAtMixin):
 
 
 class SessionStudentLog(Base, UUIDPKMixin, CreatedAtMixin):
-    """Optional per-student study-session note (HS-1): what this student worked on
-    tonight. One row per (meeting, student), upserted. NEVER mandatory — attendance
-    stays the ≤60s tap flow; a row exists only when there is something to say
-    (P1v2: no mandatory per-student capture)."""
+    """Optional per-student study-session log (HS-1/HS-2): what this student worked
+    on tonight, as named sections ("Maths", "Revision") like the class deep log —
+    one row per (meeting, student, section), full-replaced per student on save.
+    NEVER mandatory — attendance stays the ≤60s tap flow; rows exist only when
+    there is something to say (P1v2: no mandatory per-student capture)."""
 
     __tablename__ = "session_student_logs"
 
@@ -191,11 +197,14 @@ class SessionStudentLog(Base, UUIDPKMixin, CreatedAtMixin):
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True
     )
+    # Section label; '' = the unnamed default section (pre-HS-2 rows).
+    section: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     note: Mapped[str] = mapped_column(Text, nullable=False)
     member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
     )
 
     __table_args__ = (
-        UniqueConstraint("meeting_id", "student_id", name="uq_session_student_logs_meeting_id"),
+        UniqueConstraint("meeting_id", "student_id", "section",
+                         name="uq_session_student_logs_meeting_id"),
     )

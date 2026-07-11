@@ -270,19 +270,24 @@ export const schoolApi = {
     return api.upload<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/photo`, form);
   },
   sessionRecords: () => api.get<import("@/lib/school-types").SessionRecord[]>("/sessions/records"),
-  setStudentLogs: (meetingId: string, rows: { student_id: string; note: string; subject_id?: string | null }[]) =>
-    api.put<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/logs`, { rows }),
+  sessionStudentCard: (meetingId: string, studentId: string) =>
+    api.get<import("@/lib/school-types").SessionStudentCard>(
+      `/sessions/meetings/${meetingId}/students/${studentId}`),
+  setStudentLogs: (meetingId: string, studentId: string, entries: { section: string; note: string }[]) =>
+    api.put<import("@/lib/school-types").SessionStudentCard>(
+      `/sessions/meetings/${meetingId}/students/${studentId}/logs`, { entries }),
   homeworkBoard: (meetingId: string) =>
     api.get<import("@/lib/school-types").HomeworkBoard>(`/sessions/meetings/${meetingId}/homework`),
   deleteSessionMedia: (mediaId: string) => api.del<{ message: string }>(`/sessions/media/${mediaId}`),
   // Media upload: presign → direct-to-R2 PUT → confirm; falls back to the
   // pass-through endpoint when R2 isn't configured (dev) or for small files.
-  uploadSessionMedia: async (meetingId: string, file: File, caption?: string) => {
+  uploadSessionMedia: async (meetingId: string, file: File, opts?: { caption?: string; studentId?: string }) => {
     const DIRECT_LIMIT = 25 * 1024 * 1024;
     if (file.size > DIRECT_LIMIT) {
       const pre = await api.post<import("@/lib/school-types").MediaPresign>(
         `/sessions/meetings/${meetingId}/media/presign`,
-        { filename: file.name, content_type: file.type || "application/octet-stream", size_bytes: file.size },
+        { filename: file.name, content_type: file.type || "application/octet-stream",
+          size_bytes: file.size, student_id: opts?.studentId ?? null },
       );
       if (pre.upload_url) {
         const put = await fetch(pre.upload_url, {
@@ -291,12 +296,14 @@ export const schoolApi = {
         });
         if (!put.ok) throw new Error("Upload to storage failed");
         return api.post<import("@/lib/school-types").Meeting>(
-          `/sessions/meetings/${meetingId}/media/confirm`, { key: pre.key, caption: caption || null });
+          `/sessions/meetings/${meetingId}/media/confirm`,
+          { key: pre.key, caption: opts?.caption || null, student_id: opts?.studentId ?? null });
       }
     }
     const form = new FormData();
     form.append("file", file);
-    if (caption) form.append("caption", caption);
+    if (opts?.caption) form.append("caption", opts.caption);
+    if (opts?.studentId) form.append("student_id", opts.studentId);
     return api.upload<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/media`, form);
   },
 

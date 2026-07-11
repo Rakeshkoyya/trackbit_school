@@ -200,6 +200,19 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   strip with photo/video upload on all), My Day gains a **This evening** section. R2 note: set
   `R2_*` in `api/.env` (leave `R2_PUBLIC_BASE_URL` empty to keep the bucket private) and add a
   browser CORS rule (PUT from the web origin) on the bucket for presigned uploads.
+- **HS-2 (per-student session capture) COMPLETE** — migration `f9e0f1a2b3c4` (head).
+  `session_media.student_id` (NULL = class memory; set = that student's own photo/video —
+  explicit founder call, supersedes batch-only P5 for hostel sessions);
+  `session_student_logs.section` (named sections per student like the class deep log; unique =
+  meeting×student×section, PUT full-replace per student). New `GET/PUT
+  /sessions/meetings/{id}/students/{sid}[/logs]` (SessionStudentCard: attendance + homework +
+  logs + media in one round trip). Web: session page roster is a grouped/searchable
+  **StudentTable** (`components/school/student-table.tsx`, boards-table language; homework tick
+  starts EMPTY daily, saves per tap); row click → `/sessions/[id]/student/[studentId]` (homework
+  detail + Mark done, sectioned study log editor, per-student memories); hub keeps class-wide
+  memories only. Students directory gets the same toolbar (search · group-by class default ·
+  class/category/status filters, grouped card tables). Timeline folds sectioned logs into one
+  line. `test_hostel_sessions.py` still 6 green.
 - **Teacher view + student growth (2026-07-11)** — migration `a8b9c0d1e2f3`. My Day is now
   a clean list of tappable period rows; every action moved to a **period page**
   (`/my-day/period/[classId]/[no]`, backed by the V2-P6 `GET /periods/card`): attendance

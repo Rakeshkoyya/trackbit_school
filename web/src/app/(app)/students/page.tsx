@@ -7,6 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { Dropdown } from "@/components/school/student-table";
 import { TimelineBlock } from "@/components/students/timeline-block";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -277,13 +278,19 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
   );
 }
 
+const GROUP_COLORS = ["#6b7fd7", "#3f8f6b", "#c98a3d", "#b05f8a", "#5b9aa9", "#8a6bbf"];
+type DirGroupBy = "class" | "category" | "status" | "none";
+
 function StudentsInner() {
   const router = useRouter();
   const { me } = useAuth();
   const { yearId } = useYear();
   const canEdit = me?.org_role === "admin";
   const [query, setQuery] = useState("");
-  const [classFilter, setClassFilter] = useState(""); // "" all · "none" unassigned · class id
+  const [classFilter, setClassFilter] = useState("all"); // all · none · class id
+  const [catFilter, setCatFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [groupBy, setGroupBy] = useState<DirGroupBy>("class");
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -301,7 +308,80 @@ function StudentsInner() {
   const classLabel = new Map(classes.map((c) => [c.id, c.name + (c.section ? `-${c.section}` : "")]));
   const catLabel = new Map(categories.map((c) => [c.id, c.name]));
   const students = all.filter((s) =>
-    classFilter === "" ? true : classFilter === "none" ? !s.class_id : s.class_id === classFilter);
+    (classFilter === "all" ? true : classFilter === "none" ? !s.class_id : s.class_id === classFilter)
+    && (catFilter === "all" ? true : s.category_id === catFilter)
+    && (statusFilter === "all" ? true : s.status === statusFilter));
+
+  // Group the filtered rows (Group by: Class is the default view).
+  const keyOf = (s: StudentListItem) =>
+    groupBy === "class" ? (s.class_id ? classLabel.get(s.class_id) ?? "?" : "Unassigned")
+      : groupBy === "category" ? (s.category_id ? catLabel.get(s.category_id) ?? "—" : "No category")
+        : groupBy === "status" ? s.status
+          : "";
+  const groups = new Map<string, StudentListItem[]>();
+  for (const s of students) {
+    const k = keyOf(s);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(s);
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+
+  const renderTable = (rows: StudentListItem[]) => (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[640px] text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+            <th className="px-3 py-2 font-medium">Name</th>
+            <th className="px-3 py-2 font-medium">Adm. no</th>
+            <th className="px-3 py-2 font-medium">Roll</th>
+            <th className="px-3 py-2 font-medium">Class</th>
+            <th className="px-3 py-2 font-medium">Category</th>
+            <th className="px-3 py-2 font-medium">Status</th>
+            {canEdit ? <th className="px-3 py-2" /> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s: StudentListItem) => (
+            <tr
+              key={s.id}
+              onClick={() => router.push(`/students/${s.id}`)}
+              className="cursor-pointer border-b border-border/60 bg-card last:border-0 hover:bg-muted/40"
+            >
+              <td className="px-3 py-2">
+                <span className="flex items-center gap-2">
+                  <Avatar name={s.full_name} />
+                  <span className="font-medium">{s.full_name}</span>
+                </span>
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">{s.admission_no}</td>
+              <td className="px-3 py-2 text-muted-foreground">{s.roll_no ?? "—"}</td>
+              <td className="px-3 py-2">
+                {s.class_id ? classLabel.get(s.class_id) ?? "?" : <Badge tone="warning">unassigned</Badge>}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">
+                {s.category_id ? catLabel.get(s.category_id) ?? "—" : "—"}
+              </td>
+              <td className="px-3 py-2">
+                {s.status === "active" ? <span className="text-muted-foreground">active</span> : <Badge tone="neutral">{s.status}</Badge>}
+              </td>
+              {canEdit ? (
+                <td className="px-3 py-2 text-right">
+                  <button
+                    type="button"
+                    aria-label={`Edit ${s.full_name}`}
+                    onClick={(e) => { e.stopPropagation(); setDetailId(s.id); }}
+                    className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div>
@@ -315,79 +395,41 @@ function StudentsInner() {
         ) : null}
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1">
+        <div className="relative min-w-48 flex-1 basis-48">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input className="pl-9" placeholder="Search by name or admission no.…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
-        <select
-          aria-label="Filter by class"
-          className="h-10 rounded-md border border-border bg-card px-2 text-sm"
-          value={classFilter}
-          onChange={(e) => setClassFilter(e.target.value)}
-        >
-          <option value="">All classes</option>
-          {classes.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>
-          ))}
-          <option value="none">Unassigned</option>
-        </select>
+        <Dropdown label="Group by" value={groupBy}
+          options={[["class", "Class"], ["category", "Category"], ["status", "Status"], ["none", "None"]]}
+          onChange={(v) => setGroupBy(v as DirGroupBy)} />
+        <Dropdown label="Class" value={classFilter}
+          options={[["all", "All"], ...classes.map((c): [string, string] =>
+            [c.id, c.name + (c.section ? `-${c.section}` : "")]), ["none", "Unassigned"]]}
+          onChange={setClassFilter} />
+        <Dropdown label="Category" value={catFilter}
+          options={[["all", "All"], ...categories.map((c): [string, string] => [c.id, c.name])]}
+          onChange={setCatFilter} />
+        <Dropdown label="Status" value={statusFilter}
+          options={[["all", "All"], ["active", "Active"], ["left", "Left"]]}
+          onChange={setStatusFilter} />
       </div>
       {students.length === 0 ? (
-        <EmptyState icon={Plus} title="No students yet" body="Add students to build the roster fees and academics both run on." />
+        <EmptyState icon={Plus} title="No students match"
+          body="Try clearing a filter — or add students to build the roster fees and academics both run on." />
+      ) : groupBy === "none" ? (
+        <div className="overflow-hidden rounded-xl border border-border shadow-sm">{renderTable(students)}</div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Adm. no</th>
-                <th className="px-3 py-2 font-medium">Roll</th>
-                <th className="px-3 py-2 font-medium">Class</th>
-                <th className="px-3 py-2 font-medium">Category</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                {canEdit ? <th className="px-3 py-2" /> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {students.map((s: StudentListItem) => (
-                <tr
-                  key={s.id}
-                  onClick={() => router.push(`/students/${s.id}`)}
-                  className="cursor-pointer border-b border-border/60 bg-card last:border-0 hover:bg-muted/40"
-                >
-                  <td className="px-3 py-2">
-                    <span className="flex items-center gap-2">
-                      <Avatar name={s.full_name} />
-                      <span className="font-medium">{s.full_name}</span>
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">{s.admission_no}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{s.roll_no ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    {s.class_id ? classLabel.get(s.class_id) ?? "?" : <Badge tone="warning">unassigned</Badge>}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {s.category_id ? catLabel.get(s.category_id) ?? "—" : "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {s.status === "active" ? <span className="text-muted-foreground">active</span> : <Badge tone="neutral">{s.status}</Badge>}
-                  </td>
-                  {canEdit ? (
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        aria-label={`Edit ${s.full_name}`}
-                        onClick={(e) => { e.stopPropagation(); setDetailId(s.id); }}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                    </td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          {ordered.map(([label, rows], gi) => (
+            <div key={label} className="overflow-hidden rounded-xl border border-border shadow-sm">
+              <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2">
+                <span className="h-4 w-1 rounded-full" style={{ background: GROUP_COLORS[gi % GROUP_COLORS.length] }} />
+                <p className="text-sm font-semibold">{label}</p>
+                <span className="text-xs text-muted-foreground">{rows.length}</span>
+              </div>
+              {renderTable(rows)}
+            </div>
+          ))}
         </div>
       )}
       <AddStudentSheet open={addOpen} onOpenChange={setAddOpen} />

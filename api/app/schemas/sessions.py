@@ -83,12 +83,14 @@ class MeetingRosterRow(BaseModel):
     student_id: uuid.UUID
     full_name: str
     roll_no: str | None
+    class_label: str | None = None
     status: str | None = None
     late_minutes: int | None = None
     homework_done: bool | None = None
-    # HS-1: tonight's optional study log for this student (study sessions).
+    # HS-2: tonight's study log — section count + a one-line preview.
+    log_count: int = 0
     log_note: str | None = None
-    log_subject_id: uuid.UUID | None = None
+    media_count: int = 0
 
 
 class MediaOut(BaseModel):
@@ -97,6 +99,8 @@ class MediaOut(BaseModel):
     url: str  # minted at read time from the stored object key
     content_type: str
     caption: str | None = None
+    # NULL = whole-class memory; set = that student's own memory (HS-2).
+    student_id: uuid.UUID | None = None
     created_at: datetime
 
 
@@ -110,15 +114,14 @@ class MeetingOut(BaseModel):
     media: list[MediaOut] = Field(default_factory=list)
 
 
-# ── per-student study logs (HS-1) ────────────────────────────────────────────
-class StudentLogIn(BaseModel):
-    student_id: uuid.UUID
-    note: str = Field(max_length=2000)  # blank = clear the row
-    subject_id: uuid.UUID | None = None
+# ── per-student study logs (HS-2: named sections, like the class deep log) ──
+class StudentLogEntry(BaseModel):
+    section: str = Field(default="", max_length=80)
+    note: str = Field(min_length=1, max_length=2000)
 
 
-class StudentLogsIn(BaseModel):
-    rows: list[StudentLogIn] = Field(max_length=200)
+class StudentLogsReplaceIn(BaseModel):
+    entries: list[StudentLogEntry] = Field(max_length=30)  # full-replace for one student
 
 
 # ── homework board (HS-1) ────────────────────────────────────────────────────
@@ -150,6 +153,7 @@ class MediaPresignIn(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=100)
     size_bytes: int = Field(ge=1)
+    student_id: uuid.UUID | None = None  # set = this student's memory
 
 
 class MediaPresignOut(BaseModel):
@@ -161,6 +165,26 @@ class MediaPresignOut(BaseModel):
 class MediaConfirmIn(BaseModel):
     key: str = Field(min_length=1, max_length=500)
     caption: str | None = Field(default=None, max_length=300)
+    student_id: uuid.UUID | None = None
+
+
+# ── per-student card (HS-2) — one round trip for the student page ───────────
+class SessionStudentCard(BaseModel):
+    meeting_id: uuid.UUID
+    date: Date
+    session_id: uuid.UUID
+    session_name: str
+    kind: str
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None = None
+    class_label: str | None = None
+    status: str | None = None
+    late_minutes: int | None = None
+    homework_done: bool | None = None
+    homework: list[HomeworkItem] = Field(default_factory=list)
+    logs: list[StudentLogEntry] = Field(default_factory=list)
+    media: list[MediaOut] = Field(default_factory=list)
 
 
 # ── records feed (P1.5-B / dashboard precursor) ──────────────────────────────

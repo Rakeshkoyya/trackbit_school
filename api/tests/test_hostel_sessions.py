@@ -143,39 +143,56 @@ def test_homework_board_joins_class_and_personal_rows(client, cleanup):
     assert rows["Bina H"]["items"][0]["subject"] == "Maths"
 
 
-def test_study_logs_optional_upsert_and_timeline(client, cleanup):
+def test_student_card_sectioned_logs_and_timeline(client, cleanup):
     h, _y, c6, _c7, kids6, _kids7, _hos = _setup(client, cleanup)
+    subj = client.post("/api/v1/academics/subjects", headers=h, json={"name": "Maths"}).json()
+    cs = client.post("/api/v1/academics/class-subjects", headers=h, json={
+        "class_id": c6["id"], "subject_id": subj["id"], "periods_per_week": 5}).json()
+    client.post("/api/v1/classroom/homework", headers=h, json={
+        "class_subject_id": cs["id"], "text": "Ex 4.2 Q1–Q10"})
     sess = client.post("/api/v1/sessions", headers=h, json={
         "name": "Evening prep", "kind": "study", "weekdays": list(range(6)),
         "time": "18:00", "class_ids": [c6["id"]]}).json()
     meeting = client.post(f"/api/v1/sessions/{sess['id']}/meetings", headers=h).json()
     asha, bina = kids6[0], kids6[1]
+    base = f"/api/v1/sessions/meetings/{meeting['id']}/students/{asha['id']}"
 
     # Attendance first (the ≤60s flow) — logs are an optional enrichment.
     client.patch(f"/api/v1/sessions/meetings/{meeting['id']}/attendance", headers=h, json={
         "rows": [{"student_id": asha["id"], "status": "present"},
                  {"student_id": bina["id"], "status": "present"}]})
 
-    r = client.put(f"/api/v1/sessions/meetings/{meeting['id']}/logs", headers=h, json={
-        "rows": [{"student_id": asha["id"], "note": "Finished Maths Ex 4.2, started Science"}]})
+    # Sectioned log, full-replace per student (like the class deep log).
+    r = client.put(f"{base}/logs", headers=h, json={"entries": [
+        {"section": "Maths", "note": "Finished Ex 4.2"},
+        {"section": "Science", "note": "Revised diagrams"}]})
     assert r.status_code == 200, r.text
-    by_id = {row["student_id"]: row for row in r.json()["roster"]}
-    assert by_id[asha["id"]]["log_note"].startswith("Finished Maths")
-    assert by_id[bina["id"]]["log_note"] is None  # never mandatory (P1v2)
+    card = r.json()
+    assert [e["section"] for e in card["logs"]] == ["Maths", "Science"]
+    # The card is the student page's single round trip: homework rides along.
+    assert card["homework"][0]["text"] == "Ex 4.2 Q1–Q10"
+    assert card["status"] == "present"
 
-    # Upsert corrects; blank clears.
-    r = client.put(f"/api/v1/sessions/meetings/{meeting['id']}/logs", headers=h, json={
-        "rows": [{"student_id": asha["id"], "note": "Maths only"},
-                 {"student_id": bina["id"], "note": "  "}]})
-    by_id = {row["student_id"]: row for row in r.json()["roster"]}
-    assert by_id[asha["id"]]["log_note"] == "Maths only"
+    # Bina has no rows — never mandatory (P1v2).
+    other = client.get(
+        f"/api/v1/sessions/meetings/{meeting['id']}/students/{bina['id']}", headers=h).json()
+    assert other["logs"] == []
 
-    # The note lands in the student's day timeline.
+    # Replace shrinks; the meeting roster carries count + preview.
+    r = client.put(f"{base}/logs", headers=h, json={"entries": [
+        {"section": "Maths", "note": "Maths only"}]})
+    assert [e["note"] for e in r.json()["logs"]] == ["Maths only"]
+    roster = {row["student_id"]: row for row in client.post(
+        f"/api/v1/sessions/{sess['id']}/meetings", headers=h).json()["roster"]}
+    assert roster[asha["id"]]["log_count"] == 1
+    assert roster[asha["id"]]["log_note"] == "Maths: Maths only"
+
+    # The sections land in the student's day timeline, folded into one line.
     tl = client.get(f"/api/v1/students/{asha['id']}/timeline", headers=h)
     assert tl.status_code == 200, tl.text
     sessions = tl.json()["sessions"]
     assert len(sessions) == 1
-    assert sessions[0]["kind"] == "study" and sessions[0]["log_note"] == "Maths only"
+    assert sessions[0]["kind"] == "study" and sessions[0]["log_note"] == "Maths: Maths only"
 
 
 def test_media_memories_local_fallback(client, cleanup):
@@ -212,6 +229,18 @@ def test_media_memories_local_fallback(client, cleanup):
     doc = client.post(f"/api/v1/sessions/meetings/{mid}/media",
                       files={"file": ("h.pdf", io.BytesIO(b"%PDF"), "application/pdf")}, headers=h)
     assert doc.status_code == 422
+
+    # Per-student memory (HS-2): tagged media leaves the class strip and shows
+    # on the student's card instead.
+    kid = client.get(f"/api/v1/sessions/{sess['id']}", headers=h).json()["students"][0]
+    tagged = client.post(f"/api/v1/sessions/meetings/{mid}/media",
+                         files={"file": ("pose.jpg", io.BytesIO(b"jpegbytes"), "image/jpeg")},
+                         data={"student_id": kid["student_id"]}, headers=h)
+    assert tagged.status_code == 200, tagged.text
+    assert len(tagged.json()["media"]) == 1  # class strip unchanged
+    card = client.get(f"/api/v1/sessions/meetings/{mid}/students/{kid['student_id']}",
+                      headers=h).json()
+    assert len(card["media"]) == 1 and card["media"][0]["student_id"] == kid["student_id"]
 
     # Delete removes the row.
     gone = client.delete(f"/api/v1/sessions/media/{media[0]['id']}", headers=h)

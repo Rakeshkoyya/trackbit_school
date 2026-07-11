@@ -55,9 +55,10 @@ from app.schemas.sessions import (
     SessionDetail,
     SessionOut,
     SessionRecord,
+    SessionStudentCard,
     SessionStudentOut,
     SessionUpdate,
-    StudentLogsIn,
+    StudentLogEntry,
 )
 from app.services import storage
 
@@ -299,34 +300,61 @@ class SessionService:
             self.db.flush()
         return self._meeting_out(m, s, meeting)
 
-    def _media_out(self, meeting_id: uuid.UUID) -> list[MediaOut]:
+    def _media_rows(self, meeting_id: uuid.UUID) -> list[SessionMedia]:
+        return list(self.db.scalars(
+            select(SessionMedia).where(SessionMedia.meeting_id == meeting_id)
+            .order_by(SessionMedia.created_at)))
+
+    @staticmethod
+    def _media_out(rows: list[SessionMedia]) -> list[MediaOut]:
         return [
             MediaOut(id=md.id, kind=md.kind, url=storage.url_for(md.object_key),
-                     content_type=md.content_type, caption=md.caption, created_at=md.created_at)
-            for md in self.db.scalars(
-                select(SessionMedia).where(SessionMedia.meeting_id == meeting_id)
-                .order_by(SessionMedia.created_at))
+                     content_type=md.content_type, caption=md.caption,
+                     student_id=md.student_id, created_at=md.created_at)
+            for md in rows
         ]
+
+    def _class_labels(self, class_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        if not class_ids:
+            return {}
+        return {c.id: f"{c.name}{c.section or ''}" for c in self.db.scalars(
+            select(SchoolClass).where(SchoolClass.id.in_(class_ids)))}
 
     def _meeting_out(self, m: CurrentMember, s: SessionModel, meeting: SessionMeeting) -> MeetingOut:
         att = {a.student_id: a for a in self.db.scalars(
             select(SessionAttendance).where(SessionAttendance.meeting_id == meeting.id))}
-        logs = {log.student_id: log for log in self.db.scalars(
-            select(SessionStudentLog).where(SessionStudentLog.meeting_id == meeting.id))}
+        logs_by_student: dict[uuid.UUID, list[SessionStudentLog]] = {}
+        for log in self.db.scalars(
+                select(SessionStudentLog).where(SessionStudentLog.meeting_id == meeting.id)
+                .order_by(SessionStudentLog.created_at)):
+            logs_by_student.setdefault(log.student_id, []).append(log)
+        media = self._media_rows(meeting.id)
+        media_counts: dict[uuid.UUID, int] = {}
+        for md in media:
+            if md.student_id:
+                media_counts[md.student_id] = media_counts.get(md.student_id, 0) + 1
+        full = self._roster(m.org_id, s)
+        classes = self._class_labels({st.class_id for st, _ in full if st.class_id})
         roster = []
-        for st, _explicit in self._roster(m.org_id, s):
+        for st, _explicit in full:
             a = att.get(st.id)
-            log = logs.get(st.id)
+            st_logs = logs_by_student.get(st.id, [])
+            preview = " · ".join(
+                (f"{log.section}: {log.note}" if log.section else log.note) for log in st_logs
+            ) or None
             roster.append(MeetingRosterRow(
                 student_id=st.id, full_name=st.full_name, roll_no=st.roll_no,
+                class_label=classes.get(st.class_id),
                 status=a.status if a else None,
                 late_minutes=a.late_minutes if a else None,
                 homework_done=a.homework_done if a else None,
-                log_note=log.note if log else None,
-                log_subject_id=log.subject_id if log else None))
+                log_count=len(st_logs), log_note=preview,
+                media_count=media_counts.get(st.id, 0)))
+        # The meeting's media strip is the whole-class memories; per-student media
+        # lives on the student page (SessionStudentCard).
         return MeetingOut(id=meeting.id, session_id=s.id, date=meeting.date, kind=s.kind,
                           evidence_url=meeting.evidence_url, roster=roster,
-                          media=self._media_out(meeting.id))
+                          media=self._media_out([md for md in media if md.student_id is None]))
 
     def _meeting(self, m: CurrentMember,
                  meeting_id: uuid.UUID) -> tuple[SessionMeeting, SessionModel]:
@@ -359,68 +387,63 @@ class SessionService:
         self.db.flush()
         return self._meeting_out(m, s, meeting)
 
-    # ── per-student study logs (HS-1; optional by design — P1v2) ────────────
-    def set_logs(self, m: CurrentMember, meeting_id: uuid.UUID, body: StudentLogsIn) -> MeetingOut:
+    # ── per-student study logs (HS-2: named sections; optional — P1v2) ──────
+    def set_student_logs(self, m: CurrentMember, meeting_id: uuid.UUID,
+                         student_id: uuid.UUID, entries: list[StudentLogEntry]) -> SessionStudentCard:
+        """Full-replace this student's log sections for the meeting (save = replace,
+        like attendance and observation sections). Empty list clears everything."""
         meeting, s = self._meeting(m, meeting_id)
-        roster_ids = {st.id for st, _ in self._roster(m.org_id, s)}
-        existing = {log.student_id: log for log in self.db.scalars(
-            select(SessionStudentLog).where(SessionStudentLog.meeting_id == meeting_id))}
-        for row in body.rows:
-            if row.student_id not in roster_ids:
-                continue
-            log = existing.get(row.student_id)
-            note = row.note.strip()
-            if not note:  # blank = clear — a row exists only when there's something to say
-                if log is not None:
-                    self.db.delete(log)
-                continue
-            if log is None:
-                log = SessionStudentLog(org_id=m.org_id, meeting_id=meeting_id,
-                                        student_id=row.student_id)
-                self.db.add(log)
-            log.note = note
-            log.subject_id = row.subject_id
-            log.member_id = m.membership.id
+        if student_id not in {st.id for st, _ in self._roster(m.org_id, s)}:
+            raise NotFoundError("Student")
+        for log in self.db.scalars(select(SessionStudentLog).where(
+                SessionStudentLog.meeting_id == meeting_id,
+                SessionStudentLog.student_id == student_id)):
+            self.db.delete(log)
         self.db.flush()
-        return self._meeting_out(m, s, meeting)
+        seen: set[str] = set()
+        for e in entries:
+            section = e.section.strip()
+            note = e.note.strip()
+            if not note or section.lower() in seen:
+                continue
+            seen.add(section.lower())
+            self.db.add(SessionStudentLog(
+                org_id=m.org_id, meeting_id=meeting_id, student_id=student_id,
+                section=section, note=note, member_id=m.membership.id))
+        self.db.flush()
+        return self.student_card(m, meeting_id, student_id)
 
-    # ── homework board (HS-1) — a read view over homework_assignments ───────
-    def homework_board(self, m: CurrentMember, meeting_id: uuid.UUID) -> HomeworkBoardOut:
-        meeting, s = self._meeting(m, meeting_id)
-        roster = self._roster(m.org_id, s)
-        att = {a.student_id: a for a in self.db.scalars(
-            select(SessionAttendance).where(SessionAttendance.meeting_id == meeting.id))}
+    # ── homework items (HS-1) — a read view over homework_assignments ───────
+    def _homework_map(self, org_id: uuid.UUID, d: date,
+                      roster: list[tuple[Student, bool]]) -> dict[uuid.UUID, list[HomeworkItem]]:
+        """Per-student open homework for the meeting date, one batched query set."""
         class_ids = {st.class_id for st, _ in roster if st.class_id}
-        classes = {c.id: f"{c.name}{c.section or ''}" for c in self.db.scalars(
-            select(SchoolClass).where(SchoolClass.id.in_(class_ids)))} if class_ids else {}
-
+        if not class_ids:
+            return {}
         cs_by_class: dict[uuid.UUID, set[uuid.UUID]] = {}
         subject_of_cs: dict[uuid.UUID, str] = {}
-        assignments: list[HomeworkAssignment] = []
-        if class_ids:
-            for cs_id, class_id, subject_name in self.db.execute(
-                    select(ClassSubject.id, ClassSubject.class_id, Subject.name)
-                    .join(Subject, Subject.id == ClassSubject.subject_id)
-                    .where(ClassSubject.class_id.in_(class_ids))):
-                cs_by_class.setdefault(class_id, set()).add(cs_id)
-                subject_of_cs[cs_id] = subject_name
-            if subject_of_cs:
-                # "Open tonight": set on/before the meeting day and either not yet
-                # due, or (no due date) set within the last 3 days.
-                d = meeting.date
-                assignments = list(self.db.scalars(
-                    select(HomeworkAssignment).where(
-                        HomeworkAssignment.org_id == m.org_id,
-                        HomeworkAssignment.class_subject_id.in_(subject_of_cs.keys()),
-                        HomeworkAssignment.date <= d,
-                        (HomeworkAssignment.due_date >= d)
-                        | (HomeworkAssignment.due_date.is_(None)
-                           & (HomeworkAssignment.date >= d - timedelta(days=3))))
-                    .order_by(HomeworkAssignment.date.desc())))
-
-        rows = []
+        for cs_id, class_id, subject_name in self.db.execute(
+                select(ClassSubject.id, ClassSubject.class_id, Subject.name)
+                .join(Subject, Subject.id == ClassSubject.subject_id)
+                .where(ClassSubject.class_id.in_(class_ids))):
+            cs_by_class.setdefault(class_id, set()).add(cs_id)
+            subject_of_cs[cs_id] = subject_name
+        if not subject_of_cs:
+            return {}
+        # "Open tonight": set on/before the meeting day and either not yet due,
+        # or (no due date) set within the last 3 days.
+        assignments = list(self.db.scalars(
+            select(HomeworkAssignment).where(
+                HomeworkAssignment.org_id == org_id,
+                HomeworkAssignment.class_subject_id.in_(subject_of_cs.keys()),
+                HomeworkAssignment.date <= d,
+                (HomeworkAssignment.due_date >= d)
+                | (HomeworkAssignment.due_date.is_(None)
+                   & (HomeworkAssignment.date >= d - timedelta(days=3))))
+            .order_by(HomeworkAssignment.date.desc())))
+        out: dict[uuid.UUID, list[HomeworkItem]] = {}
         for st, _explicit in roster:
-            items = [
+            out[st.id] = [
                 HomeworkItem(assignment_id=a.id, subject=subject_of_cs[a.class_subject_id],
                              text=a.text, assigned_on=a.date, due_date=a.due_date,
                              personal=a.student_id is not None)
@@ -428,17 +451,65 @@ class SessionService:
                 if a.class_subject_id in cs_by_class.get(st.class_id, set())
                 and (a.student_id is None or a.student_id == st.id)
             ]
+        return out
+
+    def homework_board(self, m: CurrentMember, meeting_id: uuid.UUID) -> HomeworkBoardOut:
+        meeting, s = self._meeting(m, meeting_id)
+        roster = self._roster(m.org_id, s)
+        att = {a.student_id: a for a in self.db.scalars(
+            select(SessionAttendance).where(SessionAttendance.meeting_id == meeting.id))}
+        classes = self._class_labels({st.class_id for st, _ in roster if st.class_id})
+        items = self._homework_map(m.org_id, meeting.date, roster)
+        rows = []
+        for st, _explicit in roster:
             a_row = att.get(st.id)
             rows.append(HomeworkBoardRow(
                 student_id=st.id, full_name=st.full_name,
                 class_label=classes.get(st.class_id),
-                homework_done=a_row.homework_done if a_row else None, items=items))
+                homework_done=a_row.homework_done if a_row else None,
+                items=items.get(st.id, [])))
         return HomeworkBoardOut(meeting_id=meeting.id, date=meeting.date, rows=rows)
 
-    # ── media / memories (HS-1) ──────────────────────────────────────────────
+    # ── per-student card (HS-2) — everything the student page needs at once ─
+    def student_card(self, m: CurrentMember, meeting_id: uuid.UUID,
+                     student_id: uuid.UUID) -> SessionStudentCard:
+        meeting, s = self._meeting(m, meeting_id)
+        roster = self._roster(m.org_id, s)
+        target = next((st for st, _ in roster if st.id == student_id), None)
+        if target is None:
+            raise NotFoundError("Student")
+        a = self.db.scalar(select(SessionAttendance).where(
+            SessionAttendance.meeting_id == meeting_id,
+            SessionAttendance.student_id == student_id))
+        logs = list(self.db.scalars(
+            select(SessionStudentLog).where(
+                SessionStudentLog.meeting_id == meeting_id,
+                SessionStudentLog.student_id == student_id)
+            .order_by(SessionStudentLog.created_at)))
+        media = [md for md in self._media_rows(meeting_id) if md.student_id == student_id]
+        classes = self._class_labels({target.class_id} if target.class_id else set())
+        items = self._homework_map(m.org_id, meeting.date, [(target, False)])
+        return SessionStudentCard(
+            meeting_id=meeting.id, date=meeting.date, session_id=s.id, session_name=s.name,
+            kind=s.kind, student_id=target.id, full_name=target.full_name,
+            roll_no=target.roll_no, class_label=classes.get(target.class_id),
+            status=a.status if a else None, late_minutes=a.late_minutes if a else None,
+            homework_done=a.homework_done if a else None,
+            homework=items.get(target.id, []),
+            logs=[StudentLogEntry(section=log.section, note=log.note) for log in logs],
+            media=self._media_out(media))
+
+    # ── media / memories (HS-1/HS-2) ─────────────────────────────────────────
+    def _check_media_student(self, m: CurrentMember, s: SessionModel,
+                             student_id: uuid.UUID | None) -> None:
+        if student_id is not None and student_id not in {
+                st.id for st, _ in self._roster(m.org_id, s)}:
+            raise NotFoundError("Student")
+
     def presign_media(self, m: CurrentMember, meeting_id: uuid.UUID,
                       body: MediaPresignIn) -> MediaPresignOut:
-        meeting, _s = self._meeting(m, meeting_id)
+        meeting, s = self._meeting(m, meeting_id)
+        self._check_media_student(m, s, body.student_id)
         _media_kind(body.content_type)  # validates the type
         if body.size_bytes > _MAX_MEDIA_BYTES:
             raise ValidationError("File is too large (max 300 MB).", code="media_too_large")
@@ -448,6 +519,7 @@ class SessionService:
     def confirm_media(self, m: CurrentMember, meeting_id: uuid.UUID,
                       body: MediaConfirmIn) -> MeetingOut:
         meeting, s = self._meeting(m, meeting_id)
+        self._check_media_student(m, s, body.student_id)
         # make_key binds the key to org and meeting; refuse anything else so a
         # caller can't attach (or probe) another org's objects.
         if not body.key.startswith(f"{m.org_id}/{meeting.id}/"):
@@ -460,15 +532,18 @@ class SessionService:
         self.db.add(SessionMedia(
             org_id=m.org_id, meeting_id=meeting.id, kind=_media_kind(content_type),
             object_key=body.key, content_type=content_type, size_bytes=size,
-            caption=body.caption, uploaded_by_member_id=m.membership.id))
+            caption=body.caption, student_id=body.student_id,
+            uploaded_by_member_id=m.membership.id))
         self.db.flush()
         return self._meeting_out(m, s, meeting)
 
     def upload_media(self, m: CurrentMember, meeting_id: uuid.UUID, data: bytes,
-                     content_type: str, filename: str, caption: str | None = None) -> MeetingOut:
+                     content_type: str, filename: str, caption: str | None = None,
+                     student_id: uuid.UUID | None = None) -> MeetingOut:
         """Pass-through upload for photos/small clips (and the dev fallback when
         R2 isn't configured). Big videos take the presign path."""
         meeting, s = self._meeting(m, meeting_id)
+        self._check_media_student(m, s, student_id)
         kind = _media_kind(content_type)
         if len(data) > _MAX_DIRECT_BYTES:
             raise ValidationError("File is too large for direct upload — use the "
@@ -478,7 +553,7 @@ class SessionService:
         self.db.add(SessionMedia(
             org_id=m.org_id, meeting_id=meeting.id, kind=kind, object_key=key,
             content_type=content_type, size_bytes=len(data), caption=caption,
-            uploaded_by_member_id=m.membership.id))
+            student_id=student_id, uploaded_by_member_id=m.membership.id))
         self.db.flush()
         return self._meeting_out(m, s, meeting)
 

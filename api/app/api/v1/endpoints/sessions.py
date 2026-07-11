@@ -21,8 +21,9 @@ from app.schemas.sessions import (
     SessionDetail,
     SessionOut,
     SessionRecord,
+    SessionStudentCard,
     SessionUpdate,
-    StudentLogsIn,
+    StudentLogsReplaceIn,
 )
 from app.services.sessions import SessionService
 
@@ -53,11 +54,18 @@ def record_attendance(meeting_id: uuid.UUID, body: AttendanceRecordIn,
     return SessionService(db).record(m, meeting_id, body)
 
 
-# ── per-student study logs (HS-1) ────────────────────────────────────────────
-@router.put("/meetings/{meeting_id}/logs", response_model=MeetingOut)
-def set_student_logs(meeting_id: uuid.UUID, body: StudentLogsIn,
+# ── per-student card + study logs (HS-2) ─────────────────────────────────────
+@router.get("/meetings/{meeting_id}/students/{student_id}", response_model=SessionStudentCard)
+def student_card(meeting_id: uuid.UUID, student_id: uuid.UUID,
+                 m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    return SessionService(db).student_card(m, meeting_id, student_id)
+
+
+@router.put("/meetings/{meeting_id}/students/{student_id}/logs",
+            response_model=SessionStudentCard)
+def set_student_logs(meeting_id: uuid.UUID, student_id: uuid.UUID, body: StudentLogsReplaceIn,
                      m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
-    return SessionService(db).set_logs(m, meeting_id, body)
+    return SessionService(db).set_student_logs(m, meeting_id, student_id, body.entries)
 
 
 # ── homework board (HS-1) ────────────────────────────────────────────────────
@@ -83,12 +91,13 @@ def confirm_media(meeting_id: uuid.UUID, body: MediaConfirmIn,
 @router.post("/meetings/{meeting_id}/media", response_model=MeetingOut)
 async def upload_media(meeting_id: uuid.UUID, file: UploadFile = File(...),
                        caption: str | None = Form(default=None),
+                       student_id: uuid.UUID | None = Form(default=None),
                        m: CurrentMember = Depends(require_academic),
                        db: Session = Depends(get_db)):
     data = await file.read()
     return SessionService(db).upload_media(
         m, meeting_id, data, file.content_type or "image/jpeg",
-        file.filename or "media.jpg", caption)
+        file.filename or "media.jpg", caption, student_id)
 
 
 @router.delete("/media/{media_id}", response_model=MessageResponse)

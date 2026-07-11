@@ -557,11 +557,13 @@ export interface MeetingRow {
   student_id: string;
   full_name: string;
   roll_no: string | null;
+  class_label: string | null;
   status: AttendanceStatus | null;
   late_minutes: number | null;
   homework_done: boolean | null;
+  log_count: number;
   log_note: string | null;
-  log_subject_id: string | null;
+  media_count: number;
 }
 
 export interface SessionMediaItem {
@@ -570,7 +572,32 @@ export interface SessionMediaItem {
   url: string;
   content_type: string;
   caption: string | null;
+  student_id: string | null;
   created_at: string;
+}
+
+// ── per-student session capture (HS-2) ───────────────────────────────────────
+export interface StudentLogEntry {
+  section: string;
+  note: string;
+}
+
+export interface SessionStudentCard {
+  meeting_id: string;
+  date: string;
+  session_id: string;
+  session_name: string;
+  kind: SessionKind;
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  class_label: string | null;
+  status: AttendanceStatus | null;
+  late_minutes: number | null;
+  homework_done: boolean | null;
+  homework: HomeworkBoardItem[];
+  logs: StudentLogEntry[];
+  media: SessionMediaItem[];
 }
 
 export interface MediaPresign {
