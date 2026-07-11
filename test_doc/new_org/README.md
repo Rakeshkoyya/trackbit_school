@@ -42,21 +42,19 @@ Import **`teachers_staff.xlsx`** → 5 accounts, 18 assignments, zero errors.
   `x9`/`x8`/`x7` suffixes doing their job.
 - Anil Kumar should show on both 5-Mathematics and 5-Science.
 
-### Step 6 — Syllabus (the shortcut matters)
-Only import onto **class 5**, then copy:
-1. On class **5**, import each file onto its subject:
-   `syllabus_mathematics.xlsx` · `syllabus_science.xlsx` · `syllabus_english.xlsx` ·
-   `syllabus_social_studies.xlsx` · `syllabus_hindi.xlsx` · `syllabus_it.xlsx`
-   (each shows a draft first — chapters split into Term 1/Term 2, every topic sized —
-   then *Save to this subject*).
-2. Go back to **Teachers & assignments**, open class **6**'s subject panel, and use
-   **“Same as another section? Copy from 5”** → copies all six subjects' syllabus in one
-   click. Repeat for class **7**.
-3. Back on the Syllabus step, re-select any class+subject — the saved chapters now show
-   right there, editable (change a period count, delete a topic) without re-importing.
+### Step 6 — Syllabus (18 imports — one file per class per subject)
+Each class has its own grade-appropriate syllabus. On the Syllabus step, pick the class,
+pick the subject, import its file, review the draft (chapters split into Term 1/Term 2,
+every topic sized), then *Save to this subject*. The naming says exactly where each file
+goes: **`syllabus_<class>_<subject>.xlsx`** — e.g. `syllabus_5_mathematics.xlsx` → class
+**5** → **Mathematics**, `syllabus_7_it.xlsx` → class **7** → **IT**.
 
-*Decision:* real grades have different syllabi; reusing one file per subject across
-5/6/7 is a mock-data convenience.
+Work class by class (6 files for class 5, then 6, then 7). After saving, re-select any
+class+subject — the saved chapters show right there, editable (change a period count,
+delete a topic) without re-importing.
+
+*Note:* the “Copy from…” control in the subject panel is for true sibling **sections**
+(6-A → 6-B). Don't use it across grades here — each grade has its own files.
 
 ### Step 7 — Calendar, holidays & exams (all in the UI)
 Paint on the calendar:
@@ -113,11 +111,9 @@ Open a class grid and spot-check: no two classes share a teacher in the same per
 |---|---|---|
 | `teachers_staff.xlsx` | Setup wizard → Teachers | 5 created · 18 assignments · 48/48 per class |
 | `students_roster.xlsx` | Wizard → Students (or Students → Import) | 30 created, 0 errors |
-| `syllabus_mathematics.xlsx` | Syllabus → class 5 → Mathematics | 11 ch · 24 topics · 85p, termed |
-| `syllabus_science.xlsx` | Syllabus → class 5 → Science | 11 ch · 26 topics · 82p |
-| `syllabus_english.xlsx` | Syllabus → class 5 → English | 10 ch · 20 topics · 70p |
-| `syllabus_social_studies.xlsx` | Syllabus → class 5 → Social Studies | 11 ch · 22 topics · 72p |
-| `syllabus_hindi.xlsx` | Syllabus → class 5 → Hindi | 10 ch · 20 topics · 62p |
-| `syllabus_it.xlsx` | Syllabus → class 5 → IT | 9 ch · 18 topics · 60p |
+| `syllabus_5_*.xlsx` (6 files) | Syllabus → class 5 → matching subject | class-5 chapters, 56–80p each, termed |
+| `syllabus_6_*.xlsx` (6 files) | Syllabus → class 6 → matching subject | class-6 chapters, 60–85p each, termed |
+| `syllabus_7_*.xlsx` (6 files) | Syllabus → class 7 → matching subject | class-7 chapters, 62–88p each, termed |
 
-Classes 6 and 7 get their syllabus via **Copy from 5** (one click each).
+All 18 syllabus files follow `syllabus_<class>_<subject>.xlsx`; every topic is sized, so
+the final generate step should lock all 18 plans cleanly.
