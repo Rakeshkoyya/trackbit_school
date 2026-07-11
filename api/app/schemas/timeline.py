@@ -21,8 +21,11 @@ class TimelinePeriod(BaseModel):
 
 class TimelineSession(BaseModel):
     session_name: str
+    kind: str = "study"  # study | homework | activity (HS-1)
     status: str  # present | late | absent
     homework_done: bool | None = None
+    # HS-1: what the student worked on in a study session, when the teacher noted it.
+    log_note: str | None = None
 
 
 class StudentTimelineOut(BaseModel):

@@ -28,6 +28,7 @@ from app.models import (
     SchoolClass,
     SessionAttendance,
     SessionMeeting,
+    SessionStudentLog,
     Student,
     Subject,
     SyllabusTopic,
@@ -134,12 +135,17 @@ class StudentTimelineService:
 
     def _sessions(self, org_id: uuid.UUID, student_id: uuid.UUID, d: date) -> list[TimelineSession]:
         rows = self.db.execute(
-            select(SessionModel.name, SessionAttendance.status, SessionAttendance.homework_done)
+            select(SessionModel.name, SessionModel.kind, SessionAttendance.status,
+                   SessionAttendance.homework_done, SessionStudentLog.note)
             .join(SessionMeeting, SessionMeeting.session_id == SessionModel.id)
             .join(SessionAttendance, SessionAttendance.meeting_id == SessionMeeting.id)
+            .outerjoin(SessionStudentLog,
+                       (SessionStudentLog.meeting_id == SessionMeeting.id)
+                       & (SessionStudentLog.student_id == student_id))
             .where(SessionModel.org_id == org_id, SessionMeeting.date == d,
                    SessionAttendance.student_id == student_id)
-            .order_by(SessionModel.name)
+            .order_by(SessionModel.time, SessionModel.name)
         ).all()
-        return [TimelineSession(session_name=name, status=status, homework_done=hw)
-                for name, status, hw in rows]
+        return [TimelineSession(session_name=name, kind=kind, status=status, homework_done=hw,
+                                log_note=note)
+                for name, kind, status, hw, note in rows]

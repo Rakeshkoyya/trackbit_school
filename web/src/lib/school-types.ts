@@ -348,17 +348,39 @@ export interface Compliance {
 }
 
 // ── sessions (M2) ───────────────────────────────────────────────────────────
+export type SessionKind = "study" | "homework" | "activity";
+
 export interface SessionSummary {
   id: string;
   name: string;
   weekdays: number[];
   time: string | null;
+  end_time: string | null;
+  kind: SessionKind;
+  hostellers_only: boolean;
   active: boolean;
   roster_count: number;
+  class_labels: string[];
+  teacher_name: string | null;
+  owner_member_id: string | null;
 }
 
 export interface SessionDetail extends SessionSummary {
-  students: { student_id: string; full_name: string; roll_no: string | null }[];
+  students: { student_id: string; full_name: string; roll_no: string | null; explicit: boolean }[];
+  class_ids: string[];
+}
+
+// Write shape for create/update (HS).
+export interface SessionWrite {
+  name: string;
+  weekdays: number[];
+  time?: string | null;
+  end_time?: string | null;
+  kind?: SessionKind;
+  student_ids?: string[];
+  class_ids?: string[];
+  hostellers_only?: boolean;
+  owner_member_id?: string | null;
 }
 
 export type AttendanceStatus = "present" | "late" | "absent";
@@ -460,8 +482,10 @@ export interface TimelinePeriod {
 
 export interface TimelineSession {
   session_name: string;
+  kind: SessionKind;
   status: string;
   homework_done: boolean | null;
+  log_note: string | null;
 }
 
 export interface StudentTimeline {
@@ -531,14 +555,56 @@ export interface MeetingRow {
   status: AttendanceStatus | null;
   late_minutes: number | null;
   homework_done: boolean | null;
+  log_note: string | null;
+  log_subject_id: string | null;
+}
+
+export interface SessionMediaItem {
+  id: string;
+  kind: "photo" | "video";
+  url: string;
+  content_type: string;
+  caption: string | null;
+  created_at: string;
+}
+
+export interface MediaPresign {
+  key: string;
+  upload_url: string | null;
 }
 
 export interface Meeting {
   id: string;
   session_id: string;
   date: string;
+  kind: SessionKind;
   evidence_url: string | null;
   roster: MeetingRow[];
+  media: SessionMediaItem[];
+}
+
+// ── homework board (HS) ──────────────────────────────────────────────────────
+export interface HomeworkBoardItem {
+  assignment_id: string;
+  subject: string;
+  text: string;
+  assigned_on: string;
+  due_date: string | null;
+  personal: boolean;
+}
+
+export interface HomeworkBoardRow {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  homework_done: boolean | null;
+  items: HomeworkBoardItem[];
+}
+
+export interface HomeworkBoard {
+  meeting_id: string;
+  date: string;
+  rows: HomeworkBoardRow[];
 }
 
 export interface SessionRecord {
@@ -546,6 +612,8 @@ export interface SessionRecord {
   meeting_id: string;
   session_name: string;
   date: string;
+  kind: SessionKind;
+  media_count: number;
   present: number;
   late: number;
   absent: number;

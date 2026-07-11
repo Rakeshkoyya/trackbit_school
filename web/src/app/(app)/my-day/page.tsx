@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, ClipboardCheck, ListChecks, Send, UserCheck, Users } from "lucide-react";
+import { BookOpen, Check, ClipboardCheck, ListChecks, Moon, Send, UserCheck, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -389,6 +390,39 @@ function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
   );
 }
 
+/** This evening (HS): the teacher's hostel blocks for today, from the sessions list. */
+function EveningSection() {
+  const router = useRouter();
+  const { data: sessions = [] } = useQuery({ queryKey: ["sessions"], queryFn: schoolApi.sessions });
+  const today = (new Date().getDay() + 6) % 7; // JS Sunday=0 → Python Mon=0
+  const mine = sessions
+    .filter((s) => s.active && s.weekdays.includes(today))
+    .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+  if (mine.length === 0) return null;
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+        <Moon className="h-4 w-4" /> This evening
+      </h2>
+      <div className="space-y-2">
+        {mine.map((s) => (
+          <button key={s.id} onClick={() => router.push(`/sessions/${s.id}`)}
+            className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-muted/40">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{s.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {s.time}{s.end_time ? `–${s.end_time}` : ""}
+                {s.class_labels.length > 0 ? ` · ${s.class_labels.join(", ")}` : ""} · {s.roster_count} students
+              </p>
+            </div>
+            <Badge tone={s.kind === "activity" ? "success" : s.kind === "homework" ? "warning" : "primary"}>{s.kind}</Badge>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function MyDayInner() {
   const [hwFor, setHwFor] = useState<HwTarget | null>(null);
   const [attFor, setAttFor] = useState<MyDayPeriod | null>(null);
@@ -428,6 +462,8 @@ function MyDayInner() {
           </div>
         </section>
       ) : null}
+
+      <EveningSection />
 
       <h2 className="mb-2 text-sm font-semibold">Today’s classes</h2>
       {!data || data.classes.length === 0 ? (

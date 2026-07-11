@@ -97,9 +97,13 @@ function SessionsInner() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{s.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {s.weekdays.map((d) => DOW[d]).join(", ") || "no days set"}{s.time ? ` · ${s.time}` : ""}
+                  {s.weekdays.map((d) => DOW[d]).join(", ") || "no days set"}
+                  {s.time ? ` · ${s.time}${s.end_time ? `–${s.end_time}` : ""}` : ""}
+                  {s.class_labels.length > 0 ? ` · ${s.class_labels.join(", ")}` : ""}
+                  {s.teacher_name ? ` · ${s.teacher_name}` : ""}
                 </p>
               </div>
+              <Badge tone={s.kind === "activity" ? "success" : s.kind === "homework" ? "warning" : "primary"}>{s.kind}</Badge>
               <Badge tone="neutral"><Users className="h-3 w-3" /> {s.roster_count}</Badge>
             </button>
           ))}
