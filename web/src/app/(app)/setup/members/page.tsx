@@ -29,6 +29,11 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Random 12-char temp password. Module-level: event handlers stay pure. */
+function suggestPassword(): string {
+  return Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 8);
+}
+
 /** Email invite → emails the join link to the invitee, with a copyable fallback link. */
 function InvitePanel() {
   const qc = useQueryClient();
@@ -211,11 +216,12 @@ function MembersInner() {
   });
 
   function onReset(m: Member) {
-    if (m.email) {
-      resetPw.mutate({ m });
-      return;
-    }
-    const pw = window.prompt(`New temporary password for ${m.name} (min 8 chars):`);
+    // No email service is wired up, so the admin always sets the password
+    // directly and passes it on; the member is forced to change it on login.
+    const pw = window.prompt(
+      `New temporary password for ${m.name} (min 8 chars).\nThey'll be asked to change it on first login:`,
+      suggestPassword(),
+    );
     if (pw === null) return;
     if (pw.length < 8) {
       toast.error("Password must be at least 8 characters.");

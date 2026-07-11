@@ -1104,6 +1104,12 @@ function StudentsStep() {
   const invalidate = useInvalidate();
   const year = useActiveYear();
   const { data: students } = useQuery({ queryKey: ["students"], queryFn: () => schoolApi.students() });
+  const { data: stepClasses = [] } = useQuery({
+    queryKey: ["classes", year?.id],
+    queryFn: () => schoolApi.classes(year!.id),
+    enabled: !!year,
+  });
+  const classLabel = new Map(stepClasses.map((c) => [c.id, c.name + (c.section ? `-${c.section}` : "")]));
   const [analysis, setAnalysis] = useState<AnalyzeResult | null>(null);
 
   const analyze = useMutation({
@@ -1141,7 +1147,36 @@ function StudentsStep() {
       }
     >
       {!analysis ? (
-        <Dropzone busy={analyze.isPending} onFile={(f) => analyze.mutate(f)} hint="xlsx · Name, Admission No, Class, Section" />
+        <>
+          <Dropzone busy={analyze.isPending} onFile={(f) => analyze.mutate(f)} hint="xlsx · Name, Admission No, Class, Section" />
+          {students?.length ? (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">Already on the roll — edit them from the Students page.</p>
+              <div className="max-h-72 overflow-auto rounded-xl border border-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                    <tr className="text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-1.5 font-medium">Name</th>
+                      <th className="px-3 py-1.5 font-medium">Adm. no</th>
+                      <th className="px-3 py-1.5 font-medium">Class</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((s) => (
+                      <tr key={s.id} className="border-t border-border/60">
+                        <td className="px-3 py-1.5">{s.full_name}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{s.admission_no}</td>
+                        <td className="px-3 py-1.5">
+                          {s.class_id ? classLabel.get(s.class_id) ?? "?" : <span className="text-warning">unassigned</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="space-y-3">
           <MappingPreview
