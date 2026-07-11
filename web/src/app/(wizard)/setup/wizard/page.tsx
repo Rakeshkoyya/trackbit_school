@@ -36,6 +36,7 @@ import { toast } from "sonner";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { BulkAddPanel } from "@/components/members/bulk-add-panel";
 import { ClassSubjectsPanel } from "@/components/school/class-subjects-panel";
+import { ExamFitPanel } from "@/components/school/exam-fit-panel";
 import { ExamPortions } from "@/components/wizard/exam-portions";
 import { Dropzone, GapQuestions, MappingPreview } from "@/components/wizard/import-panel";
 import { Aside, Stat, StepFrame, StepRail } from "@/components/wizard/shell";
@@ -80,7 +81,7 @@ const PREP_DOCS = [
   {
     icon: Users,
     title: "Teaching staff",
-    columns: "Teacher Name · Email · Assignments (e.g. “6-A Mathematics; 7-B Science”)",
+    columns: "Teacher Name · Email · Assignments with periods/week (e.g. “6-A Mathematics x6; 7-B Science x5”)",
   },
   {
     icon: GraduationCap,
@@ -959,14 +960,14 @@ function CalendarStep() {
         },
       ]),
     onSuccess: () => {
-      invalidate("calendar");
+      invalidate("calendar", "exam-fit");
       toast.success("Added to the calendar");
     },
     onError: (e) => showApiError(e, "Could not add that"),
   });
   const remove = useMutation({
     mutationFn: (id: string) => schoolApi.deleteEvent(id),
-    onSuccess: () => invalidate("calendar"),
+    onSuccess: () => invalidate("calendar", "exam-fit"),
   });
 
   const ranges: PaintedRange[] = (summary?.events ?? []).map((e) => ({
@@ -1036,6 +1037,10 @@ function CalendarStep() {
           exams={(summary?.events ?? []).filter((e) => e.type === "exam_block")}
           classes={classes ?? []}
         />
+
+        {/* Live fit check: as exam dates land, each subject says whether its
+            portion fits in the teaching days before the exam. */}
+        <ExamFitPanel yearId={year.id} />
 
         <div className="max-h-64 space-y-1.5 overflow-auto pr-1">
           <AnimatePresence initial={false}>
@@ -1162,12 +1167,32 @@ function StudentsStep() {
 function TimetableStep() {
   const year = useActiveYear();
   const { data: wizard } = useWizard();
+  const invalidate = useInvalidate();
   const router = useRouter();
+  const [preview, setPreview] = useState<import("@/lib/school-types").TimetableGenerate | null>(null);
+
+  const run = useMutation({
+    mutationFn: (apply: boolean) =>
+      schoolApi.timetableGenerate({ academic_year_id: year!.id, apply }),
+    onSuccess: (res) => {
+      if (res.applied) {
+        invalidate("timetable");
+        setPreview(null);
+        toast.success(`Timetable filled for ${res.classes} class${res.classes === 1 ? "" : "es"}`);
+      } else {
+        setPreview(res);
+      }
+    },
+    onError: (e) => showApiError(e, "Could not generate"),
+  });
+
+  const issues = [...(preview?.skipped ?? []), ...(preview?.unplaced ?? [])];
+
   return (
     <StepFrame
       stepKey="timetable"
       title="Lay out the week."
-      blurb="The grid decides which teacher is in which room at which period — and the plan reads it."
+      blurb="One pass fills every class from each subject's periods/week — no teacher double-booked. You review before it applies, and can fix any cell by hand after."
       aside={
         <Aside title="Where you are">
           <div className="grid grid-cols-2 gap-2">
@@ -1175,19 +1200,53 @@ function TimetableStep() {
             <Stat label="Periods per day" value={year ? "set" : "—"} />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            We don&apos;t auto-solve timetables — a wrong one breaks the whole school&apos;s day.
-            Import yours or draft it, then fix clashes by hand; the clash checker is deterministic.
+            The generator is deterministic arithmetic, not a guess: what it cannot place it
+            reports, never squeezes in as a clash.
           </p>
         </Aside>
       }
     >
-      <p className="text-sm text-muted-foreground">
-        The timetable editor is a full-width grid, so it lives on its own page. Fill it in there,
-        then come back and generate the plan.
-      </p>
-      <Button variant="outline" onClick={() => router.push("/plan/timetable")}>
-        Open the timetable editor <ArrowRight className="h-4 w-4" />
-      </Button>
+      <div className="space-y-3">
+        <Button onClick={() => run.mutate(false)} disabled={run.isPending || !year}>
+          {run.isPending && !preview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          Generate the whole school&apos;s timetable
+        </Button>
+
+        {preview ? (
+          <div className="space-y-3 rounded-xl border border-border bg-card p-3">
+            <p className="text-sm">
+              <span className="font-medium">{preview.cells.length}</span> periods across{" "}
+              <span className="font-medium">{preview.classes}</span> class{preview.classes === 1 ? "" : "es"}.
+            </p>
+            {issues.length ? (
+              <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border bg-muted/30 p-2">
+                {issues.map((i, n) => (
+                  <p key={n} className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{i.class_label} {i.subject_name}</span> — {i.detail}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm">Every subject placed cleanly.</p>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setPreview(null)}>Discard</Button>
+              <Button disabled={run.isPending} onClick={() => run.mutate(true)}>
+                {run.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Apply to all classes
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <p className="text-sm text-muted-foreground">
+          Prefer your existing timetable, or want to adjust a cell? The full-width editor lives on
+          its own page.
+        </p>
+        <Button variant="outline" onClick={() => router.push("/plan/timetable")}>
+          Open the timetable editor <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
     </StepFrame>
   );
 }
@@ -1198,6 +1257,8 @@ type GenRow = { csId: string; label: string; fits: boolean; violations: { code: 
 function GenerateStep({ onDone }: { onDone: () => void }) {
   const invalidate = useInvalidate();
   const year = useActiveYear();
+  const { data: wizard } = useWizard();
+  const gaps = wizard?.progress.gaps ?? [];
   const { data: classes } = useQuery({
     queryKey: ["classes", year?.id],
     queryFn: () => schoolApi.classes(year!.id),
@@ -1293,6 +1354,15 @@ function GenerateStep({ onDone }: { onDone: () => void }) {
         </Aside>
       }
     >
+      {gaps.length ? (
+        <div className="space-y-1.5 rounded-xl border border-danger/40 bg-danger/5 p-3">
+          <p className="text-sm font-medium">Fix these first — the plan would be wrong:</p>
+          {gaps.map((g, i) => (
+            <p key={i} className="text-xs text-muted-foreground">{g}</p>
+          ))}
+        </div>
+      ) : null}
+
       <Button onClick={() => run.mutate()} disabled={run.isPending}>
         {run.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
         Generate every plan

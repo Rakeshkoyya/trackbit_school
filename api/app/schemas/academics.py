@@ -115,3 +115,30 @@ class ClassSubjectOut(BaseModel):
     subject_name: str | None = None
     teacher_member_id: uuid.UUID | None
     periods_per_week: int
+
+
+# ── Class allocation (periods/week budget vs the week's capacity) ─────────────
+class AllocationRow(BaseModel):
+    class_subject_id: uuid.UUID
+    subject_name: str
+    teacher_name: str | None
+    periods_per_week: int
+    syllabus_periods: int  # Σ est_periods of this subject's sized topics
+    suggested: int  # proportional share of capacity by syllabus size — a proposal, never applied
+
+
+class ClassAllocationOut(BaseModel):
+    class_id: uuid.UUID
+    class_label: str
+    capacity: int  # working weekdays × periods/day
+    allocated: int  # Σ periods_per_week across the class's subjects
+    rows: list[AllocationRow]
+
+
+class AllocationItemIn(BaseModel):
+    class_subject_id: uuid.UUID
+    periods_per_week: int = Field(ge=0, le=60)
+
+
+class AllocationSetIn(BaseModel):
+    items: list[AllocationItemIn]

@@ -14,14 +14,17 @@ import type { ClassSubject, PlanTerm, SchoolClass, Term } from "@/lib/school-typ
 
 export const RAG: Record<string, "success" | "warning" | "neutral"> = {
   green: "success", amber: "warning", red: "warning", none: "neutral",
-  // Not a RAG colour: no finish date can be computed while chapters are unsized.
+  // Not RAG colours: no finish date can be computed while chapters are unsized
+  // or the subject has no periods/week on the class.
   unplanned: "warning",
+  unallocated: "warning",
 };
 /** What the pace row should say when there is no forecast to show. */
 export const forecastLabel = (status: string, unestimated: number) =>
   status === "none" ? "no plan"
     : status === "unplanned" ? `${unestimated} chapter${unestimated === 1 ? "" : "s"} unsized`
-      : status;
+      : status === "unallocated" ? "no periods/week"
+        : status;
 export const weekLabel = (d: string) =>
   new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 

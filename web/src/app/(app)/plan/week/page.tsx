@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ClassWeekGrid } from "@/components/school/class-week-grid";
 import { ClassSelect, forecastLabel, PlanView, RAG, SubjectSelect, useClassSubjectPick, weekLabel } from "@/components/school/plan-shared";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,12 @@ function WeekPlanInner() {
         </div>
       </div>
 
+      {classId ? (
+        <div className="mb-6">
+          <ClassWeekGrid classId={classId} />
+        </div>
+      ) : null}
+
       <h2 className="mb-2 text-sm font-semibold">Pace forecast</h2>
       <div className="mb-6 space-y-2">
         {forecast.length === 0 ? <p className="text-sm text-muted-foreground">No subjects on this class yet.</p> : null}
@@ -38,6 +45,8 @@ function WeekPlanInner() {
               <p className="text-xs text-muted-foreground">
                 {f.status === "unplanned"
                   ? "no finish date — size the remaining chapters to forecast"
+                  : f.status === "unallocated"
+                  ? "no periods/week set for this subject — fix the class allocation"
                   : <>
                       {f.baseline_finish ? `baseline ${weekLabel(f.baseline_finish)}` : "no plan"}
                       {f.projected_finish && f.weeks_behind > 0 ? ` · projected ${weekLabel(f.projected_finish)} (${f.weeks_behind}w behind)` : ""}

@@ -44,6 +44,9 @@ from app.models import (
 )
 from app.schemas.periods import TopicProgressRow
 from app.schemas.planner import (
+    ExamFitExam,
+    ExamFitOut,
+    ExamFitSubject,
     ForecastOut,
     PlanCommentIn,
     PlanCommentOut,
@@ -61,6 +64,7 @@ from app.services.calendar import (
     event_rows,
     expand_blocked_dates,
     expand_partial_blocks,
+    teaching_days,
 )
 from app.services.plan_validate import (
     Violation,
@@ -449,6 +453,12 @@ class PlannerService:
         and lay the sized ones out inside the term's dates.
         Returns (cs, year, scoped_topics, sized_topics, weeks, window_label)."""
         cs = self._class_subject(m.org_id, cs_id)
+        # 0 periods/week used to silently plan at 1/week, which paced every plan
+        # wrong (a 49-period syllabus stretched over 49 weeks). Refuse instead.
+        if not cs.periods_per_week:
+            raise ValidationError(
+                "This subject has no periods/week on the class. Set the class's weekly "
+                "period allocation before planning.")
         self._lock_guard(m, cs_id, term_id)
         year = self._year_for_cs(cs)
         units = self._scoped_units(self._units(m.org_id, cs_id), term_id)
@@ -640,6 +650,102 @@ class PlannerService:
                 out.append(v)
         return out
 
+    # ── exam-gap fit (V2-P12): the calendar's live "does it fit" feedback ─────
+    def exam_fit(self, m: CurrentMember, class_id: uuid.UUID) -> ExamFitOut:
+        """For each exam, in date order: the syllabus each subject must newly cover
+        (topics between the previous exam's cut and this one's) vs the effective
+        teaching periods in the gap before the exam. Computed fresh every call, so
+        moving an exam date on the calendar re-answers immediately.
+
+        Verdicts: short (won't fit) · tight (manageable) · fits (perfect) ·
+        surplus (spare days) — plus no_portion / unallocated when the inputs are
+        missing. Deterministic arithmetic; nothing is stored."""
+        self._require_class(m.org_id, class_id)
+        klass = self.db.get(SchoolClass, class_id)
+        year = self.db.get(AcademicYear, klass.academic_year_id)
+        if year is None:
+            raise ValidationError("This class has no academic year.")
+        exams = list(self.db.scalars(
+            select(CalendarEvent).where(
+                CalendarEvent.org_id == m.org_id,
+                CalendarEvent.academic_year_id == year.id,
+                CalendarEvent.type == "exam_block")
+            .order_by(CalendarEvent.start_date)))
+        css = self.db.execute(
+            select(ClassSubject, Subject.name)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
+            .order_by(Subject.name)).all()
+        if not exams or not css:
+            return ExamFitOut(class_id=class_id, exams=[])
+
+        blocked, partial = self._calendar(m.org_id, year.id)
+        portions: dict[tuple[uuid.UUID, uuid.UUID], uuid.UUID] = {
+            (p.exam_event_id, p.class_subject_id): p.upto_topic_id
+            for p in self.db.scalars(select(ExamPortion).where(
+                ExamPortion.org_id == m.org_id,
+                ExamPortion.class_subject_id.in_([cs.id for cs, _n in css])))
+        }
+        topics_of = {cs.id: self._ordered_topics(self._units(m.org_id, cs.id))
+                     for cs, _n in css}
+        today = datetime.now(UTC).date()
+
+        out: list[ExamFitExam] = []
+        for i, ex in enumerate(exams):
+            gap_start = year.start_date if i == 0 else exams[i - 1].end_date + timedelta(days=1)
+            gap_start = max(gap_start, year.start_date)
+            gap_end = ex.start_date - timedelta(days=1)
+            gap_ok = gap_end >= gap_start
+            days_in_gap = teaching_days(
+                gap_start, gap_end, year.working_weekdays, blocked) if gap_ok else 0
+
+            subjects: list[ExamFitSubject] = []
+            for cs, sname in css:
+                topics = topics_of[cs.id]
+                index = {t.id: j for j, t in enumerate(topics)}
+                cut = portions.get((ex.id, cs.id))
+                if cut is None or cut not in index:
+                    subjects.append(ExamFitSubject(
+                        class_subject_id=cs.id, subject_name=sname, verdict="no_portion",
+                        required_periods=0, capacity_periods=0, unsized_topics=0))
+                    continue
+                # The segment this exam ADDS: everything after the latest earlier
+                # exam's cut, up to and including this exam's cut.
+                prev_idx = -1
+                for prior in exams[:i]:
+                    pc = portions.get((prior.id, cs.id))
+                    if pc is not None and pc in index:
+                        prev_idx = max(prev_idx, index[pc])
+                seg = topics[prev_idx + 1: index[cut] + 1]
+                required = sum(t.est_periods or 0 for t in seg)
+                unsized = sum(1 for t in seg if t.est_periods is None)
+                if not cs.periods_per_week:
+                    subjects.append(ExamFitSubject(
+                        class_subject_id=cs.id, subject_name=sname, verdict="unallocated",
+                        required_periods=required, capacity_periods=0, unsized_topics=unsized))
+                    continue
+                capacity = self._total_effective_periods(
+                    cs, year, blocked, partial, (gap_start, gap_end)) if gap_ok else 0.0
+                if required > capacity:
+                    verdict = "short"
+                elif required > 0.9 * capacity:
+                    verdict = "tight"
+                elif required > 0.6 * capacity:
+                    verdict = "fits"
+                else:
+                    verdict = "surplus"
+                subjects.append(ExamFitSubject(
+                    class_subject_id=cs.id, subject_name=sname, verdict=verdict,
+                    required_periods=required, capacity_periods=round(capacity, 1),
+                    unsized_topics=unsized))
+
+            out.append(ExamFitExam(
+                exam_event_id=ex.id, title=ex.title, start_date=ex.start_date,
+                end_date=ex.end_date, days_to_exam=(ex.start_date - today).days,
+                gap_start=gap_start, gap_end=gap_end, teaching_days_in_gap=days_in_gap,
+                subjects=subjects))
+        return ExamFitOut(class_id=class_id, exams=out)
+
     # ── topic progress (V2-P6): plan is baseline, logs are actual (P2) ───────
     def topic_progress(self, m: CurrentMember, cs_id: uuid.UUID) -> list[TopicProgressRow]:
         """Every syllabus topic with how far the class actually got.
@@ -726,6 +832,13 @@ class PlannerService:
                 out.append(ForecastOut(
                     class_subject_id=cs.id, subject_name=subject_name, class_label=label,
                     status="none", total_topics=len(topics),
+                    unestimated_topics=len(unsized)))
+                continue
+            if not cs.periods_per_week:
+                # A pace computed from 0 periods/week is fiction — say so instead.
+                out.append(ForecastOut(
+                    class_subject_id=cs.id, subject_name=subject_name, class_label=label,
+                    status="unallocated", total_topics=len(topics),
                     unestimated_topics=len(unsized)))
                 continue
             if unsized:

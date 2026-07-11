@@ -4,6 +4,7 @@ Reads: academic staff. Structural writes: coordinator/director. Plan approval
 (baseline lock) is director-only (SPRD §3.3)."""
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.schemas.ingest import (
 )
 from app.schemas.periods import TopicProgressRow
 from app.schemas.planner import (
+    ExamFitOut,
     ForecastOut,
     PlanCommentIn,
     PlanCommentOut,
@@ -32,9 +34,11 @@ from app.schemas.planner import (
     TopicOut,
     UnitCreate,
     UnitOut,
+    WeekScheduleOut,
 )
 from app.services.planner import PlannerService
 from app.services.syllabus_import import SyllabusImporter, analyze_file, analyze_text
+from app.services.week_schedule import WeekScheduleService
 
 router = APIRouter()
 
@@ -122,6 +126,23 @@ def get_plan(class_subject_id: uuid.UUID, m: CurrentMember = Depends(require_aca
 def plan_forecast(class_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
                   db: Session = Depends(get_db)):
     return PlannerService(db).forecast(m, class_id)
+
+
+@router.get("/plan/exam-fit", response_model=ExamFitOut)
+def exam_fit(class_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+             db: Session = Depends(get_db)):
+    """Per exam: the portion each subject must newly cover vs the teaching periods
+    in the gap before it. Recomputed on every call — the calendar's live check."""
+    return PlannerService(db).exam_fit(m, class_id)
+
+
+@router.get("/plan/week-schedule", response_model=WeekScheduleOut)
+def week_schedule(class_id: uuid.UUID, week_start: date | None = None,
+                  m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    """The class's week, period by period: actuals where a log exists, remaining
+    syllabus projected onto the slots from today forward. Computed, never stored."""
+    return WeekScheduleService(db).week(m, class_id, week_start)
 
 
 @router.post("/plan/{cs_id}/draft", response_model=PlanOut)

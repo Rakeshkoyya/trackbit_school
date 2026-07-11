@@ -8,13 +8,26 @@ org filter so nothing can point across tenants.
 
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
-from app.core.exceptions import ConflictError, NotFoundError
-from app.models import AcademicYear, ClassSubject, SchoolClass, Subject, Term
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.models import (
+    AcademicYear,
+    ClassSubject,
+    Membership,
+    SchoolClass,
+    Subject,
+    SyllabusTopic,
+    SyllabusUnit,
+    Term,
+    User,
+)
 from app.schemas.academics import (
+    AllocationRow,
+    AllocationSetIn,
+    ClassAllocationOut,
     ClassCreate,
     ClassOut,
     ClassSubjectCreate,
@@ -242,3 +255,74 @@ class AcademicService:
 
     def delete_class_subject(self, m: CurrentMember, cs_id: uuid.UUID) -> None:
         self.db.delete(self._scoped(ClassSubject, m.org_id, cs_id))
+
+    # ── class allocation (the week's period budget) ──────────────────────────
+    # periods_per_week stays *entered, never generated* (§11 fence): `suggested`
+    # is a proposal the admin confirms with an explicit save, exactly like every
+    # other draft surface.
+    def class_allocation(self, m: CurrentMember, class_id: uuid.UUID) -> ClassAllocationOut:
+        klass = self._scoped(SchoolClass, m.org_id, class_id)
+        year = self.db.get(AcademicYear, klass.academic_year_id)
+        capacity = (len(year.working_weekdays or []) * (year.periods_per_day or 0)) if year else 0
+
+        rows = self.db.execute(
+            select(ClassSubject, Subject.name, User.name)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .outerjoin(Membership, Membership.id == ClassSubject.teacher_member_id)
+            .outerjoin(User, User.id == Membership.user_id)
+            .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
+            .order_by(Subject.name)
+        ).all()
+
+        syl: dict[uuid.UUID, int] = dict(self.db.execute(
+            select(SyllabusUnit.class_subject_id,
+                   func.coalesce(func.sum(SyllabusTopic.est_periods), 0))
+            .join(SyllabusTopic, SyllabusTopic.unit_id == SyllabusUnit.id)
+            .where(SyllabusUnit.org_id == m.org_id,
+                   SyllabusUnit.class_subject_id.in_([cs.id for cs, _s, _t in rows]))
+            .group_by(SyllabusUnit.class_subject_id)
+        ).all()) if rows else {}
+
+        suggested = self._suggest(
+            [(cs.id, syl.get(cs.id, 0)) for cs, _s, _t in rows], capacity)
+        out_rows = [
+            AllocationRow(
+                class_subject_id=cs.id, subject_name=sname, teacher_name=tname,
+                periods_per_week=cs.periods_per_week, syllabus_periods=syl.get(cs.id, 0),
+                suggested=suggested.get(cs.id, 0))
+            for cs, sname, tname in rows
+        ]
+        label = klass.name + (f"-{klass.section}" if klass.section else "")
+        return ClassAllocationOut(
+            class_id=class_id, class_label=label, capacity=capacity,
+            allocated=sum(r.periods_per_week for r in out_rows), rows=out_rows)
+
+    @staticmethod
+    def _suggest(sizes: list[tuple[uuid.UUID, int]], capacity: int) -> dict[uuid.UUID, int]:
+        """Split the week's capacity across subjects in proportion to syllabus size
+        (largest-remainder rounding; a subject with any syllabus gets at least 1)."""
+        total = sum(n for _id, n in sizes)
+        if capacity <= 0 or total <= 0:
+            return {cs_id: 0 for cs_id, _n in sizes}
+        raw = {cs_id: capacity * n / total for cs_id, n in sizes}
+        base = {cs_id: max(1, int(r)) if r > 0 else 0 for cs_id, r in raw.items()}
+        leftover = capacity - sum(base.values())
+        for cs_id, _frac in sorted(
+                ((cs_id, raw[cs_id] - int(raw[cs_id])) for cs_id, _n in sizes),
+                key=lambda x: -x[1]):
+            if leftover <= 0:
+                break
+            base[cs_id] += 1
+            leftover -= 1
+        return base
+
+    def set_allocation(self, m: CurrentMember, class_id: uuid.UUID,
+                       body: AllocationSetIn) -> ClassAllocationOut:
+        self._scoped(SchoolClass, m.org_id, class_id)
+        for item in body.items:
+            cs = self._scoped(ClassSubject, m.org_id, item.class_subject_id)
+            if cs.class_id != class_id:
+                raise ValidationError("That subject belongs to a different class.")
+            cs.periods_per_week = item.periods_per_week
+        self.db.flush()
+        return self.class_allocation(m, class_id)

@@ -39,6 +39,8 @@ SPECS = [
 _ASSIGN_SPLIT = re.compile(r"[;,/|\n]+")
 # "6-A Mathematics", "6A Maths", "Class 6 - A : Science"
 _ASSIGN_ROW = re.compile(r"^\s*(?:class\s*)?([0-9]{1,2}|[ivxIVX]+|[A-Za-z]+)\s*[-–:\s]?\s*([A-Za-z])?\s+(.+?)\s*$")
+# Optional trailing periods/week: "6-A Mathematics x6", "6-A Maths (6)", "… *6"
+_ASSIGN_PPW = re.compile(r"\s*(?:[x×*]\s*(\d{1,2})|\((\d{1,2})\))\s*$")
 
 
 def analyze(data: bytes) -> dict[str, Any]:
@@ -75,14 +77,21 @@ class StaffImporter:
         return uname
 
     def _resolve(self, raw: str, classes: dict, subjects: dict,
-                 ) -> tuple[list[tuple[uuid.UUID, uuid.UUID]], list[str]]:
-        """"6-A Mathematics; 6-B Maths" → [(class_id, subject_id)], plus what failed."""
-        ok: list[tuple[uuid.UUID, uuid.UUID]] = []
+                 ) -> tuple[list[tuple[uuid.UUID, uuid.UUID, int | None]], list[str]]:
+        """"6-A Mathematics x6; 6-B Maths" → [(class_id, subject_id, periods_per_week
+        or None)], plus what failed. The x6/(6) suffix is how a staff sheet carries
+        each subject's weekly period budget in the same cell as the assignment."""
+        ok: list[tuple[uuid.UUID, uuid.UUID, int | None]] = []
         bad: list[str] = []
         for chunk in _ASSIGN_SPLIT.split(raw):
             token = chunk.strip()
             if not token:
                 continue
+            ppw: int | None = None
+            suffix = _ASSIGN_PPW.search(token)
+            if suffix:
+                ppw = int(suffix.group(1) or suffix.group(2))
+                token = token[: suffix.start()].strip()
             m = _ASSIGN_ROW.match(token)
             if not m:
                 bad.append(token)
@@ -93,7 +102,7 @@ class StaffImporter:
             if class_id is None or subject_id is None:
                 bad.append(token)
                 continue
-            ok.append((class_id, subject_id))
+            ok.append((class_id, subject_id, ppw))
         return ok, bad
 
     def commit(self, m: CurrentMember, *, mapping: dict[str, str], rows: list[dict],
@@ -161,14 +170,16 @@ class StaffImporter:
             raw = val(row, "assignments")
             if raw:
                 pairs, bad = self._resolve(raw, classes, subjects)
-                for class_id, subject_id in pairs:
+                for class_id, subject_id, ppw in pairs:
                     cs = self.db.scalar(select(ClassSubject).where(
                         ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id,
                         ClassSubject.subject_id == subject_id))
                     if cs is None:
                         cs = ClassSubject(org_id=m.org_id, class_id=class_id,
-                                          subject_id=subject_id, periods_per_week=0)
+                                          subject_id=subject_id, periods_per_week=ppw or 0)
                         self.db.add(cs)
+                    elif ppw:
+                        cs.periods_per_week = ppw
                     cs.teacher_member_id = membership.id
                     assigned += 1
                 if bad:

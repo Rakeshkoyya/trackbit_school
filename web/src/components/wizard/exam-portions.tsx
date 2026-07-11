@@ -51,6 +51,7 @@ export function ExamPortions({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["exam-portions"] });
       qc.invalidateQueries({ queryKey: ["wizard"] });
+      qc.invalidateQueries({ queryKey: ["exam-fit"] });
       toast.success("Portion set");
     },
     onError: (e) => showApiError(e, "Could not set the portion"),

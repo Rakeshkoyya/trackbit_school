@@ -18,6 +18,8 @@ from app.schemas.timetable import (
     GridOut,
     ImportAnalyzeOut,
     ImportCommitIn,
+    OrgGenerateIn,
+    OrgGenerateOut,
     PeriodConfigIn,
     PeriodConfigOut,
     SlotClearIn,
@@ -94,6 +96,15 @@ async def import_analyze(
 def import_commit(body: ImportCommitIn, m: CurrentMember = Depends(require_admin),
                   db: Session = Depends(get_db)):
     return TimetableService(db).import_commit(m, body)
+
+
+# ── whole-school generation (deterministic) ───────────────────────────────────
+@router.post("/generate", response_model=OrgGenerateOut)
+def generate_year_grid(body: OrgGenerateIn, m: CurrentMember = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    """Fill every class of the year at once (teacher-clash-aware, honours
+    periods_per_week). Preview by default; `apply=true` replaces the live grid."""
+    return TimetableService(db).generate_year_grid(m, body)
 
 
 # ── assisted draft (flag-gated) ───────────────────────────────────────────────

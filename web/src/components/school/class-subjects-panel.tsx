@@ -36,13 +36,34 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
   });
   const { data: subjects = [] } = useQuery({ queryKey: ["subjects"], queryFn: schoolApi.subjects });
   const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
+  const { data: allocation } = useQuery({
+    queryKey: ["class-allocation", classId],
+    queryFn: () => schoolApi.classAllocation(classId),
+    enabled: !!classId,
+  });
   // Anyone with a membership can be put in front of a class — admins teach too.
   const staff = (membersData?.members ?? []).filter((m) => m.member_id);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["class-subjects", classId] });
+    qc.invalidateQueries({ queryKey: ["class-allocation", classId] });
     qc.invalidateQueries({ queryKey: ["forecast"] });
   };
+
+  const applySuggested = useMutation({
+    mutationFn: () =>
+      schoolApi.saveClassAllocation(
+        classId,
+        (allocation?.rows ?? [])
+          .filter((r) => r.suggested > 0)
+          .map((r) => ({ class_subject_id: r.class_subject_id, periods_per_week: r.suggested })),
+      ),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Suggested periods applied — adjust any subject below.");
+    },
+    onError: (e) => showApiError(e, "Could not apply suggestion"),
+  });
 
   const add = useMutation({
     mutationFn: () =>
@@ -98,12 +119,40 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
 
   const available = subjects.filter((s) => !rows.some((r) => r.subject_id === s.id));
 
+  const overAllocated = !!allocation && allocation.allocated > allocation.capacity;
+  const underAllocated = !!allocation && allocation.capacity > 0 && allocation.allocated < allocation.capacity;
+  const hasSuggestion = (allocation?.rows ?? []).some((r) => r.suggested > 0);
+
   return (
     <div className="mt-2 rounded-md bg-muted/30 p-2">
       {rows.length === 0 ? (
         <p className="px-1 py-1 text-xs text-muted-foreground">
           No subjects yet — add one below so a teacher has something to teach.
         </p>
+      ) : null}
+
+      {allocation && rows.length > 0 ? (
+        <div className="mb-1 flex flex-wrap items-center gap-2 border-b border-border/60 px-1 pb-1.5">
+          <span
+            className={`text-xs font-medium ${
+              overAllocated ? "text-danger" : underAllocated ? "text-warning" : "text-muted-foreground"
+            }`}
+          >
+            {allocation.allocated} of {allocation.capacity} periods/week allocated
+            {overAllocated ? " — more than the week has" : ""}
+          </span>
+          {canEdit && hasSuggestion ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              disabled={applySuggested.isPending}
+              onClick={() => applySuggested.mutate()}
+            >
+              Suggest from syllabus
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {rows.map((cs) => (

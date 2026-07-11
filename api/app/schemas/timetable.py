@@ -119,6 +119,42 @@ class ImportCommitIn(BaseModel):
     cells: list[ImportCommitCell]
 
 
+# ── whole-school generation (deterministic — no AI, no flag) ─────────────────
+class OrgGenerateIn(BaseModel):
+    academic_year_id: uuid.UUID
+    effective_from: date | None = None
+    # False = preview only. True = replace the live grid of every class in the
+    # year with the generated one (append-only: old slots are closed, not deleted).
+    apply: bool = False
+
+
+class OrgDraftCell(BaseModel):
+    class_id: uuid.UUID
+    class_label: str
+    weekday: int
+    period_no: int
+    class_subject_id: uuid.UUID
+    subject_name: str
+
+
+class OrgDraftIssue(BaseModel):
+    class_label: str
+    subject_name: str
+    detail: str
+
+
+class OrgGenerateOut(BaseModel):
+    academic_year_id: uuid.UUID
+    classes: int
+    cells: list[OrgDraftCell]
+    # Demand that could not be placed (teacher already busy / week full) — the
+    # generator reports, never squeezes (§5.2 spirit).
+    unplaced: list[OrgDraftIssue] = Field(default_factory=list)
+    # Subjects skipped because periods_per_week is 0.
+    skipped: list[OrgDraftIssue] = Field(default_factory=list)
+    applied: bool = False
+
+
 # ── assisted draft (flag-gated) ──────────────────────────────────────────────
 class DraftOut(BaseModel):
     class_id: uuid.UUID

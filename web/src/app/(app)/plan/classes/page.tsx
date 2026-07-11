@@ -33,6 +33,7 @@ const RAG_TONE: Record<Rag, "success" | "neutral" | "warning" | "danger"> = {
   amber: "warning",
   red: "danger",
   unplanned: "warning",
+  unallocated: "warning",
 };
 const RAG_LABEL: Record<Rag, string> = {
   green: "on track",
@@ -40,6 +41,7 @@ const RAG_LABEL: Record<Rag, string> = {
   amber: "slipping",
   red: "behind",
   unplanned: "not sized",
+  unallocated: "no periods/week",
 };
 
 function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {

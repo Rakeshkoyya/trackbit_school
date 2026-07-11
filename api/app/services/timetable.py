@@ -33,6 +33,10 @@ from app.schemas.timetable import (
     ImportAnalyzeOut,
     ImportCell,
     ImportCommitIn,
+    OrgDraftCell,
+    OrgDraftIssue,
+    OrgGenerateIn,
+    OrgGenerateOut,
     PeriodConfigIn,
     PeriodConfigOut,
     SlotClearIn,
@@ -309,6 +313,116 @@ class TimetableService:
                 class_id=body.class_id, weekday=cell.weekday, period_no=cell.period_no,
                 class_subject_id=cell.class_subject_id, effective_from=eff))
         return self._grid(m, klass, eff)
+
+    # ── whole-school generation (deterministic — the wizard's heavy lifting) ──
+    def generate_year_grid(self, m: CurrentMember, body: OrgGenerateIn) -> OrgGenerateOut:
+        """Fill EVERY class of the year in one pass, honouring each subject's
+        periods_per_week and never double-booking a teacher. Greedy, deterministic
+        (same inputs → same grid), and honest: demand it cannot place is reported
+        in `unplaced`, never squeezed in as a clash.
+
+        Preview by default; `apply=True` replaces the year's live grid append-only
+        (old slots closed at `effective_from`, same-day rows deleted)."""
+        year = self.db.scalar(select(AcademicYear).where(
+            AcademicYear.id == body.academic_year_id, AcademicYear.org_id == m.org_id))
+        if year is None:
+            raise NotFoundError("Academic year")
+        eff = body.effective_from or self._today(m)
+        classes = list(self.db.scalars(
+            select(SchoolClass).where(
+                SchoolClass.org_id == m.org_id,
+                SchoolClass.academic_year_id == year.id)
+            .order_by(SchoolClass.name, SchoolClass.section)))
+        if not classes:
+            raise ValidationError("This year has no classes yet.")
+        weekdays = list(year.working_weekdays or [])
+        ppd = year.periods_per_day
+        if not weekdays or not ppd:
+            raise ValidationError("Set working weekdays and periods/day first.")
+
+        cs_meta = self._cs_meta(m.org_id)
+        class_ids = {k.id for k in classes}
+        # Teachers stay honest across years: live slots of classes we are NOT
+        # regenerating still occupy their teachers.
+        busy: set[tuple[int, int, uuid.UUID]] = {
+            (s.weekday, s.period_no, cs_meta[s.class_subject_id][1])
+            for s in self._org_slots(m.org_id, eff)
+            if s.class_id not in class_ids
+            and cs_meta.get(s.class_subject_id, (None, None, None))[1] is not None
+        }
+
+        cells: list[OrgDraftCell] = []
+        unplaced: list[OrgDraftIssue] = []
+        skipped: list[OrgDraftIssue] = []
+        for klass in classes:
+            label = _label(klass)
+            subs = self._parsed_subjects(m.org_id, klass.id)
+            demand: dict[uuid.UUID, int] = {}
+            names: dict[uuid.UUID, str] = {}
+            for s in subs:
+                names[s.class_subject_id] = s.subject_name
+                if s.periods_per_week > 0:
+                    demand[s.class_subject_id] = s.periods_per_week
+                else:
+                    skipped.append(OrgDraftIssue(
+                        class_label=label, subject_name=s.subject_name,
+                        detail="0 periods/week — set the class allocation first"))
+            teacher_of = {cs: cs_meta.get(cs, (None, None, None))[1] for cs in demand}
+            # Spread cap: a 6-period subject on a 6-day week lands once a day.
+            cap_per_day = {cs: max(1, -(-ppw // len(weekdays))) for cs, ppw in demand.items()}
+            day_count: dict[tuple[int, uuid.UUID], int] = {}
+
+            for wd in weekdays:
+                for p in range(1, ppd + 1):
+                    ranked = sorted(
+                        (
+                            # Prefer subjects still under their daily cap, then the
+                            # most-starved; name breaks ties deterministically.
+                            (0 if day_count.get((wd, cs), 0) < cap_per_day[cs] else 1,
+                             -rem, names[cs], cs)
+                            for cs, rem in demand.items()
+                            if rem > 0 and (
+                                teacher_of[cs] is None
+                                or (wd, p, teacher_of[cs]) not in busy)
+                        )
+                    )
+                    if not ranked:
+                        continue
+                    cs = ranked[0][3]
+                    demand[cs] -= 1
+                    day_count[wd, cs] = day_count.get((wd, cs), 0) + 1
+                    if teacher_of[cs] is not None:
+                        busy.add((wd, p, teacher_of[cs]))
+                    cells.append(OrgDraftCell(
+                        class_id=klass.id, class_label=label, weekday=wd, period_no=p,
+                        class_subject_id=cs, subject_name=names[cs]))
+
+            for cs, rem in demand.items():
+                if rem > 0:
+                    unplaced.append(OrgDraftIssue(
+                        class_label=label, subject_name=names[cs],
+                        detail=f"{rem} period(s) not placed — the teacher is busy "
+                               f"elsewhere or the week is full"))
+
+        if body.apply:
+            for s in self._org_slots(m.org_id, eff):
+                if s.class_id not in class_ids:
+                    continue
+                if s.effective_from >= eff:
+                    self.db.delete(s)
+                else:
+                    s.effective_to = eff
+            self.db.flush()
+            for c in cells:
+                self.db.add(TimetableSlot(
+                    org_id=m.org_id, class_id=c.class_id, weekday=c.weekday,
+                    period_no=c.period_no, class_subject_id=c.class_subject_id,
+                    effective_from=eff, effective_to=None))
+            self.db.flush()
+
+        return OrgGenerateOut(
+            academic_year_id=year.id, classes=len(classes), cells=cells,
+            unplaced=unplaced, skipped=skipped, applied=body.apply)
 
     # ── assisted draft (flag-gated, NOT a guaranteed solver) ─────────────────
     def assisted_draft(self, m: CurrentMember, class_id: uuid.UUID) -> DraftOut:

@@ -25,6 +25,7 @@ from app.models import (
     Student,
     Subject,
     SyllabusTopic,
+    SyllabusUnit,
     Term,
     TimetableSlot,
 )
@@ -67,6 +68,8 @@ class WizardService:
             Plan.org_id == org, Plan.status == "approved")) or 0
         exams = self._count(
             CalendarEvent, CalendarEvent.org_id == org, CalendarEvent.type == "exam_block")
+        timetable_slots = self._count(
+            TimetableSlot, TimetableSlot.org_id == org, TimetableSlot.effective_to.is_(None))
         return WizardProgress(
             calendar_events=self._count(CalendarEvent, CalendarEvent.org_id == org),
             exams=exams,
@@ -81,10 +84,57 @@ class WizardService:
             teachers=self._count(
                 Membership, Membership.org_id == org, Membership.org_role == "teacher"),
             students=self._count(Student, Student.org_id == org),
-            timetable_slots=self._count(
-                TimetableSlot, TimetableSlot.org_id == org, TimetableSlot.effective_to.is_(None)),
+            timetable_slots=timetable_slots,
             plans_total=plans_total,
-            plans_approved=plans_approved)
+            plans_approved=plans_approved,
+            gaps=self._gaps(org, cs_ids, timetable_slots))
+
+    def _gaps(self, org, cs_ids: list, timetable_slots: int) -> list[str]:
+        """Capture gaps that make a generated plan wrong (V2-P12). Informational —
+        the wizard shows them on the generate step; it does not hard-block, because
+        a term-wise school legitimately finishes with later terms unsized."""
+        if not cs_ids:
+            return []
+        gaps: list[str] = []
+
+        rows = self.db.execute(
+            select(ClassSubject.id, SchoolClass.name, SchoolClass.section, Subject.name,
+                   ClassSubject.periods_per_week)
+            .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .where(ClassSubject.org_id == org)
+        ).all()
+        with_topics = set(self.db.scalars(
+            select(SyllabusUnit.class_subject_id)
+            .join(SyllabusTopic, SyllabusTopic.unit_id == SyllabusUnit.id)
+            .where(SyllabusUnit.org_id == org).distinct()))
+
+        def label(cname, section):
+            return cname + (f"-{section}" if section else "")
+
+        no_syllabus = sorted({label(c, s) for cs_id, c, s, _subj, _ppw in rows
+                              if cs_id not in with_topics})
+        # Only flag a class when NONE of the wizard's syllabus landed on it — the
+        # 6-B case, where an import quietly skipped a whole class.
+        fully_missing = [
+            lbl for lbl in no_syllabus
+            if all(cs_id not in with_topics
+                   for cs_id, c, s, _subj, _ppw in rows if label(c, s) == lbl)
+        ]
+        for lbl in fully_missing[:5]:
+            gaps.append(f"Class {lbl} has no syllabus at all — its plan cannot be generated.")
+
+        zero_ppw = [(label(c, s), subj) for _id, c, s, subj, ppw in rows if not ppw]
+        if zero_ppw:
+            sample = ", ".join(f"{lbl} {subj}" for lbl, subj in zero_ppw[:3])
+            more = f" (+{len(zero_ppw) - 3} more)" if len(zero_ppw) > 3 else ""
+            gaps.append(
+                f"{len(zero_ppw)} subject(s) have 0 periods/week — {sample}{more}. "
+                f"Set the class allocation or the plan has no pace.")
+
+        if timetable_slots == 0:
+            gaps.append("The timetable is empty — teachers will see no periods on My Day.")
+        return gaps
 
     def _complete(self, key: str, p: WizardProgress) -> bool:
         """Whether a step's real data exists. Derived, never stored — an admin who

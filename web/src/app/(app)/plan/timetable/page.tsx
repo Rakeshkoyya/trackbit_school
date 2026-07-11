@@ -82,11 +82,76 @@ function ImportSheet({ classId, open, onOpenChange }: { classId: string; open: b
   );
 }
 
+function GenerateSheet({ yearId, open, onOpenChange }: { yearId: string; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const qc = useQueryClient();
+  const [preview, setPreview] = useState<import("@/lib/school-types").TimetableGenerate | null>(null);
+
+  const run = useMutation({
+    mutationFn: (apply: boolean) => schoolApi.timetableGenerate({ academic_year_id: yearId, apply }),
+    onSuccess: (res) => {
+      if (res.applied) {
+        qc.invalidateQueries({ queryKey: ["timetable"] });
+        toast.success(`Timetable generated for ${res.classes} class${res.classes === 1 ? "" : "es"}`);
+        setPreview(null);
+        onOpenChange(false);
+      } else {
+        setPreview(res);
+      }
+    },
+    onError: (e) => showApiError(e, "Could not generate"),
+  });
+
+  const issues = [...(preview?.skipped ?? []), ...(preview?.unplaced ?? [])];
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) setPreview(null); onOpenChange(v); }} title="Generate full timetable">
+      {!preview ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Fills every class of this year in one pass from each subject&apos;s periods/week —
+            no teacher is ever double-booked. You preview before anything changes.
+          </p>
+          <Button className="w-full" disabled={run.isPending} onClick={() => run.mutate(false)}>
+            {run.isPending ? "Generating…" : "Preview"}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm">
+            <span className="font-medium">{preview.cells.length}</span> periods across{" "}
+            <span className="font-medium">{preview.classes}</span> class{preview.classes === 1 ? "" : "es"}.
+          </p>
+          {issues.length > 0 ? (
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-warning/40 bg-warning/5 p-2">
+              {issues.map((i, n) => (
+                <p key={n} className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{i.class_label} {i.subject_name}</span> — {i.detail}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-success">Every subject placed. No conflicts.</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Applying replaces the current grid of every class in this year (history is kept).
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setPreview(null)}>Back</Button>
+            <Button className="flex-1" disabled={run.isPending} onClick={() => run.mutate(true)}>
+              {run.isPending ? "Applying…" : "Apply to all classes"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 function TimetableAdmin() {
   const { yearId } = useYear();
   const { classes, classId, setClassId } = useClassSubjectPick(yearId);
   const qc = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
 
   const draft = useMutation({
     mutationFn: () => schoolApi.timetableDraft(classId),
@@ -120,9 +185,13 @@ function TimetableAdmin() {
             <Button size="sm" variant="outline" disabled={draft.isPending} onClick={() => draft.mutate()}>
               <Sparkles className="h-4 w-4" /> Draft for me
             </Button>
+            <Button size="sm" onClick={() => setGenerateOpen(true)}>
+              <Sparkles className="h-4 w-4" /> Generate all classes
+            </Button>
           </div>
           <TimetableGrid classId={classId} canEdit />
           <ImportSheet classId={classId} open={importOpen} onOpenChange={setImportOpen} />
+          {yearId ? <GenerateSheet yearId={yearId} open={generateOpen} onOpenChange={setGenerateOpen} /> : null}
         </>
       ) : (
         <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">

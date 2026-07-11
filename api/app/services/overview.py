@@ -59,7 +59,7 @@ from app.services.planner import PlannerService
 # `unplanned` outranks amber: a subject two weeks behind is a known problem, one with
 # unsized chapters is an unknown. It sits below red, which is a plan actively failing.
 # The default of 3 for an unrecognised status keeps a new status loud, not silent.
-_RAG_ORDER = {"green": 0, "none": 1, "amber": 2, "unplanned": 3, "red": 4}
+_RAG_ORDER = {"green": 0, "none": 1, "amber": 2, "unplanned": 3, "unallocated": 3, "red": 4}
 
 
 def _label(k: SchoolClass) -> str:

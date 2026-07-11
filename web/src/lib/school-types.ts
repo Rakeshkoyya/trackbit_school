@@ -61,6 +61,64 @@ export interface ExamPortion {
   upto_topic_id: string;
 }
 
+/** short (won't fit) | tight (manageable) | fits (perfect) | surplus (spare days)
+ *  | no_portion | unallocated */
+export type ExamFitVerdict = "short" | "tight" | "fits" | "surplus" | "no_portion" | "unallocated";
+
+export interface ExamFitSubject {
+  class_subject_id: string;
+  subject_name: string;
+  verdict: ExamFitVerdict;
+  required_periods: number;
+  capacity_periods: number;
+  unsized_topics: number;
+}
+
+export interface ExamFitExam {
+  exam_event_id: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  days_to_exam: number;
+  gap_start: string;
+  gap_end: string;
+  teaching_days_in_gap: number;
+  subjects: ExamFitSubject[];
+}
+
+export interface ExamFit {
+  class_id: string;
+  exams: ExamFitExam[];
+}
+
+// ── computed week/day schedule (V2-P12) — never stored ───────────────────────
+export interface DaySlot {
+  period_no: number;
+  class_subject_id: string;
+  subject_name: string;
+  teacher_name: string | null;
+  topic_id: string | null;
+  topic_title: string | null;
+  unit_title: string | null;
+  /** actual = logged · planned = projected from remaining syllabus · blocked · past */
+  state: "actual" | "planned" | "blocked" | "past";
+}
+
+export interface DaySchedule {
+  date: string;
+  weekday: number;
+  blocked: boolean;
+  slots: DaySlot[];
+}
+
+export interface WeekSchedule {
+  class_id: string;
+  class_label: string;
+  week_start: string;
+  periods_per_day: number;
+  days: DaySchedule[];
+}
+
 export interface CalendarSummary {
   academic_year_id: string;
   start_date: string;
@@ -119,8 +177,8 @@ export interface Forecast {
   class_subject_id: string;
   subject_name: string;
   class_label: string;
-  /** `unplanned` = chapters remain unsized, so no finish date can be computed. */
-  status: "green" | "amber" | "red" | "none" | "unplanned";
+  /** `unplanned` = chapters unsized; `unallocated` = 0 periods/week on the class. */
+  status: "green" | "amber" | "red" | "none" | "unplanned" | "unallocated";
   total_topics: number;
   baseline_finish: string | null;
   projected_finish: string | null;
@@ -249,6 +307,29 @@ export interface TimetableDraft {
   clashes: TimetableClash[];
   unresolved: string[];
   message: string;
+}
+
+export interface TimetableGenerateIssue {
+  class_label: string;
+  subject_name: string;
+  detail: string;
+}
+
+/** Whole-school deterministic generation (POST /timetable/generate). */
+export interface TimetableGenerate {
+  academic_year_id: string;
+  classes: number;
+  cells: {
+    class_id: string;
+    class_label: string;
+    weekday: number;
+    period_no: number;
+    class_subject_id: string;
+    subject_name: string;
+  }[];
+  unplaced: TimetableGenerateIssue[];
+  skipped: TimetableGenerateIssue[];
+  applied: boolean;
 }
 
 export interface ComplianceRow {
@@ -409,6 +490,8 @@ export interface WizardProgress {
   calendar_events: number;
   exams: number;
   exam_portions: number;
+  /** Capture gaps that would make the generated plan wrong (shown on the last step). */
+  gaps: string[];
 }
 
 export interface WizardState {
@@ -572,6 +655,26 @@ export interface ClassSubject {
   subject_name: string | null;
   teacher_member_id: string | null;
   periods_per_week: number;
+}
+
+export interface AllocationRow {
+  class_subject_id: string;
+  subject_name: string;
+  teacher_name: string | null;
+  periods_per_week: number;
+  /** Σ est_periods of this subject's sized syllabus topics. */
+  syllabus_periods: number;
+  /** Proportional share of capacity by syllabus size — a proposal, never applied. */
+  suggested: number;
+}
+
+export interface ClassAllocation {
+  class_id: string;
+  class_label: string;
+  /** working weekdays × periods/day. */
+  capacity: number;
+  allocated: number;
+  rows: AllocationRow[];
 }
 
 export interface StudentCategory {
@@ -793,8 +896,9 @@ export interface YearFacts {
   exams_without_portions: number;
 }
 
-/** `unplanned` is not a RAG colour: chapters are unsized, so no finish date exists. */
-export type Rag = "green" | "none" | "amber" | "red" | "unplanned";
+/** `unplanned`/`unallocated` are not RAG colours: unsized chapters or 0 periods/week
+ * mean no finish date exists. */
+export type Rag = "green" | "none" | "amber" | "red" | "unplanned" | "unallocated";
 
 export interface ClassRow {
   class_id: string;

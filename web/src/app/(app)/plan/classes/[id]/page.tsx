@@ -42,6 +42,7 @@ const RAG_TONE: Record<Rag, "success" | "neutral" | "warning" | "danger"> = {
   amber: "warning",
   red: "danger",
   unplanned: "warning",
+  unallocated: "warning",
 };
 
 const fmt = (d: string | null) =>

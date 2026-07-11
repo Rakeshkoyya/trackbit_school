@@ -20,6 +20,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ExamFitPanel } from "@/components/school/exam-fit-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { ExamPortions } from "@/components/wizard/exam-portions";
 import {
@@ -72,6 +73,8 @@ function PlanYearInner() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["calendar", yearId] });
     qc.invalidateQueries({ queryKey: ["school-overview"] });
+    // Moving/adding/removing an exam changes every gap — refresh the fit verdicts.
+    qc.invalidateQueries({ queryKey: ["exam-fit"] });
   };
 
   const create = useMutation({
@@ -228,6 +231,9 @@ function PlanYearInner() {
             workingWeekdays={summary.working_weekdays}
             onPaint={(start, end) => create.mutate({ start, end })}
           />
+          <div className="mt-6">
+            <ExamFitPanel yearId={yearId} />
+          </div>
         </div>
       </div>
     </div>

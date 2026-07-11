@@ -73,6 +73,19 @@ export const schoolApi = {
 
   classSubjects: (classId: string) =>
     api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
+  /** Periods/week per subject vs the week's capacity, with a suggested split. */
+  classAllocation: (classId: string) =>
+    api.get<import("@/lib/school-types").ClassAllocation>(`/academics/classes/${classId}/allocation`),
+  saveClassAllocation: (classId: string, items: { class_subject_id: string; periods_per_week: number }[]) =>
+    api.put<import("@/lib/school-types").ClassAllocation>(`/academics/classes/${classId}/allocation`, { items }),
+
+  /** Per exam: required portion vs teaching periods in the gap — the calendar's live check. */
+  examFit: (classId: string) =>
+    api.get<import("@/lib/school-types").ExamFit>(`/planner/plan/exam-fit${qs({ class_id: classId })}`),
+  /** The class's computed week: actuals where logged, remaining syllabus projected forward. */
+  weekSchedule: (classId: string, weekStart?: string) =>
+    api.get<import("@/lib/school-types").WeekSchedule>(
+      `/planner/plan/week-schedule${qs({ class_id: classId, week_start: weekStart })}`),
 
   // planner: syllabus + plan + forecast (M1)
   syllabus: (csId: string) =>
@@ -323,6 +336,9 @@ export const schoolApi = {
     api.post<import("@/lib/school-types").TimetableGrid>("/timetable/import/commit", b),
   timetableDraft: (classId: string) =>
     api.post<import("@/lib/school-types").TimetableDraft>(`/timetable/draft${qs({ class_id: classId })}`),
+  /** Whole-school generation: preview (apply=false) or replace the year's grid. */
+  timetableGenerate: (b: { academic_year_id: string; effective_from?: string; apply: boolean }) =>
+    api.post<import("@/lib/school-types").TimetableGenerate>("/timetable/generate", b),
 
   // ── fees ────────────────────────────────────────────────────────────────
   feeSummary: (yearId?: string) => api.get<FeeSummary>(`/fees/summary${qs({ year_id: yearId })}`),

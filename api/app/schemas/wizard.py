@@ -60,6 +60,9 @@ class WizardProgress(BaseModel):
     calendar_events: int = 0
     exams: int = 0
     exam_portions: int = 0
+    # V2-P12: capture gaps that will make the generated plan wrong — shown on the
+    # generate step so the admin fixes the data instead of locking fiction.
+    gaps: list[str] = []
 
 
 class WizardStepOut(BaseModel):
