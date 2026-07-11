@@ -36,11 +36,14 @@ export const weekLabel = (d: string) =>
 export function useClassSubjectPick(yearId: string | null) {
   const [pickedClass, setPickedClass] = useState("");
   const [pickedCs, setPickedCs] = useState("");
-  const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
+  const { data: classes = [], isLoading: classesLoading } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
   const classId = classes.some((c) => c.id === pickedClass) ? pickedClass : (classes[0]?.id ?? "");
-  const { data: subjects = [] } = useQuery({ queryKey: ["class-subjects", classId], queryFn: () => schoolApi.classSubjects(classId), enabled: !!classId });
+  const { data: subjects = [], isLoading: subjectsLoading } = useQuery({ queryKey: ["class-subjects", classId], queryFn: () => schoolApi.classSubjects(classId), enabled: !!classId });
   const csId = subjects.some((s) => s.id === pickedCs) ? pickedCs : (subjects[0]?.id ?? "");
-  return { classes, classId, setClassId: setPickedClass, subjects, csId, setCsId: setPickedCs };
+  return {
+    classes, classId, setClassId: setPickedClass, subjects, csId, setCsId: setPickedCs,
+    loading: classesLoading || subjectsLoading,
+  };
 }
 
 export function ClassSelect({ classes, classId, onChange }: {

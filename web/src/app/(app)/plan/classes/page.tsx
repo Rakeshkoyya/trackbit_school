@@ -22,6 +22,7 @@ import { TeacherLoad } from "@/components/school/teacher-load";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
+import { PageLoading } from "@/components/ui/page-loading";
 import { useYear } from "@/contexts/year-context";
 import { schoolApi } from "@/lib/school-api";
 import type { ClassRow, Rag } from "@/lib/school-types";
@@ -84,7 +85,14 @@ function ClassesInner() {
   });
 
   if (isLoading || !data) {
-    return <PageHeader title="Classes" subtitle="Loading…" />;
+    return (
+      <div>
+        <PageHeader title="Classes" subtitle="Everything you set up, in one place" />
+        <div className="mt-6">
+          <PageLoading label="Computing every class's coverage and pace…" />
+        </div>
+      </div>
+    );
   }
 
   const { year } = data;

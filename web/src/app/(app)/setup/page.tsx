@@ -1,20 +1,25 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus, Star, Trash2 } from "lucide-react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, GraduationCap, Plus, Star, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { ClassSubjectsPanel } from "@/components/school/class-subjects-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { PageLoading } from "@/components/ui/page-loading";
 import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
+import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
+import type { SchoolClass } from "@/lib/school-types";
+import { cn } from "@/lib/utils";
 
 function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -94,18 +99,17 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-function ClassesCard({ canEdit }: { canEdit: boolean }) {
+const classLabel = (c: SchoolClass) => c.name + (c.section ? `-${c.section}` : "");
+
+/** By-class view: each class expands into its subject table (teacher, periods/week,
+ * allocation bar, copy-from-section) — the same panel the wizard uses. */
+function ByClassView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: boolean }) {
   const qc = useQueryClient();
   const { yearId } = useYear();
   const [name, setName] = useState("");
   const [section, setSection] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
-  const { data: classes = [] } = useQuery({
-    queryKey: ["classes", yearId],
-    queryFn: () => schoolApi.classes(yearId ?? undefined),
-    enabled: !!yearId,
-  });
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["classes", yearId] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["classes"] });
   const create = useMutation({
     mutationFn: () => schoolApi.createClass({ academic_year_id: yearId!, name: name.trim(), section: section.trim() || null }),
     onSuccess: () => { invalidate(); setName(""); setSection(""); toast.success("Class added"); },
@@ -117,17 +121,26 @@ function ClassesCard({ canEdit }: { canEdit: boolean }) {
     onError: (e) => showApiError(e, "Could not remove"),
   });
 
+  function confirmRemove(c: SchoolClass) {
+    if (window.confirm(`Delete class ${classLabel(c)}? Its subjects, syllabus, plans and timetable go with it.`)) {
+      remove.mutate(c.id);
+    }
+  }
+
   return (
-    <Card title="Classes & sections">
+    <div>
       {classes.length === 0 ? <p className="text-sm text-muted-foreground">No classes for this year yet.</p> : null}
       {classes.map((c) => (
         <div key={c.id} className="border-t border-border py-2 first:border-t-0">
           <div className="flex items-center gap-2 text-sm">
             <button className="min-w-0 flex-1 text-left font-medium hover:text-primary" onClick={() => setOpenId(openId === c.id ? null : c.id)}>
-              {c.name}{c.section ? `-${c.section}` : ""} <span className="text-xs font-normal text-muted-foreground">· subjects</span>
+              {classLabel(c)}{" "}
+              <span className="text-xs font-normal text-muted-foreground">
+                {openId === c.id ? "· hide subjects" : "· show subjects & teachers"}
+              </span>
             </button>
             {canEdit ? (
-              <button onClick={() => remove.mutate(c.id)} aria-label="Delete" className="text-muted-foreground hover:text-danger">
+              <button onClick={() => confirmRemove(c)} aria-label={`Delete ${classLabel(c)}`} className="text-muted-foreground hover:text-danger">
                 <Trash2 className="h-4 w-4" />
               </button>
             ) : null}
@@ -140,10 +153,153 @@ function ClassesCard({ canEdit }: { canEdit: boolean }) {
           <Input className="w-24" placeholder="Class (6)" value={name} onChange={(e) => setName(e.target.value)} />
           <Input className="w-28" placeholder="Section (B)" value={section} onChange={(e) => setSection(e.target.value)} />
           <Button size="sm" type="submit" disabled={create.isPending || !name || !yearId}>
-            <Plus className="h-4 w-4" /> Add
+            <Plus className="h-4 w-4" /> Add class
           </Button>
         </form>
       ) : null}
+    </div>
+  );
+}
+
+/** By-teacher view: pick a teacher, see everything on their plate — classes,
+ * subjects, weekly period load, and which classes they're class-teacher of. */
+function ByTeacherView({ classes }: { classes: SchoolClass[] }) {
+  const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
+  const staff = (membersData?.members ?? []).filter((m) => m.member_id);
+  const [picked, setPicked] = useState("");
+  const teacherId = staff.some((t) => t.member_id === picked) ? picked : (staff[0]?.member_id ?? "");
+
+  const results = useQueries({
+    queries: classes.map((c) => ({
+      queryKey: ["class-subjects", c.id],
+      queryFn: () => schoolApi.classSubjects(c.id),
+    })),
+  });
+  const loading = results.some((r) => r.isLoading);
+
+  type Row = { classId: string; classLabel: string; subject: string; ppw: number };
+  const byTeacher = new Map<string, Row[]>();
+  const unassigned: Row[] = [];
+  classes.forEach((c, i) => {
+    for (const cs of results[i]?.data ?? []) {
+      const row = { classId: c.id, classLabel: classLabel(c), subject: cs.subject_name ?? "?", ppw: cs.periods_per_week };
+      if (cs.teacher_member_id) {
+        byTeacher.set(cs.teacher_member_id, [...(byTeacher.get(cs.teacher_member_id) ?? []), row]);
+      } else {
+        unassigned.push(row);
+      }
+    }
+  });
+
+  const rows = byTeacher.get(teacherId) ?? [];
+  const totalPpw = rows.reduce((a, r) => a + r.ppw, 0);
+  const classTeacherOf = classes.filter((c) => c.class_teacher_member_id === teacherId);
+
+  if (!staff.length) return <p className="text-sm text-muted-foreground">No staff yet — add members first.</p>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Teacher"
+          className="rounded-md border border-border bg-card px-2 py-1.5 text-sm"
+          value={teacherId}
+          onChange={(e) => setPicked(e.target.value)}
+        >
+          {staff.map((t) => (
+            <option key={t.member_id} value={t.member_id!}>
+              {t.name}{byTeacher.has(t.member_id!) ? ` · ${byTeacher.get(t.member_id!)!.length}` : ""}
+            </option>
+          ))}
+        </select>
+        <Badge tone="primary"><GraduationCap className="h-3 w-3" /> {rows.length} subject{rows.length === 1 ? "" : "s"}</Badge>
+        <Badge tone={totalPpw > 48 ? "danger" : "neutral"}>{totalPpw} periods/week</Badge>
+        {classTeacherOf.length ? (
+          <Badge tone="success">class teacher of {classTeacherOf.map(classLabel).join(", ")}</Badge>
+        ) : null}
+      </div>
+
+      {loading ? (
+        <PageLoading label="Reading assignments…" />
+      ) : rows.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
+          Nothing assigned yet — assign subjects from the class view.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="px-3 py-2 font-medium">Class</th>
+                <th className="px-3 py-2 font-medium">Subject</th>
+                <th className="px-3 py-2 font-medium">Periods/week</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows
+                .sort((a, b) => a.classLabel.localeCompare(b.classLabel) || a.subject.localeCompare(b.subject))
+                .map((r, i) => (
+                  <tr key={i} className="border-b border-border/60 bg-card last:border-0">
+                    <td className="px-3 py-2 font-medium">{r.classLabel}</td>
+                    <td className="px-3 py-2">{r.subject}</td>
+                    <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.ppw || <span className="text-warning">not set</span>}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && unassigned.length ? (
+        <p className="text-xs text-warning">
+          {unassigned.length} subject{unassigned.length === 1 ? " has" : "s have"} no teacher:{" "}
+          {unassigned.slice(0, 4).map((r) => `${r.classLabel} ${r.subject}`).join(", ")}
+          {unassigned.length > 4 ? ` +${unassigned.length - 4} more` : ""}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Who teaches what — the page's centrepiece. Two lenses over the same data:
+ * a class's subject table, or a teacher's full plate. */
+function AssignmentsCard({ canEdit }: { canEdit: boolean }) {
+  const { yearId } = useYear();
+  const [view, setView] = useState<"class" | "teacher">("class");
+  const { data: classes = [], isLoading } = useQuery({
+    queryKey: ["classes", yearId],
+    queryFn: () => schoolApi.classes(yearId ?? undefined),
+    enabled: !!yearId,
+  });
+
+  return (
+    <Card
+      title="Teaching assignments"
+      action={
+        <div className="flex gap-1 rounded-lg border border-border p-0.5">
+          {([["class", "By class", GraduationCap], ["teacher", "By teacher", Users]] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setView(key)}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors",
+                view === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" /> {label}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      {isLoading ? (
+        <PageLoading label="Loading classes…" />
+      ) : view === "class" ? (
+        <ByClassView classes={classes} canEdit={canEdit} />
+      ) : (
+        <ByTeacherView classes={classes} />
+      )}
     </Card>
   );
 }
@@ -208,26 +364,31 @@ function AcademicsInner() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <PageHeader title="School setup" subtitle="Academic years, classes, subjects & fee categories" />
+        <PageHeader
+          title="School setup"
+          subtitle="The school's structure: who teaches what, plus years, subjects & categories"
+        />
         <YearSwitcher />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <YearsCard canEdit={canEdit} />
-        <ClassesCard canEdit={canEdit} />
-        <SimpleListCard
-          title="Subjects" queryKey={["subjects"]} placeholder="Mathematics" canEdit={canEdit}
-          list={schoolApi.subjects} create={schoolApi.createSubject} remove={schoolApi.deleteSubject}
-        />
-        <SimpleListCard
-          title="Fee categories" queryKey={["categories"]} placeholder="Day Scholar" canEdit={canEdit}
-          list={schoolApi.categories} create={schoolApi.createCategory} remove={schoolApi.deleteCategory}
-          seed={schoolApi.seedCategories}
-        />
-        <SimpleListCard
-          title="Skill areas (diagnostic)" queryKey={["skill-areas"]} placeholder="Reading" canEdit={canEdit}
-          list={schoolApi.skillAreas} create={schoolApi.createSkill} remove={schoolApi.deleteSkill}
-          seed={schoolApi.seedSkills}
-        />
+      <div className="grid gap-4">
+        <AssignmentsCard canEdit={canEdit} />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <YearsCard canEdit={canEdit} />
+          <SimpleListCard
+            title="Subjects" queryKey={["subjects"]} placeholder="Mathematics" canEdit={canEdit}
+            list={schoolApi.subjects} create={schoolApi.createSubject} remove={schoolApi.deleteSubject}
+          />
+          <SimpleListCard
+            title="Fee categories" queryKey={["categories"]} placeholder="Day Scholar" canEdit={canEdit}
+            list={schoolApi.categories} create={schoolApi.createCategory} remove={schoolApi.deleteCategory}
+            seed={schoolApi.seedCategories}
+          />
+          <SimpleListCard
+            title="Skill areas (diagnostic)" queryKey={["skill-areas"]} placeholder="Reading" canEdit={canEdit}
+            list={schoolApi.skillAreas} create={schoolApi.createSkill} remove={schoolApi.deleteSkill}
+            seed={schoolApi.seedSkills}
+          />
+        </div>
       </div>
     </div>
   );

@@ -811,6 +811,9 @@ class PlannerService:
 
     # ── forecast (computed) ──────────────────────────────────────────────────
     def forecast(self, m: CurrentMember, class_id: uuid.UUID) -> list[ForecastOut]:
+        """Batched: the DB is a remote round-trip, so this loads the year's
+        calendar once and every subject's syllabus + plan entries in two IN()
+        queries, instead of ~4 queries per subject."""
         self._require_class(m.org_id, class_id)
         rows = self.db.execute(
             select(ClassSubject, Subject.name, SchoolClass)
@@ -818,15 +821,36 @@ class PlannerService:
             .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
             .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
         ).all()
+        if not rows:
+            return []
+        cs_ids = [cs.id for cs, _n, _k in rows]
+
+        units_by_cs: dict[uuid.UUID, list[SyllabusUnit]] = {}
+        for u in self.db.scalars(
+            select(SyllabusUnit)
+            .where(SyllabusUnit.org_id == m.org_id,
+                   SyllabusUnit.class_subject_id.in_(cs_ids))
+            .options(selectinload(SyllabusUnit.topics))
+            .order_by(SyllabusUnit.position)
+        ):
+            units_by_cs.setdefault(u.class_subject_id, []).append(u)
+
+        entries_by_cs: dict[uuid.UUID, list[PlanEntry]] = {}
+        for e in self.db.scalars(
+            select(PlanEntry).where(
+                PlanEntry.org_id == m.org_id, PlanEntry.class_subject_id.in_(cs_ids))
+        ):
+            entries_by_cs.setdefault(e.class_subject_id, []).append(e)
+
+        year = self.db.get(AcademicYear, rows[0][2].academic_year_id)
+        blocked, partial = self._calendar(m.org_id, year.id) if year else (set(), {})
+
         out: list[ForecastOut] = []
         for cs, subject_name, klass in rows:
             label = klass.name + (f"-{klass.section}" if klass.section else "")
-            units = self._units(m.org_id, cs.id)
+            units = units_by_cs.get(cs.id, [])
             topics = self._ordered_topics(units)
-            entries = list(self.db.scalars(
-                select(PlanEntry).where(
-                    PlanEntry.org_id == m.org_id, PlanEntry.class_subject_id == cs.id)
-            ))
+            entries = entries_by_cs.get(cs.id, [])
             unsized = self._unsized(topics)
             if not topics or not entries:
                 out.append(ForecastOut(
@@ -850,9 +874,7 @@ class PlannerService:
                     status="unplanned", total_topics=len(topics),
                     unestimated_topics=len(unsized)))
                 continue
-            year = self.db.get(AcademicYear, klass.academic_year_id)
             baseline_finish = max(e.week_start for e in entries)
-            blocked, partial = self._calendar(m.org_id, year.id)
             projected = distribute(
                 [t.est_periods for t in topics], periods_per_week=cs.periods_per_week,
                 working_weekdays=year.working_weekdays, blocked=blocked, partial=partial,
