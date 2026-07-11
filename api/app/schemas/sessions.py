@@ -1,19 +1,41 @@
-"""After-school session schemas (M2, SPRD §5.2 — SS-1/SS-2)."""
+"""After-school & hostel session schemas (M2 + HS-1, SPRD §5.2)."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
 # Fields named `date` would shadow the `date` type in the class body; alias it.
 Date = date
 
+_TIME = r"^\d{2}:\d{2}$"
+_KIND = "^(study|homework|activity)$"
+
 
 class SessionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     weekdays: list[int] = Field(default_factory=list)  # Mon=0 … Sun=6
     time: str | None = Field(default=None, max_length=10)  # "16:15"
+    end_time: str | None = Field(default=None, max_length=10)  # "17:30"
+    kind: str = Field(default="study", pattern=_KIND)
     student_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+    class_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
+    hostellers_only: bool = False
+    # Admin assigns the teacher who runs the block; non-admins always own their own.
+    owner_member_id: uuid.UUID | None = None
+
+
+class SessionUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    weekdays: list[int] | None = None
+    time: str | None = Field(default=None, max_length=10)
+    end_time: str | None = Field(default=None, max_length=10)
+    kind: str | None = Field(default=None, pattern=_KIND)
+    student_ids: list[uuid.UUID] | None = Field(default=None, max_length=200)
+    class_ids: list[uuid.UUID] | None = Field(default=None, max_length=30)
+    hostellers_only: bool | None = None
+    owner_member_id: uuid.UUID | None = None
+    active: bool | None = None
 
 
 class SessionOut(BaseModel):
@@ -21,18 +43,28 @@ class SessionOut(BaseModel):
     name: str
     weekdays: list[int]
     time: str | None
+    end_time: str | None = None
+    kind: str = "study"
+    hostellers_only: bool = False
     active: bool
     roster_count: int
+    class_labels: list[str] = Field(default_factory=list)
+    teacher_name: str | None = None
+    owner_member_id: uuid.UUID | None = None
 
 
 class SessionStudentOut(BaseModel):
     student_id: uuid.UUID
     full_name: str
     roll_no: str | None
+    # True when the student is an explicit session_students row (ad-hoc addition),
+    # False when they come in via a linked class.
+    explicit: bool = False
 
 
 class SessionDetail(SessionOut):
     students: list[SessionStudentOut] = Field(default_factory=list)
+    class_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 # ── capture (SS-2) ───────────────────────────────────────────────────────────
@@ -54,14 +86,81 @@ class MeetingRosterRow(BaseModel):
     status: str | None = None
     late_minutes: int | None = None
     homework_done: bool | None = None
+    # HS-1: tonight's optional study log for this student (study sessions).
+    log_note: str | None = None
+    log_subject_id: uuid.UUID | None = None
+
+
+class MediaOut(BaseModel):
+    id: uuid.UUID
+    kind: str  # photo | video
+    url: str  # minted at read time from the stored object key
+    content_type: str
+    caption: str | None = None
+    created_at: datetime
 
 
 class MeetingOut(BaseModel):
     id: uuid.UUID
     session_id: uuid.UUID
     date: Date
+    kind: str = "study"
     evidence_url: str | None
     roster: list[MeetingRosterRow]
+    media: list[MediaOut] = Field(default_factory=list)
+
+
+# ── per-student study logs (HS-1) ────────────────────────────────────────────
+class StudentLogIn(BaseModel):
+    student_id: uuid.UUID
+    note: str = Field(max_length=2000)  # blank = clear the row
+    subject_id: uuid.UUID | None = None
+
+
+class StudentLogsIn(BaseModel):
+    rows: list[StudentLogIn] = Field(max_length=200)
+
+
+# ── homework board (HS-1) ────────────────────────────────────────────────────
+class HomeworkItem(BaseModel):
+    assignment_id: uuid.UUID
+    subject: str
+    text: str
+    assigned_on: Date
+    due_date: Date | None = None
+    personal: bool = False  # per-student addition vs whole-class
+
+
+class HomeworkBoardRow(BaseModel):
+    student_id: uuid.UUID
+    full_name: str
+    class_label: str | None = None
+    homework_done: bool | None = None
+    items: list[HomeworkItem] = Field(default_factory=list)
+
+
+class HomeworkBoardOut(BaseModel):
+    meeting_id: uuid.UUID
+    date: Date
+    rows: list[HomeworkBoardRow]
+
+
+# ── media (HS-1) ─────────────────────────────────────────────────────────────
+class MediaPresignIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=1, max_length=100)
+    size_bytes: int = Field(ge=1)
+
+
+class MediaPresignOut(BaseModel):
+    key: str
+    # None when R2 isn't configured — client falls back to the direct upload route.
+    upload_url: str | None
+
+
+class MediaConfirmIn(BaseModel):
+    key: str = Field(min_length=1, max_length=500)
+    caption: str | None = Field(default=None, max_length=300)
 
 
 # ── records feed (P1.5-B / dashboard precursor) ──────────────────────────────
@@ -70,9 +169,11 @@ class SessionRecord(BaseModel):
     meeting_id: uuid.UUID
     session_name: str
     date: Date
+    kind: str = "study"
     present: int
     late: int
     absent: int
     homework_done: int
     total: int
     evidence_url: str | None
+    media_count: int = 0

@@ -105,11 +105,15 @@ function SessionsInner() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{s.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {s.weekdays.map((d) => DOW[d]).join(" · ") || "no days set"}{s.time ? ` · ${s.time.slice(0, 5)}` : ""}
+                  <p className="truncate text-xs text-muted-foreground">
+                    {s.weekdays.map((d) => DOW[d]).join(" · ") || "no days set"}
+                    {s.time ? ` · ${s.time.slice(0, 5)}${s.end_time ? `–${s.end_time.slice(0, 5)}` : ""}` : ""}
+                    {s.class_labels.length > 0 ? ` · ${s.class_labels.join(", ")}` : ""}
+                    {s.teacher_name ? ` · ${s.teacher_name}` : ""}
                   </p>
                 </div>
                 {isToday ? <Badge tone="primary">today</Badge> : null}
+                <Badge tone={s.kind === "activity" ? "success" : s.kind === "homework" ? "warning" : "neutral"}>{s.kind}</Badge>
                 <Badge tone="neutral"><Users className="h-3 w-3" /> {s.roster_count}</Badge>
               </button>
             );

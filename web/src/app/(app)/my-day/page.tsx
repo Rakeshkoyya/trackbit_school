@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, ChevronRight, ClipboardCheck, Send, Users } from "lucide-react";
+import { BookOpen, Check, ChevronRight, ClipboardCheck, Moon, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -143,6 +143,39 @@ function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
   );
 }
 
+/** This evening (HS): the teacher's hostel blocks for today, from the sessions list. */
+function EveningSection() {
+  const { data: sessions = [] } = useQuery({ queryKey: ["sessions"], queryFn: schoolApi.sessions });
+  const today = (new Date().getDay() + 6) % 7; // JS Sunday=0 → Python Mon=0
+  const mine = sessions
+    .filter((s) => s.active && s.weekdays.includes(today))
+    .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+  if (mine.length === 0) return null;
+  return (
+    <section className="mt-6">
+      <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+        <Moon className="h-4 w-4" /> This evening
+      </h2>
+      <div className="space-y-2">
+        {mine.map((s) => (
+          <Link key={s.id} href={`/sessions/${s.id}`}
+            className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/40 active:scale-[0.995]">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{s.name}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {s.time}{s.end_time ? `–${s.end_time}` : ""}
+                {s.class_labels.length > 0 ? ` · ${s.class_labels.join(", ")}` : ""} · {s.roster_count} students
+              </p>
+            </div>
+            <Badge tone={s.kind === "activity" ? "success" : s.kind === "homework" ? "warning" : "primary"}>{s.kind}</Badge>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function MyDayInner() {
   const [hwFor, setHwFor] = useState<HwTarget | null>(null);
   const { data } = useQuery({ queryKey: ["my-day"], queryFn: schoolApi.myDay });
@@ -197,6 +230,8 @@ function MyDayInner() {
           </div>
         </section>
       ) : null}
+
+      <EveningSection />
 
       <HomeworkSheet target={hwFor} onClose={() => setHwFor(null)} />
     </div>

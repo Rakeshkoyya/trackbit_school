@@ -177,7 +177,30 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   denominator is now the week's working days, identical for any week wholly inside the window.
   Syllabus importer maps a `Term` column and reports names it can't resolve rather than inventing
   them. `test_term_planning.py`.
-- **Teacher view + student growth (2026-07-11)** — migration `a8b9c0d1e2f3` (head). My Day is now
+- **HS-1 (hostel sessions) COMPLETE** — migration `f8d9e0f1a2b3` (head, revises `a8b9c0d1e2f3`).
+  The sessions module is now the **hostel-timetable unit**: `sessions` gains `kind`
+  (study|homework|activity — picks the capture surface), `end_time`, `hostellers_only`; new tables
+  `session_classes` (class-linked membership — the roster is **computed**: class students,
+  optionally Hosteller-category only, ∪ explicit `session_students`, so new admissions appear with
+  zero edits), `session_media` (photos/videos of a meeting stored as **R2 object keys**, URLs
+  minted per read via presigned GET — private bucket; media attaches to the meeting, never a
+  student, P5), `session_student_logs` (optional per-student study note, one row per
+  meeting×student, **never mandatory** — P1v2). `SessionService`: admin creates + assigns the
+  teacher (`owner_member_id`), deterministic teacher-clash check on create/update (§11: no
+  solver), `homework_board` (computed read view over `homework_assignments` for the roster — no
+  new capture), `set_logs` (blank note = clear), media presign→direct-PUT→confirm for big videos
+  (300 MB cap) + pass-through upload ≤25 MB (also the no-R2 dev fallback; `storage.py` grew
+  `url_for`/`presign_put`/`object_stat`/`delete_object`). Endpoints: PATCH `/sessions/{id}`,
+  `/sessions/meetings/{id}/logs|homework|media|media/presign|media/confirm`, DELETE
+  `/sessions/media/{id}`. Timeline sessions now carry `kind` + `log_note`. Seed adds an
+  evening-prep study block (all classes, hostellers-only, with a log) + Saturday yoga.
+  `test_hostel_sessions.py` (6). Frontend: **Plan → Hostel** tab (week grid of blocks, admin
+  create/edit sheet with kind/days/times/teacher/classes/hostellers-only), session capture page
+  is kind-aware (study = optional per-row notes; homework = tonight's-homework board; memories
+  strip with photo/video upload on all), My Day gains a **This evening** section. R2 note: set
+  `R2_*` in `api/.env` (leave `R2_PUBLIC_BASE_URL` empty to keep the bucket private) and add a
+  browser CORS rule (PUT from the web origin) on the bucket for presigned uploads.
+- **Teacher view + student growth (2026-07-11)** — migration `a8b9c0d1e2f3`. My Day is now
   a clean list of tappable period rows; every action moved to a **period page**
   (`/my-day/period/[classId]/[no]`, backed by the V2-P6 `GET /periods/card`): attendance
   (inline tap-cycle + all-present), **topic picked from the syllabus list** (grouped by chapter,

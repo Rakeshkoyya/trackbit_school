@@ -51,8 +51,11 @@ from app.models.reports import DailyReport
 from app.models.sessions import (
     Session,
     SessionAttendance,
+    SessionClass,
+    SessionMedia,
     SessionMeeting,
     SessionStudent,
+    SessionStudentLog,
 )
 from app.models.students import Guardian, Student, StudentCategory
 from app.models.task import EVENT_TYPES, Attachment, TaskEvent, TaskInstance, TaskTemplate
@@ -101,8 +104,11 @@ __all__ = [
     "SchoolClass",
     "Session",
     "SessionAttendance",
+    "SessionClass",
+    "SessionMedia",
     "SessionMeeting",
     "SessionStudent",
+    "SessionStudentLog",
     "SkillArea",
     "Student",
     "StudentBand",

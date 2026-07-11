@@ -11,6 +11,7 @@ export default function PlanLayout({ children }: { children: React.ReactNode }) 
           { label: "Syllabus", href: "/plan/syllabus" },
           { label: "Week plan", href: "/plan/week" },
           { label: "Timetable", href: "/plan/timetable" },
+          { label: "Hostel", href: "/plan/hostel" },
         ]}
       />
       {children}

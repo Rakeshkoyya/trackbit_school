@@ -92,6 +92,13 @@ SCHOOL_SESSION_TABLES = (
     "session_attendance",
 )
 
+# HS-1 hostel sessions — engaged in migration f8d9e0f1a2b3.
+SCHOOL_HOSTEL_TABLES = (
+    "session_classes",
+    "session_media",
+    "session_student_logs",
+)
+
 # V2-P1 timetable (SPRD2 §4, §5.3) — engaged in migration f0a1b2c3d4e5.
 SCHOOL_TIMETABLE_TABLES = (
     "timetable_slots",

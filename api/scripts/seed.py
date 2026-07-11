@@ -38,8 +38,10 @@ from app.models import (
     PlanEntry,
     SchoolClass,
     SessionAttendance,
+    SessionClass,
     SessionMeeting,
     SessionStudent,
+    SessionStudentLog,
     SkillArea,
     Student,
     StudentBand,
@@ -327,8 +329,9 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
 
     # Ramesh's after-school homework class (Flow 6): 6-A roster + today's meeting with
     # attendance captured — so Sessions + the records feed render on review.
-    session = SessionModel(org_id=org.id, name="Homework Class 6A",
-                           owner_member_id=mships[ramesh].id, weekdays=[0, 2, 4], time="16:15")
+    session = SessionModel(org_id=org.id, name="Homework Class 6A", kind="homework",
+                           owner_member_id=mships[ramesh].id, weekdays=[0, 2, 4],
+                           time="16:15", end_time="17:00")
     db.add(session)
     db.flush()
     for st in sixa:
@@ -343,6 +346,34 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
             late_minutes=8 if status == "late" else None,
             homework_done=(status != "absent" and i % 2 == 0)))
 
+    db.flush()
+
+    # ── Hostel week (HS-1): evening study (hostellers of all classes, computed
+    # roster + a study log), plus a Saturday yoga activity — so Plan → Hostel,
+    # the study-log surface and the memories strip all render on review.
+    prep = SessionModel(org_id=org.id, name="Evening prep", kind="study",
+                        owner_member_id=mships[anil].id, weekdays=[0, 1, 2, 3, 4],
+                        time="18:30", end_time="20:00", hostellers_only=True)
+    yoga = SessionModel(org_id=org.id, name="Morning yoga", kind="activity",
+                        owner_member_id=mships[priya].id, weekdays=[5],
+                        time="06:30", end_time="07:15", hostellers_only=True)
+    db.add_all([prep, yoga])
+    db.flush()
+    for c in classes.values():
+        db.add(SessionClass(org_id=org.id, session_id=prep.id, class_id=c.id))
+        db.add(SessionClass(org_id=org.id, session_id=yoga.id, class_id=c.id))
+    prep_meeting = SessionMeeting(org_id=org.id, session_id=prep.id, date=today_ist)
+    db.add(prep_meeting)
+    db.flush()
+    hostellers = [s for s in students if s.category_id == cats["Hosteller"].id]
+    for st in hostellers:
+        db.add(SessionAttendance(org_id=org.id, meeting_id=prep_meeting.id,
+                                 student_id=st.id, status="present"))
+    if hostellers:
+        db.add(SessionStudentLog(
+            org_id=org.id, meeting_id=prep_meeting.id, student_id=hostellers[0].id,
+            note="Finished Maths Ex 4.2; revised Science ch. 3 diagrams",
+            member_id=mships[anil].id))
     db.flush()
 
     # ── V2 data: timings, timetable, per-period attendance, checks, report ─────

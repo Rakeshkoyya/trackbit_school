@@ -33,7 +33,11 @@ export function TimelineBlock({ studentId }: { studentId: string }) {
           {data.sessions.map((s, i) => (
             <li key={`sess-${i}`} className="flex items-center gap-2">
               <span className="w-6 shrink-0 text-xs font-semibold text-muted-foreground">◷</span>
-              <span className="min-w-0 flex-1 truncate">{s.session_name}</span>
+              <span className="min-w-0 flex-1 truncate">
+                {s.session_name}
+                {s.log_note ? <span className="text-xs text-muted-foreground"> · {s.log_note}</span> : null}
+                {s.homework_done ? <span className="text-xs text-muted-foreground"> · hw ✓</span> : null}
+              </span>
               <span className={`text-xs ${tone(s.status)}`}>{s.status}</span>
             </li>
           ))}
