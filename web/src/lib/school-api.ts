@@ -207,6 +207,8 @@ export const schoolApi = {
     api.post<{ id: string }>("/periods/open", b),
   periodNotHeld: (periodId: string, reason: string) =>
     api.post<{ id: string }>(`/periods/${periodId}/not-held`, { reason }),
+  closePeriod: (periodId: string) => api.post<{ id: string }>(`/periods/${periodId}/close`),
+  reopenPeriod: (periodId: string) => api.post<{ id: string }>(`/periods/${periodId}/reopen`),
 
   // deep log — optional lesson observations (exception-only, P1v2)
   observations: (csId: string, onDate?: string, periodId?: string) =>
