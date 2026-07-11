@@ -812,7 +812,13 @@ function SyllabusStep() {
       title="What's the syllabus?"
       blurb="Per class-subject. Import a sheet, paste the chapter list, or type it — whichever is quickest."
       aside={
-        <Aside title={draft ? `Draft · ${totalPeriods} periods${unsizedCount ? ` · ${unsizedCount} unsized` : ""}` : "Nothing loaded"}>
+        <Aside
+          title={draft
+            ? `Draft · ${totalPeriods} periods${unsizedCount ? ` · ${unsizedCount} unsized` : ""}`
+            : existing.length
+              ? "Saved on this subject — edit in place"
+              : "Nothing loaded"}
+        >
           {draft ? (
             <div className="max-h-[70vh] space-y-2 overflow-auto pr-1">
               {draft.units.map((u, ui) => (
@@ -844,6 +850,12 @@ function SyllabusStep() {
                   </ul>
                 </motion.div>
               ))}
+            </div>
+          ) : existing.length ? (
+            // The saved syllabus lives on the VIEW side: left panel enters, right
+            // panel shows. Fully editable (periods, delete, terms) without re-import.
+            <div className="max-h-[70vh] overflow-auto pr-1">
+              <SyllabusEditor csId={csId} canEdit terms={terms} />
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
@@ -896,14 +908,10 @@ function SyllabusStep() {
       {!draft ? (
         <>
           {existing.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-sm font-medium">
-                Already saved on this subject — edit here, or import again to replace it.
-              </p>
-              <div className="max-h-80 overflow-auto rounded-xl border border-border p-3">
-                <SyllabusEditor csId={csId} canEdit terms={terms} />
-              </div>
-            </div>
+            <p className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              This subject already has {existing.length} chapter{existing.length === 1 ? "" : "s"} —
+              shown on the right, editable in place. Importing again replaces them.
+            </p>
           ) : null}
           <Dropzone
             busy={analyzeFile.isPending}
@@ -1143,40 +1151,37 @@ function StudentsStep() {
             <Stat label="On the roll" value={students?.length ?? 0} />
             <Stat label="In the file" value={analysis?.row_count ?? "—"} />
           </div>
+          {students?.length ? (
+            // The roll is the VIEW: it lives on the right, next to the import
+            // controls. Editing happens on the Students page.
+            <div className="mt-3 max-h-[60vh] overflow-auto rounded-xl border border-border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted/60 backdrop-blur">
+                  <tr className="text-left text-xs text-muted-foreground">
+                    <th className="px-3 py-1.5 font-medium">Name</th>
+                    <th className="px-3 py-1.5 font-medium">Adm. no</th>
+                    <th className="px-3 py-1.5 font-medium">Class</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((s) => (
+                    <tr key={s.id} className="border-t border-border/60 bg-card">
+                      <td className="px-3 py-1.5">{s.full_name}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{s.admission_no}</td>
+                      <td className="px-3 py-1.5">
+                        {s.class_id ? classLabel.get(s.class_id) ?? "?" : <span className="text-warning">unassigned</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </Aside>
       }
     >
       {!analysis ? (
-        <>
-          <Dropzone busy={analyze.isPending} onFile={(f) => analyze.mutate(f)} hint="xlsx · Name, Admission No, Class, Section" />
-          {students?.length ? (
-            <div className="space-y-1.5">
-              <p className="text-sm font-medium">Already on the roll — edit them from the Students page.</p>
-              <div className="max-h-72 overflow-auto rounded-xl border border-border">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-muted/60 backdrop-blur">
-                    <tr className="text-left text-xs text-muted-foreground">
-                      <th className="px-3 py-1.5 font-medium">Name</th>
-                      <th className="px-3 py-1.5 font-medium">Adm. no</th>
-                      <th className="px-3 py-1.5 font-medium">Class</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {students.map((s) => (
-                      <tr key={s.id} className="border-t border-border/60">
-                        <td className="px-3 py-1.5">{s.full_name}</td>
-                        <td className="px-3 py-1.5 text-muted-foreground">{s.admission_no}</td>
-                        <td className="px-3 py-1.5">
-                          {s.class_id ? classLabel.get(s.class_id) ?? "?" : <span className="text-warning">unassigned</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
-        </>
+        <Dropzone busy={analyze.isPending} onFile={(f) => analyze.mutate(f)} hint="xlsx · Name, Admission No, Class, Section" />
       ) : (
         <div className="space-y-3">
           <MappingPreview
