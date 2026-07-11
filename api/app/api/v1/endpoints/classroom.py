@@ -21,7 +21,10 @@ from app.schemas.classroom import (
     LessonLogIn,
     LessonLogOut,
     MyDayOut,
+    ObservationSectionIn,
+    ObservationsOut,
 )
+from app.schemas.common import MessageResponse
 from app.services.classroom import ClassroomService
 
 router = APIRouter()
@@ -49,6 +52,34 @@ def add_homework(body: HomeworkIn, m: CurrentMember = Depends(require_academic),
 def check_homework(assignment_id: uuid.UUID, body: HomeworkCheckIn,
                    m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
     return ClassroomService(db).check_homework(m, assignment_id, body)
+
+
+# ── deep log — optional lesson observations (teacher-view redesign) ──────────
+@router.get("/observations", response_model=ObservationsOut)
+def observations(class_subject_id: uuid.UUID, on_date: date | None = None,
+                 period_id: uuid.UUID | None = None,
+                 m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    return ClassroomService(db).observations(m, class_subject_id, on_date, period_id)
+
+
+@router.put("/observations", response_model=ObservationsOut)
+def save_observation_section(body: ObservationSectionIn,
+                             m: CurrentMember = Depends(require_academic),
+                             db: Session = Depends(get_db)):
+    """Full-replace ONE section (e.g. "Vocabulary") — concepts + only the tapped
+    per-student deviations (P1v2)."""
+    return ClassroomService(db).save_observation_section(m, body)
+
+
+@router.delete("/observations", response_model=MessageResponse)
+def delete_observation_section(class_subject_id: uuid.UUID, section: str,
+                               on_date: date | None = None,
+                               period_id: uuid.UUID | None = None,
+                               m: CurrentMember = Depends(require_academic),
+                               db: Session = Depends(get_db)):
+    ClassroomService(db).delete_observation_section(m, class_subject_id, section,
+                                                    on_date, period_id)
+    return MessageResponse(message="Section removed.")
 
 
 @router.get("/compliance", response_model=ComplianceOut)

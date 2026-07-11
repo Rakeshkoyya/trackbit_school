@@ -22,6 +22,7 @@ from app.models import (
     HomeworkAssignment,
     HomeworkCheck,
     LessonLog,
+    LessonObservation,
     Membership,
     PlanEntry,
     SchoolClass,
@@ -44,6 +45,11 @@ from app.schemas.classroom import (
     MyDayClass,
     MyDayOut,
     MyDayPeriod,
+    ObservationConceptOut,
+    ObservationSectionIn,
+    ObservationSectionOut,
+    ObservationsOut,
+    ObservationStudentOut,
 )
 from app.schemas.periods import (
     PeriodCardOut,
@@ -398,6 +404,123 @@ class ClassroomService:
             absent_count=sheet.absent_count if sheet.marked else None,
             late_count=sheet.late_count if sheet.marked else None,
             plan=plan, homework=homework)
+
+    # ── deep log — lesson observations (optional, exception-only) ────────────
+    def _observation_scope(self, m: CurrentMember, body: ObservationSectionIn,
+                           d: date) -> ClassPeriod | None:
+        """Resolve which period occurrence the section belongs to (same rules as
+        the lesson log): explicit id, explicit number, else day-scoped."""
+        if body.period_id is not None:
+            period = self.db.scalar(select(ClassPeriod).where(
+                ClassPeriod.id == body.period_id, ClassPeriod.org_id == m.org_id))
+            if period is None:
+                raise NotFoundError("Period")
+            return period
+        if body.period_no is not None:
+            cs = self._cs(m.org_id, body.class_subject_id)
+            return get_or_create_period(self.db, m, cs.class_id, d, body.period_no, cs.id)
+        return None
+
+    def save_observation_section(self, m: CurrentMember,
+                                 body: ObservationSectionIn) -> ObservationsOut:
+        """Full-replace one section's rows — concept rows plus only the tapped
+        per-student deviations. An empty `concepts` list keeps just the section
+        row ("we did Vocabulary", nothing deeper)."""
+        cs = self._cs(m.org_id, body.class_subject_id)
+        self._can_capture(m, cs)
+        d = body.date or self._today(m)
+        period = self._observation_scope(m, body, d)
+        period_id = period.id if period is not None else None
+
+        # Per-student rows must be students of this class.
+        student_ids = {s.student_id for c in body.concepts for s in c.students}
+        if student_ids:
+            in_class = set(self.db.scalars(select(Student.id).where(
+                Student.id.in_(student_ids), Student.org_id == m.org_id,
+                Student.class_id == cs.class_id)))
+            if in_class != student_ids:
+                raise NotFoundError("Student")
+
+        for row in self.db.scalars(select(LessonObservation).where(
+                LessonObservation.org_id == m.org_id,
+                LessonObservation.class_subject_id == cs.id,
+                LessonObservation.date == d,
+                LessonObservation.period_id.is_(None) if period_id is None
+                else LessonObservation.period_id == period_id,
+                LessonObservation.section == body.section)):
+            self.db.delete(row)
+        self.db.flush()
+
+        common = {"org_id": m.org_id, "class_subject_id": cs.id, "date": d,
+                  "period_id": period_id, "member_id": m.membership.id,
+                  "section": body.section}
+        if not body.concepts:
+            self.db.add(LessonObservation(**common))
+        for c in body.concepts:
+            self.db.add(LessonObservation(**common, concept=c.concept))
+            for s in c.students:
+                self.db.add(LessonObservation(**common, concept=c.concept,
+                                              student_id=s.student_id, rating=s.rating,
+                                              note=s.note))
+        self.db.flush()
+        return self.observations(m, cs.id, d, period_id)
+
+    def delete_observation_section(self, m: CurrentMember, class_subject_id: uuid.UUID,
+                                   section: str, on_date: date | None = None,
+                                   period_id: uuid.UUID | None = None) -> None:
+        """Remove a named section from the day. Omitting period_id removes it
+        wherever it sits (period-scoped or day-scoped) — the teacher is deleting
+        "the Vocabulary section", not a storage detail."""
+        cs = self._cs(m.org_id, class_subject_id)
+        self._can_capture(m, cs)
+        d = on_date or self._today(m)
+        cond = [LessonObservation.org_id == m.org_id,
+                LessonObservation.class_subject_id == cs.id,
+                LessonObservation.date == d,
+                LessonObservation.section == section]
+        if period_id is not None:
+            cond.append(LessonObservation.period_id == period_id)
+        for row in self.db.scalars(select(LessonObservation).where(*cond)):
+            self.db.delete(row)
+        self.db.flush()
+
+    def observations(self, m: CurrentMember, class_subject_id: uuid.UUID,
+                     on_date: date | None = None,
+                     period_id: uuid.UUID | None = None) -> ObservationsOut:
+        """The deep log for one class-subject day (or one period of it), grouped
+        section → concept → tapped students."""
+        cs = self._cs(m.org_id, class_subject_id)
+        assert_can_take_class(self.db, m, cs.class_id, None)
+        d = on_date or self._today(m)
+        cond = [LessonObservation.org_id == m.org_id,
+                LessonObservation.class_subject_id == cs.id,
+                LessonObservation.date == d]
+        if period_id is not None:
+            cond.append(LessonObservation.period_id == period_id)
+        rows = list(self.db.execute(
+            select(LessonObservation, Student.full_name)
+            .outerjoin(Student, Student.id == LessonObservation.student_id)
+            .where(*cond).order_by(LessonObservation.created_at)).all())
+
+        sections: dict[tuple[uuid.UUID | None, str], ObservationSectionOut] = {}
+        concepts: dict[tuple[uuid.UUID | None, str, str | None], ObservationConceptOut] = {}
+        for obs, student_name in rows:
+            skey = (obs.period_id, obs.section)
+            if skey not in sections:
+                sections[skey] = ObservationSectionOut(
+                    section=obs.section, period_id=obs.period_id)
+            if obs.concept is None and obs.student_id is None:
+                continue  # bare section row — nothing deeper recorded
+            ckey = (*skey, obs.concept)
+            if ckey not in concepts:
+                concepts[ckey] = ObservationConceptOut(concept=obs.concept)
+                sections[skey].concepts.append(concepts[ckey])
+            if obs.student_id is not None:
+                concepts[ckey].students.append(ObservationStudentOut(
+                    student_id=obs.student_id, full_name=student_name or "?",
+                    rating=obs.rating or "needs_work", note=obs.note))
+        return ObservationsOut(class_subject_id=cs.id, date=d,
+                               sections=list(sections.values()))
 
     # ── homework (CL-2) + guardian notify (P3) ───────────────────────────────
     def add_homework(self, m: CurrentMember, body: HomeworkIn) -> HomeworkOut:

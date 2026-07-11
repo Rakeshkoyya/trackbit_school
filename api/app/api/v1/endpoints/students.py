@@ -16,6 +16,7 @@ from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import get_current_member, require_coordinator_up
 from app.schemas.common import MessageResponse
+from app.schemas.growth import StudentGrowthOut
 from app.schemas.students import (
     CategoryCreate,
     CategoryOut,
@@ -32,6 +33,7 @@ from app.schemas.students import (
 )
 from app.schemas.timeline import StudentTimelineOut
 from app.services import roster_import
+from app.services.growth import GrowthService
 from app.services.roster_import import RosterImporter
 from app.services.students import StudentService
 from app.services.timeline import StudentTimelineService
@@ -44,6 +46,14 @@ def student_timeline(student_id: uuid.UUID, on_date: date | None = None,
                      m: CurrentMember = Depends(get_current_member), db: Session = Depends(get_db)):
     """§5.7 — period-by-period what the student did today (computed join, no new tables)."""
     return StudentTimelineService(db).timeline(m, student_id, on_date)
+
+
+@router.get("/{student_id}/growth", response_model=StudentGrowthOut)
+def student_growth(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_member),
+                   db: Session = Depends(get_db)):
+    """Chapter-level growth report with topic drill-down. Staff-only; the service
+    limits teachers to students in classes they teach (admin sees all)."""
+    return GrowthService(db).growth(m, student_id)
 
 
 # ── roster xlsx import (SPRD §5.6) ───────────────────────────────────────────

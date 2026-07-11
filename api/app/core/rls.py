@@ -79,6 +79,11 @@ SCHOOL_CLASSROOM_TABLES = (
     "homework_checks",
 )
 
+# Teacher-view deep log (2026-07) — engaged in migration a8b9c0d1e2f3.
+SCHOOL_OBSERVATION_TABLES = (
+    "lesson_observations",
+)
+
 # P1.5 sessions (SPRD §4.4) — engaged in migration d7d8e9fab0c1.
 SCHOOL_SESSION_TABLES = (
     "sessions",
