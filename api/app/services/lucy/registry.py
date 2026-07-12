@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -224,6 +225,13 @@ def execute(spec: ToolSpec, m: CurrentMember, db: Session,
     except AppError as exc:
         return ToolExecution(ok=False, error_code=exc.code, error_message=exc.message,
                              details=exc.details or {})
+    except PydanticValidationError as exc:
+        # Handlers build the services' own *In schemas from model-supplied
+        # nested data; a bad nested field is the model's mistake to fix.
+        first = exc.errors()[0] if exc.errors() else {}
+        loc = ".".join(str(p) for p in first.get("loc", ()))
+        return ToolExecution(ok=False, error_code="bad_params",
+                             error_message=f"{loc}: {first.get('msg', 'invalid')}")
     except Exception:
         logger.exception("lucy tool %s crashed", spec.name)
         return ToolExecution(ok=False, error_code="tool_failed",

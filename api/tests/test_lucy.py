@@ -296,3 +296,93 @@ def test_ai_off_meta_and_polite_error(client, cleanup):
     err = next(d for e, d in events if e == "error")
     assert err["code"] == "ai_unconfigured"
     assert events[-1][0] == "done"
+
+
+# --- write tools: propose -> human confirm -> execute (LU-3) --------------------
+
+def _setup_cs(client, cleanup):
+    """Org + class + a class-subject taught by the admin (admins pass the
+    teacher check), so write tools have something to write against."""
+    h, reg, year, klass, kids = _setup(client, cleanup)
+    subject = client.post("/api/v1/academics/subjects", headers=h,
+                          json={"name": "Math"}).json()
+    admin_ms = _membership(reg["user"]["id"], reg["org"]["id"])
+    cs = client.post("/api/v1/academics/class-subjects", headers=h,
+                     json={"class_id": klass["id"], "subject_id": subject["id"],
+                           "teacher_member_id": str(admin_ms.id),
+                           "periods_per_week": 5}).json()
+    return h, reg, klass, cs, kids
+
+
+def _propose_homework(client, monkeypatch, h, cs, text="Read chapter 2"):
+    _scripted(monkeypatch, [
+        {"tool_calls": [{"id": "c1", "name": "assign_homework",
+                         "arguments": json.dumps({
+                             "class_subject_id": cs["id"], "text": text,
+                             "summary": f"Assign homework: {text}"})}]},
+        {"content": "I have proposed the homework - please confirm it."},
+    ])
+    convo = client.post("/api/v1/lucy/conversations", headers=h, json={}).json()
+    r = client.post(f"/api/v1/lucy/conversations/{convo['id']}/messages",
+                    headers=h, json={"content": "assign reading homework"})
+    events = _sse_events(r.text)
+    action_ev = next(d for e, d in events if e == "action")
+    return convo, action_ev, events
+
+
+def test_write_tool_proposes_then_confirm_executes(client, cleanup, monkeypatch):
+    h, reg, _klass, cs, _kids = _setup_cs(client, cleanup)
+    convo, action_ev, events = _propose_homework(client, monkeypatch, h, cs)
+    # Proposed, not executed - and no widget was rendered for it.
+    assert action_ev["status"] == "proposed"
+    assert action_ev["tool"] == "assign_homework"
+    assert any(p["value"] == "Read chapter 2" for p in action_ev["params_preview"])
+    # The action is attached to the persisted assistant message.
+    detail = client.get(f"/api/v1/lucy/conversations/{convo['id']}", headers=h).json()
+    persisted = detail["messages"][1]["actions"][0]
+    assert persisted["status"] == "proposed"
+
+    # Human confirms -> the REAL service write runs.
+    confirmed = client.post(f"/api/v1/lucy/actions/{action_ev['id']}/confirm",
+                            headers=h)
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    assert body["status"] == "executed"
+    assert body["result"]["data"]["text"] == "Read chapter 2"
+    # Idempotence: a second confirm conflicts instead of double-writing.
+    again = client.post(f"/api/v1/lucy/actions/{action_ev['id']}/confirm", headers=h)
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "action_resolved"
+
+
+def test_action_cancel_expiry_and_member_scoping(client, cleanup, monkeypatch):
+    h, reg, _klass, cs, _kids = _setup_cs(client, cleanup)
+
+    # Cancel: never executes.
+    _convo, action_ev, _ = _propose_homework(client, monkeypatch, h, cs, "Cancel me")
+    cancelled = client.post(f"/api/v1/lucy/actions/{action_ev['id']}/cancel",
+                            headers=h).json()
+    assert cancelled["status"] == "cancelled"
+    assert client.post(f"/api/v1/lucy/actions/{action_ev['id']}/confirm",
+                       headers=h).status_code == 409
+
+    # Expiry: a stale proposal cannot run.
+    _convo2, action2, _ = _propose_homework(client, monkeypatch, h, cs, "Expire me")
+    db = AdminSession()
+    try:
+        from datetime import UTC, datetime, timedelta
+
+        from app.models import LucyPendingAction
+        row = db.get(LucyPendingAction, uuid.UUID(action2["id"]))
+        row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        db.commit()
+    finally:
+        db.close()
+    expired = client.post(f"/api/v1/lucy/actions/{action2['id']}/confirm", headers=h)
+    assert expired.status_code == 409
+
+    # Member scoping: another member cannot see or resolve my action.
+    _convo3, action3, _ = _propose_homework(client, monkeypatch, h, cs, "Not yours")
+    th, _cred = _add_teacher(client, h, reg["org"]["id"])
+    assert client.post(f"/api/v1/lucy/actions/{action3['id']}/confirm",
+                       headers=th).status_code == 404
