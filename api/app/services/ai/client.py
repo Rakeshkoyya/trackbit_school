@@ -24,6 +24,7 @@ import base64
 import json
 import logging
 import mimetypes
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -118,6 +119,154 @@ def _user_content(user: str, attachment: tuple[str, bytes] | None) -> Any:
     else:
         raise ValueError(f"unsupported attachment type: {media_type}")
     return parts
+
+
+class AgentUnavailable(Exception):
+    """AI is unconfigured or the model call failed for good.
+
+    Unlike every other AI path there is no deterministic heuristic for a
+    conversation, so this DOES propagate — Lucy's agent loop turns it into a
+    friendly error event instead of a heuristic fallback."""
+
+
+class _Retryable(Exception):
+    """Internal: transient failure before any token was yielded."""
+
+
+class _StreamStarted(Exception):
+    """Internal: the stream broke after tokens already reached the caller."""
+
+
+def chat_tools(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    max_tokens: int = 4000,
+    timeout: float | None = None,
+) -> Iterator[dict[str, Any]]:
+    """One completion turn with tool support — Lucy's agent-loop primitive.
+
+    Yields `{"type": "text", "delta": str}` as tokens arrive, then exactly one
+    `{"type": "message", "content": str, "tool_calls": [...]}` where each tool
+    call is `{id, name, arguments}` (arguments = raw JSON string).
+
+    Raises AgentUnavailable when AI is off or the call fails. Retries once on
+    transient errors, but never after tokens were already yielded — the caller
+    would render the same text twice. `LUCY_STREAM_TOKENS=false` switches to a
+    buffered (non-stream) request with identical event semantics.
+    """
+    if not settings.ai_configured:
+        raise AgentUnavailable("ai_unconfigured")
+
+    payload: dict[str, Any] = {
+        "model": model or settings.AI_MODEL_AGENT,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        payload["tools"] = tools
+    url = f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
+    per_call_timeout = timeout or settings.AI_AGENT_TIMEOUT_SECONDS
+    last_error: object = None
+
+    for _attempt in range(settings.AI_MAX_RETRIES + 1):
+        try:
+            if settings.LUCY_STREAM_TOKENS:
+                yield from _stream_turn(url, payload, per_call_timeout)
+            else:
+                yield from _buffered_turn(url, payload, per_call_timeout)
+            return
+        except _StreamStarted as exc:
+            raise AgentUnavailable(f"stream broke mid-turn: {exc}") from exc
+        except (_Retryable, httpx.HTTPError, KeyError, IndexError, TypeError,
+                ValueError) as exc:
+            last_error = exc
+            continue
+
+    logger.warning("agent turn failed: %s", last_error)
+    raise AgentUnavailable(str(last_error))
+
+
+def _norm_tool_calls(raw: list | None) -> list[dict[str, str]]:
+    """OpenAI tool_calls → [{id, name, arguments}] with arguments as a JSON string."""
+    out: list[dict[str, str]] = []
+    for tc in raw or []:
+        fn = tc.get("function") or {}
+        out.append({
+            "id": tc.get("id") or f"call_{len(out)}",
+            "name": fn.get("name") or "",
+            "arguments": fn.get("arguments") or "{}",
+        })
+    return out
+
+
+def _buffered_turn(url: str, payload: dict[str, Any], timeout: float,
+                   ) -> Iterator[dict[str, Any]]:
+    resp = httpx.post(url, headers=_headers(), json=payload, timeout=timeout)
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise _Retryable(f"HTTP {resp.status_code}")
+    if resp.status_code >= 400:
+        raise AgentUnavailable(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    message = resp.json()["choices"][0]["message"]
+    content = message.get("content") or ""
+    if content:
+        yield {"type": "text", "delta": content}
+    yield {"type": "message", "content": content,
+           "tool_calls": _norm_tool_calls(message.get("tool_calls"))}
+
+
+def _stream_turn(url: str, payload: dict[str, Any], timeout: float,
+                 ) -> Iterator[dict[str, Any]]:
+    """Consume one streamed completion, accumulating OpenAI deltas."""
+    content_parts: list[str] = []
+    calls: dict[int, dict[str, str]] = {}
+    emitted = False
+    try:
+        with httpx.stream("POST", url, headers=_headers(),
+                          json={**payload, "stream": True}, timeout=timeout) as resp:
+            if resp.status_code == 429 or resp.status_code >= 500:
+                resp.read()
+                raise _Retryable(f"HTTP {resp.status_code}")
+            if resp.status_code >= 400:
+                resp.read()
+                raise AgentUnavailable(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            for line in resp.iter_lines():
+                if not line.startswith("data: "):
+                    continue  # keep-alive comments and blank lines
+                chunk = line[len("data: "):].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(chunk)["choices"][0].get("delta") or {}
+                except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                    continue  # metadata frames (usage, moderation) — not deltas
+                text_piece = delta.get("content")
+                if isinstance(text_piece, str) and text_piece:
+                    content_parts.append(text_piece)
+                    emitted = True
+                    yield {"type": "text", "delta": text_piece}
+                for tc in delta.get("tool_calls") or []:
+                    slot = calls.setdefault(tc.get("index", 0),
+                                            {"id": "", "name": "", "arguments": ""})
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        slot["arguments"] += fn["arguments"]
+    except (AgentUnavailable, _Retryable, _StreamStarted):
+        raise
+    except httpx.HTTPError as exc:
+        if emitted:
+            raise _StreamStarted(str(exc)) from exc
+        raise
+    tool_calls = [
+        {"id": c["id"] or f"call_{i}", "name": c["name"], "arguments": c["arguments"] or "{}"}
+        for i, c in sorted(calls.items())
+    ]
+    yield {"type": "message", "content": "".join(content_parts), "tool_calls": tool_calls}
 
 
 def chat_json(
