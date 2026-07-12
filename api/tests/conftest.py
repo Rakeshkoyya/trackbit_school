@@ -53,6 +53,27 @@ def _no_real_ai():
     settings.OPENROUTER_API_KEY = prev
 
 
+@pytest.fixture(autouse=True)
+def _no_real_storage():
+    """Force the local-disk fallback so tests never touch the real R2 bucket.
+
+    `settings.storage_configured` is just "are all four R2_* set", and real keys now
+    live in `api/.env`. Without this, every attachment/session-media test uploads a
+    fixture into the production bucket — orphaned objects nobody ever cleans up — and
+    the assertions expecting a local MEDIA_BASE_URL fail, because they get a presigned
+    r2.cloudflarestorage.com URL back instead. Same reasoning as `_no_real_ai`.
+    Tests that exercise the R2 branch set the keys themselves, after this has run."""
+    prev = (settings.R2_ACCOUNT_ID, settings.R2_ACCESS_KEY_ID,
+            settings.R2_SECRET_ACCESS_KEY, settings.R2_BUCKET)
+    settings.R2_ACCOUNT_ID = ""
+    settings.R2_ACCESS_KEY_ID = ""
+    settings.R2_SECRET_ACCESS_KEY = ""
+    settings.R2_BUCKET = ""
+    yield
+    (settings.R2_ACCOUNT_ID, settings.R2_ACCESS_KEY_ID,
+     settings.R2_SECRET_ACCESS_KEY, settings.R2_BUCKET) = prev
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
