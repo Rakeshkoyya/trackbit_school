@@ -15,10 +15,20 @@ web/.next/
 web/out/
 *.tsbuildinfo
 
-# Env & secrets (only .env.example is committed)
+# Env & secrets — ONLY the .env.example templates are ever committed.
+# Match every .env variant, not just the two we happen to use today: a stray
+# `.env.bak` or `.env.production` holds the same live DB password as `.env`, and
+# a bare `.env` pattern does not match either of them.
 .env
-.env.local
+.env.*
 !.env.example
+*.bak
+
+# Generated test fixtures. `test_doc/new_org/generate.py` invents a NEW random school
+# on every run, so the .xlsx pack and its per-run SETUP.md walkthrough are derived
+# artifacts — committing them would be meaningless binary churn. Run the generator.
+test_doc/new_org/*.xlsx
+test_doc/new_org/SETUP.md
 
 # Editor / OS
 .DS_Store

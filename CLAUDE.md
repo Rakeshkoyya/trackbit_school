@@ -274,10 +274,16 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   dataviz-validated palette) · rag_board · roster_grid · timeline · report_card · student_card ·
   alert_list · progress · escaped-markdown. Titles autogen off-thread via `chat_json`.
   `test_lucy.py` (10). AI-off: `/lucy/meta` gates the page, streams degrade politely.
-- **`test_doc/`** — dummy xlsx/txt fixtures for the roster, staff and syllabus importers, plus the
-  generator that writes them. Each carries rows meant to fail (missing name, unresolvable
-  class-subject, duplicates of seeded rows) so the `errors`/`skipped`/`unresolved` surfaces get
-  exercised. See `test_doc/README.md`.
+- **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
+  syllabus importers. It invents a **different school on every run** (name, grades, subjects,
+  weekly period split, teachers, students, chapters) while holding the four invariants that keep
+  the pack valid: periods sum exactly to weekly capacity · every class-subject has one teacher and
+  nobody is over-loaded · every topic is sized · each syllabus fits the year. So imports land 100%
+  and the wizard can approve+lock every plan. `--seed N` reproduces a run; `--messy` injects rows
+  built to fail (unresolvable class-subject, duplicate admission no, missing name, unsized topic)
+  to exercise the `errors`/`skipped`/`unresolved` surfaces. The `.xlsx` pack and the per-run
+  `SETUP.md` walkthrough are **generated, not committed** — run the generator. See
+  `test_doc/new_org/README.md`.
 
 ## How this repo was bootstrapped (background)
 

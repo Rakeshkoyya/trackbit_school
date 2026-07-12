@@ -1,7 +1,12 @@
 __pycache__/
 *.py[cod]
 .venv/
+# Every .env variant (.env, .env.bak, .env.production) carries the live DB
+# password. Only the template is committed.
 .env
+.env.*
+!.env.example
+*.bak
 .pytest_cache/
 .ruff_cache/
 htmlcov/
