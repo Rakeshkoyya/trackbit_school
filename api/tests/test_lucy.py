@@ -18,8 +18,8 @@ import uuid
 
 from sqlalchemy import select
 
-from app.models import Membership, Organization, User
 from app.core.context import CurrentMember
+from app.models import Membership, Organization, User
 from app.services.lucy import registry
 from app.services.lucy.registry import REGISTRY, ToolResult
 from app.services.lucy.widgets import WidgetConfigError, materialize
