@@ -141,6 +141,14 @@ SCHOOL_CAPTURE_TABLES = (
     "score_capture_pages",
 )
 
+# Lucy agentic chat (founder decision 2026-07-12) — engaged in migration fc3d4e5f6a7b.
+SCHOOL_LUCY_TABLES = (
+    "lucy_conversations",
+    "lucy_messages",
+    "lucy_widgets",
+    "lucy_pending_actions",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

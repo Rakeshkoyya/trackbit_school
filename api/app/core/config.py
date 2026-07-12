@@ -151,6 +151,22 @@ class Settings(BaseSettings):
     def ai_configured(self) -> bool:
         return bool(self.OPENROUTER_API_KEY)
 
+    # Lucy — the agentic chat layer. One more model slot, split by job like the
+    # others: AGENT must be a strong tool-calling model (the loop is useless on a
+    # model that can't emit parallel tool_calls reliably). Everything else is the
+    # loop's safety rails: caps are hard limits, not tuning knobs — a runaway
+    # conversation must end, not degrade the Aiven connection budget.
+    AI_MODEL_AGENT: str = "anthropic/claude-sonnet-4.5"
+    AI_AGENT_TIMEOUT_SECONDS: float = 45.0  # per model call, not per message
+    LUCY_MAX_ITERATIONS: int = 8  # model turns per message
+    LUCY_WALL_SECONDS: float = 90.0  # hard wall-clock cap per message
+    LUCY_HISTORY_MESSAGES: int = 20  # prior messages replayed to the model
+    LUCY_TOOL_RESULT_MAX_CHARS: int = 6000  # model-facing tool result truncation
+    # Streaming can be flipped off per-deploy if a model's SSE misbehaves; the
+    # loop then buffers each completion and emits the same events at once.
+    LUCY_STREAM_TOKENS: bool = True
+    LUCY_ACTION_EXPIRE_MINUTES: int = 15  # pending write proposals expire unconfirmed
+
     # V2-P1 §5.3 — the assisted timetable draft (proposer + validators + repair) is
     # NOT a guaranteed solver, so it ships behind a flag until piloted. Off => the
     # /timetable/draft endpoint reports the feature is disabled.

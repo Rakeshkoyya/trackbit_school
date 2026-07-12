@@ -105,7 +105,9 @@ async function performRefresh(): Promise<boolean> {
   return true;
 }
 
-async function tryRefresh(): Promise<boolean> {
+// Exported for the SSE client (lib/sse.ts), which streams with raw fetch and
+// needs the same single-flight refresh-then-retry on 401.
+export async function tryRefresh(): Promise<boolean> {
   if (!refreshInFlight) {
     refreshInFlight = performRefresh().finally(() => {
       refreshInFlight = null;
@@ -113,6 +115,8 @@ async function tryRefresh(): Promise<boolean> {
   }
   return refreshInFlight;
 }
+
+export { API_BASE };
 
 export async function apiFetch<T>(path: string, opts: Options = {}): Promise<T> {
   let res = await raw(path, opts);

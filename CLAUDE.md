@@ -248,6 +248,32 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   /assessments/bands/categorize` re-tiers the class from that cycle's results (append-only rows
   naming the source test). `test_exams.py` (5). Backend 205 passing-equivalent (suite +5), ruff
   clean; web tsc + eslint + build clean.
+- **LU (Lucy, the agentic chat layer) COMPLETE** — migration `fc3d4e5f6a7b` (head). Founder
+  decision 2026-07-12 moves a **staff-only chat surface IN** (supersedes the §11 "no chat UI"
+  fence for Lucy specifically; parents still have nothing). New sidebar item **Lucy** (both
+  roles): ChatGPT-style page → `/lucy` (pin board + composer + recent chats) and `/lucy/[id]`
+  (desktop = widget canvas + chat rail, mobile = single column). Backend `services/lucy/`:
+  **MCP-ready tool registry** (`registry.py` ToolSpec — name/JSON-schema/role/kind/confirm;
+  transport-agnostic, a future MCP server maps it 1:1) with **29 read tools wrapping the existing
+  services** (org/teacher scoping and the fee fence ride along; `AppError`s return to the model
+  as tool data) + **6 write tools, all confirm-gated**: the agent files a `lucy_pending_actions`
+  row (append-only, 15-min expiry) and the human taps Confirm in chat before the service write
+  runs. Agent loop (`agent.py`) = `ai/client.py::chat_tools` (OpenRouter streaming tool-calls,
+  `AI_MODEL_AGENT`, buffered fallback `LUCY_STREAM_TOKENS`) capped by `LUCY_MAX_ITERATIONS`/
+  `LUCY_WALL_SECONDS`; **it never holds a DB session across model I/O** (`lucy_session` per
+  phase — the Aiven 20-conn rule). **Data fidelity:** tool results are stored server-side per
+  turn; the model renders them via the internal `render_widget(result_id, type, config)` tool and
+  `widgets.py` materializes from the STORED result — the model picks the representation, it
+  cannot type the numbers (an invented key errors back to the model). SSE endpoint
+  `POST /lucy/conversations/{id}/messages` (events status·tool·text·widget·action·error·done,
+  fetch-stream client in `web/src/lib/sse.ts`, 10/min SlowAPI). Chat history: `lucy_conversations`
+  / `lucy_messages` / `lucy_widgets` — **member-private** (admins don't read teachers' chats);
+  widget **pinning** puts it on the Lucy landing board, snapshot-first with live refresh
+  (re-executes source tool, role re-checked). Widget catalog v1 (13 renderers + confirm card):
+  table (search/group/sort) · stat_group · bar/line/donut (Recharts, one dynamic chunk,
+  dataviz-validated palette) · rag_board · roster_grid · timeline · report_card · student_card ·
+  alert_list · progress · escaped-markdown. Titles autogen off-thread via `chat_json`.
+  `test_lucy.py` (10). AI-off: `/lucy/meta` gates the page, streams degrade politely.
 - **`test_doc/`** — dummy xlsx/txt fixtures for the roster, staff and syllabus importers, plus the
   generator that writes them. Each carries rows meant to fail (missing name, unresolvable
   class-subject, duplicates of seeded rows) so the `errors`/`skipped`/`unresolved` surfaces get
@@ -406,11 +432,15 @@ All AI lives in `app/services/ai/`, routed through **OpenRouter** (one OpenAI-co
 any model, one key) via `ai/client.py::chat_json` — the only function here that touches the network.
 It is **env-gated**: with `OPENROUTER_API_KEY` unset every call short-circuits and the caller's
 deterministic heuristic runs, so all flows are testable offline. Same pattern as the seed's
-integrations (email/R2/billing/push stub when keys blank). **No chat UI** — AI is invisible plumbing
+integrations (email/R2/billing/push stub when keys blank). AI is invisible plumbing
 (plan drafts, celebration drafts, syllabus split, xlsx/photo parsing), and **every AI output lands in
-a human-confirm surface before persisting** (editable drafts, verify grids). Model ids come from env
+a human-confirm surface before persisting** (editable drafts, verify grids). The one chat surface is
+**Lucy** (staff-only, founder decision 2026-07-12): `ai/client.py::chat_tools` streams tool-calling
+turns for it, widget numbers come only from server-stored tool results, and its write tools land in
+the pending-action confirm card — so the doctrine holds there too. Model ids come from env
 as OpenRouter slugs (`AI_MODEL_DRAFT=anthropic/claude-opus-4.8`,
-`AI_MODEL_PARSE=anthropic/claude-sonnet-5`); browse slugs at openrouter.ai/models.
+`AI_MODEL_PARSE=anthropic/claude-sonnet-5`, `AI_MODEL_AGENT=anthropic/claude-sonnet-4.5` — Lucy's
+tool-calling loop); browse slugs at openrouter.ai/models.
 
 Two rules make it safe in the setup wizard's critical path:
 
@@ -426,12 +456,15 @@ Two rules make it safe in the setup wizard's critical path:
 
 **Moved IN by founder decision (July 2026):** per-period attendance (capture-by-exception only) ·
 timetable (import-first + AI-assisted draft with **deterministic** validators — still no guaranteed
-solver) · daily report generation · per-student homework.
+solver) · daily report generation · per-student homework · **Lucy, a staff-only agentic chat
+surface (2026-07-12)** — tools wrap existing services only, widget data is server-materialized,
+writes are human-confirmed pending actions; the registry is the seed of a future MCP server.
 
 **Still OUT:** payroll/HR/library/transport/inventory/visitor/social modules · report-card
-designer · test authoring/conducting · parent app or login (notifications only) · chat UI /
-AI-orchestrator surface · **mandatory per-student capture** (exception-only, always — P1v2) ·
-per-student evidence photos (batch only). LMS + teacher training = Playground's lane.
+designer · test authoring/conducting · parent app or login (notifications only) · **any
+parent/guardian-facing chat or AI surface** · **mandatory per-student capture** (exception-only,
+always — P1v2) · per-student evidence photos (batch only). LMS + teacher training = Playground's
+lane.
 
 ## Build order
 

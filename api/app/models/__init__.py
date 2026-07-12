@@ -37,6 +37,12 @@ from app.models.fees import (
     StudentFee,
     Transaction,
 )
+from app.models.lucy import (
+    LucyConversation,
+    LucyMessage,
+    LucyPendingAction,
+    LucyWidget,
+)
 from app.models.notification import DeviceToken, Notification
 from app.models.onboarding import OnboardingState
 from app.models.org import Membership, Organization
@@ -95,6 +101,10 @@ __all__ = [
     "Invoice",
     "LessonLog",
     "LessonObservation",
+    "LucyConversation",
+    "LucyMessage",
+    "LucyPendingAction",
+    "LucyWidget",
     "Membership",
     "Notification",
     "OnboardingState",

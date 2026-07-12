@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     daily_report,
     dashboard,
     fees,
+    lucy,
     me,
     ops,
     org,
@@ -55,3 +56,4 @@ api_router.include_router(daily_report.router, prefix="/reports", tags=["reports
 api_router.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
 api_router.include_router(students.router, prefix="/students", tags=["students"])
 api_router.include_router(fees.router, prefix="/fees", tags=["fees"])
+api_router.include_router(lucy.router, prefix="/lucy", tags=["lucy"])
