@@ -18,6 +18,7 @@ from app.models import (
     Intervention,
     InterventionItem,
     Membership,
+    Organization,
     SchoolClass,
     SkillArea,
     Student,
@@ -30,6 +31,8 @@ from app.schemas.assessments import (
     AnalysisCyclePoint,
     AnalysisMover,
     BandBoard,
+    BandCategorizeOut,
+    BandConfig,
     BandRow,
     ClassAnalysis,
     CycleCreate,
@@ -53,8 +56,10 @@ DEFAULT_SKILLS = ("Reading", "Writing", "Speaking", "Math")
 WEAK_DROP = 0.10  # a >10pt class-average drop across cycles flags a weak subject
 
 
-def _tier_for(pct: float) -> str:
-    return "A" if pct >= 0.75 else "B" if pct >= 0.5 else "C"
+def _tier_for(pct: float, a_min: int = 75, b_min: int = 50) -> str:
+    """pct is a 0–1 fraction; thresholds are the org's configured percentages."""
+    p = pct * 100
+    return "A" if p >= a_min else "B" if p >= b_min else "C"
 
 
 class AssessmentService:
@@ -260,6 +265,20 @@ class AssessmentService:
             tiers.setdefault(b.student_id, b.tier)
         return tiers
 
+    # ── band config (SC-5) ───────────────────────────────────────────────────
+    def band_config(self, m: CurrentMember) -> BandConfig:
+        org = self.db.get(Organization, m.org_id)
+        return BandConfig(a_min=org.band_a_min, b_min=org.band_b_min)
+
+    def set_band_config(self, m: CurrentMember, body: BandConfig) -> BandConfig:
+        if body.b_min >= body.a_min:
+            raise ValidationError("The B threshold must be below the A threshold.")
+        org = self.db.get(Organization, m.org_id)
+        org.band_a_min = body.a_min
+        org.band_b_min = body.b_min
+        self.db.flush()
+        return self.band_config(m)
+
     def band_board(self, m: CurrentMember, class_id: uuid.UUID, term_id: uuid.UUID | None) -> BandBoard:
         students = list(self.db.scalars(
             select(Student).where(Student.org_id == m.org_id, Student.class_id == class_id)
@@ -267,12 +286,13 @@ class AssessmentService:
         sids = [s.id for s in students]
         tiers = self._current_tiers(m, sids, term_id)
         pcts = self._latest_pcts(m, sids)
+        cfg = self.band_config(m)
         rows: list[BandRow] = []
         for st in students:
             pct = pcts.get(st.id, (None, None))[0]
             rows.append(BandRow(
                 student_id=st.id, full_name=st.full_name, current_tier=tiers.get(st.id),
-                suggested_tier=_tier_for(pct) if pct is not None else None,
+                suggested_tier=_tier_for(pct, cfg.a_min, cfg.b_min) if pct is not None else None,
                 latest_pct=round(pct * 100, 1) if pct is not None else None))
         return BandBoard(class_id=class_id, term_id=term_id, rows=rows)
 
@@ -290,9 +310,10 @@ class AssessmentService:
             Student.status == "active")))
         tiers = self._current_tiers(m, sids, term_id)
         pcts = self._latest_pcts(m, sids)
+        cfg = self.band_config(m)
         applied = 0
         for sid, (pct, cycle_name) in pcts.items():
-            suggested = _tier_for(pct)
+            suggested = _tier_for(pct, cfg.a_min, cfg.b_min)
             if tiers.get(sid) == suggested:
                 continue
             self.db.add(StudentBand(
@@ -301,6 +322,44 @@ class AssessmentService:
             applied += 1
         self.db.flush()
         return applied
+
+    def categorize_from_cycle(self, m: CurrentMember, cycle_id: uuid.UUID) -> BandCategorizeOut:
+        """One tap after a band test: tier every scored student of that class by
+        the org's thresholds, appending a band row where the tier moved (law 3 —
+        the movement history stays intact and each row names its source test)."""
+        cycle = self._cycle(m, cycle_id)
+        if cycle.class_id is None:
+            raise ValidationError("Categorization runs on a class-scoped test.",
+                                  code="class_scoped_only")
+        cfg = self.band_config(m)
+        students = list(self.db.scalars(select(Student).where(
+            Student.org_id == m.org_id, Student.class_id == cycle.class_id,
+            Student.status == "active")))
+        sids = [s.id for s in students]
+        totals: dict[uuid.UUID, list[float]] = {}
+        for sc in self.db.scalars(select(AssessmentScore).where(
+                AssessmentScore.org_id == m.org_id, AssessmentScore.cycle_id == cycle.id)):
+            pair = totals.setdefault(sc.student_id, [0.0, 0.0])
+            pair[0] += float(sc.score)
+            pair[1] += float(sc.max_score)
+        tiers = self._current_tiers(m, sids, cycle.term_id)
+        counts = {"A": 0, "B": 0, "C": 0, "no_score": 0}
+        applied = 0
+        for st in students:
+            pair = totals.get(st.id)
+            if not pair or not pair[1]:
+                counts["no_score"] += 1
+                continue
+            tier = _tier_for(pair[0] / pair[1], cfg.a_min, cfg.b_min)
+            counts[tier] += 1
+            if tiers.get(st.id) == tier:
+                continue
+            self.db.add(StudentBand(
+                org_id=m.org_id, student_id=st.id, term_id=cycle.term_id, tier=tier,
+                set_by=m.user_id, note=f"band test: {cycle.name}"))
+            applied += 1
+        self.db.flush()
+        return BandCategorizeOut(applied=applied, counts=counts)
 
     def current_band_map(self, m: CurrentMember) -> dict[str, str]:
         """student_id -> newest overall tier for the whole org, one query.

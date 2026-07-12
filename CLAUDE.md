@@ -229,6 +229,25 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   check flags, observations, test scores; plus skill profile, latest band + history (staff-only,
   P4 intact) and derived **growth areas** phrases. Access: admin = all students, teacher = only
   students in classes they teach (`not_your_student` 403). `test_growth.py` (4).
+- **SC-5 (exam-first scores + band categorization screens) COMPLETE** — migration
+  `fb2c3d4e5f6a` (head). The Students→Scores tab is now exam-first: landing = class cards
+  (teacher sees only taught classes via `/academics/classes?mine=true`; admin all) + a feed of
+  previous exams (`GET /assessments/exams`, batched summaries: avg %, scored/roster, evidence
+  page count, author). `assessment_cycles` gains `topic`/`total_marks`/`student_ids` (few-students
+  subset; NULL = whole class)/`created_by_member_id` + widened types (chapter_test, class_test,
+  slip_test, objective, band_test). `/students/scores/[classId]` = capture page with
+  **Whole class | Few students** tabs (few = pick who sat it first); `ExamCapture` component:
+  drop photos/PDF **before** any typing → cycle-less **draft capture** (`score_captures.cycle_id`
+  now nullable, `parsed_meta` = AI-read header with deterministic subject match) prefills
+  title/subject/total/topic + matched marks → review step → `POST /assessments/exams` creates the
+  cycle + scores + files the capture as evidence in one transaction. Saved exams reopen at
+  `/students/scores/exam/[cycleId]` (full-replace edit; org-wide/diagnostic cycles fall back to
+  the score grid there). Bands: landing = class buttons + **three-column A/B/C table**, admin
+  threshold config (`organizations.band_a_min/band_b_min`, GET/PUT `/assessments/bands/config`);
+  `/students/bands/[classId]` records a `band_test` (admin-only) and `POST
+  /assessments/bands/categorize` re-tiers the class from that cycle's results (append-only rows
+  naming the source test). `test_exams.py` (5). Backend 205 passing-equivalent (suite +5), ruff
+  clean; web tsc + eslint + build clean.
 - **`test_doc/`** — dummy xlsx/txt fixtures for the roster, staff and syllabus importers, plus the
   generator that writes them. Each carries rows meant to fail (missing name, unresolvable
   class-subject, duplicates of seeded rows) so the `errors`/`skipped`/`unresolved` surfaces get

@@ -142,11 +142,11 @@ def test_capture_flow_ai_off_then_parse_then_confirm(client, cleanup, monkeypatc
     monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
     monkeypatch.setattr(
         "app.services.score_capture.extract_marksheet",
-        lambda filename, data: [
+        lambda filename, data: {"meta": None, "rows": [
             {"name_text": "Asha Reddy", "roll_text": None, "score": 18, "max_score": 20},
             {"name_text": "Bharath Kumar", "roll_text": None, "score": 9, "max_score": 20},
             {"name_text": "Unknown Kid", "roll_text": None, "score": 7, "max_score": 20},
-        ])
+        ]})
     parsed = client.post(f"/api/v1/assessments/captures/{cap['id']}/parse", headers=h).json()
     assert parsed["status"] == "parsed" and parsed["parse_error"] is None
     rows = parsed["parsed_rows"]

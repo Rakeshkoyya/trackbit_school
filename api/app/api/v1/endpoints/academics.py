@@ -127,10 +127,12 @@ def delete_subject(subject_id: uuid.UUID, m: CurrentMember = Depends(require_adm
 
 
 # ── classes ──────────────────────────────────────────────────────────────────
+# mine=true narrows a teacher to classes they teach a subject in (admins always
+# see all) — the scores/bands landings show "your classes" (SC-5).
 @router.get("/classes", response_model=list[ClassOut])
-def list_classes(year_id: uuid.UUID | None = None,
+def list_classes(year_id: uuid.UUID | None = None, mine: bool = False,
                  m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
-    return AcademicService(db).list_classes(m, year_id)
+    return AcademicService(db).list_classes(m, year_id, mine=mine)
 
 
 @router.post("/classes", response_model=ClassOut)

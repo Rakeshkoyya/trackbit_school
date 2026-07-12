@@ -54,13 +54,17 @@ class SkillArea(Base, UUIDPKMixin, CreatedAtMixin):
     __table_args__ = (UniqueConstraint("org_id", "name", name="uq_skill_areas_org_id"),)
 
 
+CYCLE_TYPES = ("diagnostic", "unit_test", "term_exam", "daily_test",
+               "chapter_test", "class_test", "slip_test", "objective", "band_test")
+
+
 class AssessmentCycle(Base, UUIDPKMixin, CreatedAtMixin):
     __tablename__ = "assessment_cycles"
 
     org_id: Mapped[uuid.UUID] = _org_fk()
     term_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("terms.id", ondelete="CASCADE"), nullable=False)
-    type: Mapped[str] = mapped_column(Text, nullable=False)  # diagnostic|unit_test|term_exam|daily_test
+    type: Mapped[str] = mapped_column(Text, nullable=False)  # one of CYCLE_TYPES
     name: Mapped[str] = mapped_column(Text, nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     # SC-1: a daily test is class × subject × date; NULL on both = org-wide cycle
@@ -69,10 +73,17 @@ class AssessmentCycle(Base, UUIDPKMixin, CreatedAtMixin):
         UUID(as_uuid=True), ForeignKey("school_classes.id", ondelete="CASCADE"), nullable=True)
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("subjects.id", ondelete="CASCADE"), nullable=True)
+    # SC-5: the paper's own metadata — what was tested and out of how much.
+    topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_marks: Mapped[float | None] = mapped_column(_SCORE, nullable=True)
+    # A few-students test: only these students sat it. NULL = the whole class.
+    student_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('diagnostic', 'unit_test', 'term_exam', 'daily_test')",
+            "type IN ({})".format(", ".join(f"'{t}'" for t in CYCLE_TYPES)),
             name="type_valid"),
     )
 
@@ -137,9 +148,11 @@ class ScoreCapture(Base, UUIDPKMixin, CreatedAtMixin):
     __tablename__ = "score_captures"
 
     org_id: Mapped[uuid.UUID] = _org_fk()
-    cycle_id: Mapped[uuid.UUID] = mapped_column(
+    # NULL = a draft exam capture: papers dropped first, the cycle is created
+    # when the human saves the reviewed exam (SC-5).
+    cycle_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("assessment_cycles.id", ondelete="CASCADE"),
-        nullable=False, index=True)
+        nullable=True, index=True)
     class_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("school_classes.id", ondelete="CASCADE"), nullable=False)
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -149,6 +162,11 @@ class ScoreCapture(Base, UUIDPKMixin, CreatedAtMixin):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="uploaded")
     # [{name_text, roll_text, score, max_score, student_id, confidence, candidates}]
     parsed_rows: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # AI-read exam header {title, subject_text, subject_id, total_marks, topic, date}
+    # — proposals only, the human-confirm form is what persists (§8).
+    parsed_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Few-students capture: the picked subset. NULL = the whole class roster.
+    student_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)  # ai_off|unreadable_page
     created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True)
@@ -161,7 +179,8 @@ class ScoreCapture(Base, UUIDPKMixin, CreatedAtMixin):
         order_by="ScoreCapturePage.page_no")
 
     __table_args__ = (
-        CheckConstraint("num_nonnulls(subject_id, skill_area_id) = 1", name="capture_one_target"),
+        # At most one — a draft capture's subject is unknown until the parse.
+        CheckConstraint("num_nonnulls(subject_id, skill_area_id) <= 1", name="capture_one_target"),
         CheckConstraint("status IN ('uploaded', 'parsed', 'confirmed', 'discarded')",
                         name="status_valid"),
     )
