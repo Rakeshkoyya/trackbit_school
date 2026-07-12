@@ -698,7 +698,9 @@ export interface Digest {
 // â”€â”€ assessments & bands (M3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface SkillArea { id: string; name: string; position: number }
 
-export type CycleType = "diagnostic" | "unit_test" | "term_exam" | "daily_test";
+export type CycleType =
+  | "diagnostic" | "unit_test" | "term_exam" | "daily_test"
+  | "chapter_test" | "class_test" | "slip_test" | "objective" | "band_test";
 export interface Cycle {
   id: string;
   term_id: string;
@@ -707,6 +709,78 @@ export interface Cycle {
   date: string;
   class_id: string | null;
   subject_id: string | null;
+  topic: string | null;
+  total_marks: number | null;
+  student_ids: string[] | null;
+}
+
+// ── exams (SC-5) — the scores screen's exam-first surface ────────────────────
+export interface ExamSummary {
+  id: string;
+  type: CycleType;
+  name: string;
+  date: string;
+  class_id: string | null;
+  class_label: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  topic: string | null;
+  total_marks: number | null;
+  few_students: boolean;
+  roster_count: number;
+  scored_count: number;
+  avg_pct: number | null;
+  verified: boolean;
+  created_by_name: string | null;
+  page_count: number;
+  /** Org-wide / diagnostic cycles open in the score grid, not the exam page. */
+  grid_only: boolean;
+}
+
+export interface ExamRosterRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  score: number | null;
+  max_score: number | null;
+}
+
+export interface ExamDetail {
+  id: string;
+  type: CycleType;
+  name: string;
+  date: string;
+  class_id: string;
+  class_label: string;
+  subject_id: string;
+  subject_name: string;
+  topic: string | null;
+  total_marks: number | null;
+  student_ids: string[] | null;
+  verified: boolean;
+  avg_pct: number | null;
+  rows: ExamRosterRow[];
+  pages: CapturePage[];
+}
+
+export interface ExamSaveBody {
+  cycle_id?: string;
+  class_id: string;
+  subject_id: string;
+  type: string;
+  name: string;
+  date: string;
+  topic?: string | null;
+  total_marks: number;
+  student_ids?: string[] | null;
+  capture_id?: string | null;
+  rows: { student_id: string; score: number; max_score?: number | null }[];
+}
+
+export interface BandConfig { a_min: number; b_min: number }
+export interface BandCategorizeResult {
+  applied: number;
+  counts: Record<string, number>; // A/B/C/no_score
 }
 
 // ── photo score capture (SC-2) ───────────────────────────────────────────────
@@ -721,9 +795,18 @@ export interface CaptureParsedRow {
   candidates: { student_id: string; full_name: string }[];
 }
 export interface CaptureRosterRow { student_id: string; full_name: string; roll_no: string | null }
+/** The AI-read exam header — a form prefill, never persisted as-is. */
+export interface CaptureParsedMeta {
+  title: string | null;
+  subject_text: string | null;
+  subject_id: string | null;
+  total_marks: number | null;
+  topic: string | null;
+  date: string | null;
+}
 export interface Capture {
   id: string;
-  cycle_id: string;
+  cycle_id: string | null;
   class_id: string;
   subject_id: string | null;
   skill_area_id: string | null;
@@ -731,12 +814,14 @@ export interface Capture {
   parse_error: string | null;
   pages: CapturePage[];
   parsed_rows: CaptureParsedRow[] | null;
+  parsed_meta: CaptureParsedMeta | null;
+  student_ids: string[] | null;
   roster: CaptureRosterRow[];
   created_at: string;
 }
 export interface CaptureSummary {
   id: string;
-  cycle_id: string;
+  cycle_id: string | null;
   class_id: string;
   subject_id: string | null;
   skill_area_id: string | null;

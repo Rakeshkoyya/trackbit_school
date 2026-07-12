@@ -21,10 +21,14 @@ class SkillAreaCreate(BaseModel):
 
 
 # ── cycles ───────────────────────────────────────────────────────────────────
+_TYPE_PATTERN = ("^(diagnostic|unit_test|term_exam|daily_test|chapter_test|class_test"
+                 "|slip_test|objective|band_test)$")
+
+
 class CycleCreate(BaseModel):
     # term_id omitted = derive the term covering `date` (daily-test quick create).
     term_id: uuid.UUID | None = None
-    type: str = Field(pattern="^(diagnostic|unit_test|term_exam|daily_test)$")
+    type: str = Field(pattern=_TYPE_PATTERN)
     name: str = Field(min_length=1, max_length=120)
     date: Date
     # A daily test is class × subject × date; org-wide cycles leave both NULL.
@@ -41,6 +45,9 @@ class CycleOut(BaseModel):
     date: Date
     class_id: uuid.UUID | None = None
     subject_id: uuid.UUID | None = None
+    topic: str | None = None
+    total_marks: float | None = None
+    student_ids: list[uuid.UUID] | None = None
 
 
 # ── scores / grid ────────────────────────────────────────────────────────────
@@ -80,10 +87,13 @@ class ScoreGrid(BaseModel):
 
 # ── photo score capture (SC-1) ───────────────────────────────────────────────
 class CaptureCreate(BaseModel):
-    cycle_id: uuid.UUID
+    # NULL cycle = draft exam capture (SC-5): the cycle is created on exam save.
+    cycle_id: uuid.UUID | None = None
     class_id: uuid.UUID
-    subject_id: uuid.UUID | None = None      # exactly one of subject/skill
+    subject_id: uuid.UUID | None = None      # at most one of subject/skill
     skill_area_id: uuid.UUID | None = None
+    # Few-students capture: only these students sat the test.
+    student_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)
 
 
 class CapturePageOut(BaseModel):
@@ -114,9 +124,19 @@ class CaptureRosterRow(BaseModel):
     roll_no: str | None = None
 
 
+class CaptureParsedMeta(BaseModel):
+    """The AI-read exam header — a form prefill, never persisted as-is (§8)."""
+    title: str | None = None
+    subject_text: str | None = None
+    subject_id: uuid.UUID | None = None      # deterministic match, or None
+    total_marks: float | None = None
+    topic: str | None = None
+    date: str | None = None
+
+
 class CaptureOut(BaseModel):
     id: uuid.UUID
-    cycle_id: uuid.UUID
+    cycle_id: uuid.UUID | None
     class_id: uuid.UUID
     subject_id: uuid.UUID | None
     skill_area_id: uuid.UUID | None
@@ -124,13 +144,15 @@ class CaptureOut(BaseModel):
     parse_error: str | None
     pages: list[CapturePageOut]
     parsed_rows: list[CaptureParsedRow] | None
+    parsed_meta: CaptureParsedMeta | None
+    student_ids: list[uuid.UUID] | None
     roster: list[CaptureRosterRow]
     created_at: object
 
 
 class CaptureSummary(BaseModel):
     id: uuid.UUID
-    cycle_id: uuid.UUID
+    cycle_id: uuid.UUID | None
     class_id: uuid.UUID
     subject_id: uuid.UUID | None
     skill_area_id: uuid.UUID | None
@@ -149,7 +171,96 @@ class CaptureConfirmIn(BaseModel):
     rows: list[CaptureConfirmRow] = Field(min_length=1, max_length=5000)
 
 
+# ── exams (SC-5) — the scores screen's exam-first surface ────────────────────
+class ExamRowIn(BaseModel):
+    student_id: uuid.UUID
+    score: float = Field(ge=0)
+    # Omitted = the exam's total_marks.
+    max_score: float | None = Field(default=None, gt=0)
+
+
+class ExamSaveIn(BaseModel):
+    # Set = edit that exam in place; omitted = create.
+    cycle_id: uuid.UUID | None = None
+    class_id: uuid.UUID
+    subject_id: uuid.UUID
+    type: str = Field(pattern=_TYPE_PATTERN)
+    name: str = Field(min_length=1, max_length=120)
+    date: Date
+    topic: str | None = Field(default=None, max_length=200)
+    total_marks: float = Field(default=100, gt=0)
+    # Few-students test: only these students sat it. None = the whole class.
+    student_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)
+    # A draft photo capture to file as this exam's evidence.
+    capture_id: uuid.UUID | None = None
+    rows: list[ExamRowIn] = Field(default_factory=list, max_length=5000)
+
+
+class ExamSummary(BaseModel):
+    id: uuid.UUID
+    type: str
+    name: str
+    date: Date
+    class_id: uuid.UUID | None
+    class_label: str | None          # None = org-wide cycle ("all classes")
+    subject_id: uuid.UUID | None
+    subject_name: str | None
+    topic: str | None
+    total_marks: float | None
+    few_students: bool
+    roster_count: int
+    scored_count: int
+    avg_pct: float | None
+    verified: bool
+    created_by_name: str | None
+    page_count: int                  # photo evidence pages
+    # Org-wide / diagnostic cycles have no single-subject exam page — they open
+    # in the score grid instead.
+    grid_only: bool
+
+
+class ExamRosterRow(BaseModel):
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None
+    score: float | None
+    max_score: float | None
+
+
+class ExamDetail(BaseModel):
+    id: uuid.UUID
+    type: str
+    name: str
+    date: Date
+    class_id: uuid.UUID
+    class_label: str
+    subject_id: uuid.UUID
+    subject_name: str
+    topic: str | None
+    total_marks: float | None
+    student_ids: list[uuid.UUID] | None
+    verified: bool
+    avg_pct: float | None
+    rows: list[ExamRosterRow]
+    pages: list[CapturePageOut]
+
+
 # ── bands ────────────────────────────────────────────────────────────────────
+class BandConfig(BaseModel):
+    """Categorization thresholds: pct >= a_min → A, >= b_min → B, else C."""
+    a_min: int = Field(ge=2, le=100)
+    b_min: int = Field(ge=1, le=99)
+
+
+class BandCategorizeIn(BaseModel):
+    cycle_id: uuid.UUID
+
+
+class BandCategorizeOut(BaseModel):
+    applied: int          # students whose band moved (appended rows)
+    counts: dict          # {"A": n, "B": n, "C": n, "no_score": n}
+
+
 class BandRow(BaseModel):
     student_id: uuid.UUID
     full_name: str

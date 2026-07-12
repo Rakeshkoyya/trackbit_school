@@ -1,128 +1,133 @@
 "use client";
 
+/**
+ * Scores landing (SC-5) — pick a class to record a test, scroll the feed of
+ * previous exams below. Teachers see the classes they teach; the admin sees
+ * all. Each feed card opens the saved exam for review/edit.
+ */
+
 import { useQuery } from "@tanstack/react-query";
-import { Camera, ClipboardList, Plus } from "lucide-react";
+import { Camera, ChevronRight, ClipboardList, GraduationCap, Plus, Users } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { NewCycleSheet, ScoreGrid, useClassPick } from "@/components/school/assessments";
-import { CaptureReview, useStartCapture } from "@/components/school/score-capture";
+import { NewCycleSheet } from "@/components/school/assessments";
+import { EXAM_TYPE_LABEL } from "@/components/school/exam-capture";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
-import { Sheet } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
 import { schoolApi } from "@/lib/school-api";
-import type { Cycle } from "@/lib/school-types";
+import type { ExamSummary } from "@/lib/school-types";
 
-/** Pick the capture target (subject or skill area) and start the photo flow. */
-function StartCaptureSheet({ cycle, classId, open, onOpenChange, onStarted }: {
-  cycle: Cycle | undefined; classId: string; open: boolean;
-  onOpenChange: (v: boolean) => void; onStarted: (id: string) => void;
-}) {
-  const [target, setTarget] = useState("");
-  const isDiagnostic = cycle?.type === "diagnostic";
-  const { data: subjects = [] } = useQuery({ queryKey: ["subjects"], queryFn: schoolApi.subjects, enabled: open && !isDiagnostic });
-  const { data: skills = [] } = useQuery({ queryKey: ["skills"], queryFn: schoolApi.skillAreas, enabled: open && isDiagnostic });
-  const options = isDiagnostic ? skills : (cycle?.subject_id ? subjects.filter((s) => s.id === cycle.subject_id) : subjects);
-  const effTarget = options.some((o) => o.id === target) ? target : (options[0]?.id ?? "");
-  const start = useStartCapture((id) => { onOpenChange(false); onStarted(id); });
-
+function ExamPost({ exam }: { exam: ExamSummary }) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} title="Scores from photo">
-      <div className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Photograph the evaluated papers or your mark register. The system reads the
-          names and marks; you review and confirm — nothing is saved until you do.
-        </p>
-        <div>
-          <Label>{isDiagnostic ? "Skill area" : "Subject"}</Label>
-          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm"
-            value={effTarget} onChange={(e) => setTarget(e.target.value)}>
-            {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
+    <Link href={`/students/scores/exam/${exam.id}`}
+      className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="text-sm font-semibold">{exam.name}</p>
+          <Badge tone="neutral">{EXAM_TYPE_LABEL[exam.type] ?? exam.type}</Badge>
+          {exam.class_label ? <Badge tone="neutral">{exam.class_label}</Badge> : <Badge tone="neutral">All classes</Badge>}
+          {exam.subject_name ? <Badge tone="neutral">{exam.subject_name}</Badge> : null}
+          {exam.few_students ? <Badge tone="warning"><Users className="h-3 w-3" /> {exam.roster_count} students</Badge> : null}
         </div>
-        <Button className="w-full" disabled={start.isPending || !effTarget || !cycle}
-          onClick={() => start.mutate({
-            cycle_id: cycle!.id, class_id: classId,
-            ...(isDiagnostic ? { skill_area_id: effTarget } : { subject_id: effTarget }) })}>
-          <Camera className="h-4 w-4" /> Start
-        </Button>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {exam.date}
+          {exam.topic ? ` · ${exam.topic}` : ""}
+          {exam.total_marks ? ` · out of ${exam.total_marks}` : ""}
+          {exam.created_by_name ? ` · by ${exam.created_by_name}` : ""}
+          {exam.page_count ? ` · ${exam.page_count} photo${exam.page_count === 1 ? "" : "s"}` : ""}
+        </p>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{exam.scored_count}</span>
+          {exam.roster_count ? `/${exam.roster_count}` : ""} marks recorded
+          {exam.verified ? " · verified" : ""}
+        </p>
       </div>
-    </Sheet>
+      <div className="shrink-0 text-right">
+        {exam.avg_pct != null ? (
+          <>
+            <p className="text-2xl font-bold tabular-nums">{exam.avg_pct}%</p>
+            <p className="text-[11px] text-muted-foreground">class average</p>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">no marks yet</p>
+        )}
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </Link>
   );
 }
 
 function ScoresInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin";
+  const isAdmin = me?.org_role === "admin";
   const { yearId } = useYear();
-  const { classes, classId, setClassId } = useClassPick(yearId);
-  const [pickedCycle, setPickedCycle] = useState("");
   const [newCycle, setNewCycle] = useState(false);
-  const [startCapture, setStartCapture] = useState(false);
-  const [activeCapture, setActiveCapture] = useState<string | null>(null);
 
-  const { data: terms = [] } = useQuery({ queryKey: ["terms", yearId], queryFn: () => schoolApi.terms(yearId ?? undefined), enabled: !!yearId });
-  const { data: cycles = [] } = useQuery({ queryKey: ["cycles", yearId], queryFn: () => schoolApi.cycles(), enabled: !!yearId });
-  const cycleId = cycles.some((c) => c.id === pickedCycle) ? pickedCycle : (cycles[0]?.id ?? "");
-  const cycle = cycles.find((c) => c.id === cycleId);
-  const termId = terms[0]?.id ?? null;
-
-  // Unfinished photo captures for this cycle+class — resumable in one tap.
-  const { data: pending = [] } = useQuery({
-    queryKey: ["captures", cycleId, classId],
-    queryFn: () => schoolApi.captures({ cycleId, classId }),
-    enabled: !!cycleId && !!classId,
-    select: (rows) => rows.filter((r) => r.status === "uploaded" || r.status === "parsed"),
+  const { data: classes = [] } = useQuery({
+    queryKey: ["classes", yearId, !isAdmin],
+    queryFn: () => schoolApi.classes(yearId!, !isAdmin),
+    enabled: !!yearId,
   });
+  const { data: terms = [] } = useQuery({ queryKey: ["terms", yearId], queryFn: () => schoolApi.terms(yearId ?? undefined), enabled: !!yearId });
+  const { data: feed = [], isLoading } = useQuery({ queryKey: ["exam-feed"], queryFn: () => schoolApi.examFeed({ limit: 30 }) });
 
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <PageHeader title="Scores" subtitle="Diagnostics, unit tests, term exams & daily tests" />
+        <PageHeader title="Scores" subtitle="Record a test's results, browse previous exams" />
         <div className="flex items-center gap-2">
           <YearSwitcher />
-          <select className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm" value={classId} onChange={(e) => setClassId(e.target.value)}>
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.name}{c.section ? `-${c.section}` : ""}</option>)}
-          </select>
+          {isAdmin ? (
+            <Button size="sm" variant="outline" onClick={() => setNewCycle(true)}>
+              <Plus className="h-4 w-4" /> New cycle
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select className="rounded-md border border-border bg-card px-2 py-1.5 text-sm" value={cycleId} onChange={(e) => { setPickedCycle(e.target.value); setActiveCapture(null); }}>
-          {cycles.length === 0 ? <option value="">No cycles</option> : null}
-          {cycles.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.type.replace("_", " ")})</option>)}
-        </select>
-        {cycleId && classId ? (
-          <Button size="sm" variant="outline" onClick={() => setStartCapture(true)}>
-            <Camera className="h-4 w-4" /> From photo
-          </Button>
-        ) : null}
-        {canEdit ? <Button size="sm" variant="outline" onClick={() => setNewCycle(true)}><Plus className="h-4 w-4" /> New cycle</Button> : null}
-        {pending.map((p) => (
-          <button key={p.id} onClick={() => setActiveCapture(p.id)}>
-            <Badge tone="warning"><Camera className="h-3 w-3" /> {p.status === "parsed" ? "review pending" : `photo capture (${p.page_count} pages)`}</Badge>
-          </button>
+      {/* 1 · pick a class to record a test */}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {classes.map((c) => (
+          <Link key={c.id} href={`/students/scores/${c.id}`}
+            className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.99]">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+              <GraduationCap className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold">
+                Class {c.name}{c.section ? `-${c.section}` : ""}
+              </span>
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Camera className="h-3 w-3" /> record a test
+              </span>
+            </span>
+          </Link>
         ))}
+        {classes.length === 0 ? (
+          <p className="col-span-full rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+            {isAdmin ? "No classes in this year yet — set them up first." : "No classes assigned to you yet."}
+          </p>
+        ) : null}
       </div>
 
-      {activeCapture ? (
-        <CaptureReview captureId={activeCapture} onDone={() => setActiveCapture(null)} />
-      ) : cycleId && classId ? (
-        <ScoreGrid cycleId={cycleId} classId={classId} canVerify={canEdit} />
-      ) : (
-        <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          <ClipboardList className="mx-auto mb-2 h-6 w-6" /> Create a cycle to record scores.
-        </p>
-      )}
+      {/* 2 · previous exams */}
+      <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Previous exams</h2>
+      <div className="space-y-2.5">
+        {feed.map((exam) => <ExamPost key={exam.id} exam={exam} />)}
+        {!isLoading && feed.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            <ClipboardList className="mx-auto mb-2 h-6 w-6" /> No exams recorded yet — tap a class above to record the first one.
+          </p>
+        ) : null}
+      </div>
 
-      <NewCycleSheet open={newCycle} onOpenChange={setNewCycle} termId={termId} yearId={yearId} />
-      <StartCaptureSheet cycle={cycle} classId={classId} open={startCapture}
-        onOpenChange={setStartCapture} onStarted={setActiveCapture} />
+      <NewCycleSheet open={newCycle} onOpenChange={setNewCycle} termId={terms[0]?.id ?? null} yearId={yearId} />
     </div>
   );
 }

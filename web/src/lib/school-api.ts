@@ -41,7 +41,9 @@ export const schoolApi = {
   createSubject: (name: string) => api.post<Subject>("/academics/subjects", { name }),
   deleteSubject: (id: string) => api.del<{ message: string }>(`/academics/subjects/${id}`),
 
-  classes: (yearId?: string) => api.get<SchoolClass[]>(`/academics/classes${qs({ year_id: yearId })}`),
+  /** mine narrows a teacher to classes they teach (admins always get all). */
+  classes: (yearId?: string, mine?: boolean) =>
+    api.get<SchoolClass[]>(`/academics/classes${qs({ year_id: yearId, mine: mine ? "true" : undefined })}`),
   createClass: (b: { academic_year_id: string; name: string; section?: string | null }) =>
     api.post<SchoolClass>("/academics/classes", b),
   deleteClass: (id: string) => api.del<{ message: string }>(`/academics/classes/${id}`),
@@ -332,9 +334,25 @@ export const schoolApi = {
   cycles: (termId?: string) => api.get<import("@/lib/school-types").Cycle[]>(`/assessments/cycles${qs({ term_id: termId })}`),
   createCycle: (b: { term_id?: string; type: string; name: string; date: string; class_id?: string; subject_id?: string }) =>
     api.post<import("@/lib/school-types").Cycle>("/assessments/cycles", b),
+  // exams (SC-5): the scores screen's exam-first surface.
+  examFeed: (opts?: { classId?: string; limit?: number }) =>
+    api.get<import("@/lib/school-types").ExamSummary[]>(
+      `/assessments/exams${qs({ class_id: opts?.classId, limit: opts?.limit ? String(opts.limit) : undefined })}`),
+  exam: (cycleId: string) =>
+    api.get<import("@/lib/school-types").ExamDetail>(`/assessments/exams/${cycleId}`),
+  saveExam: (b: import("@/lib/school-types").ExamSaveBody) =>
+    api.post<import("@/lib/school-types").ExamDetail>("/assessments/exams", b),
+  deleteCycle: (id: string) => api.del<{ message: string }>(`/assessments/cycles/${id}`),
+  bandConfig: () => api.get<import("@/lib/school-types").BandConfig>("/assessments/bands/config"),
+  setBandConfig: (b: import("@/lib/school-types").BandConfig) =>
+    api.put<import("@/lib/school-types").BandConfig>("/assessments/bands/config", b),
+  categorizeBands: (cycleId: string) =>
+    api.post<import("@/lib/school-types").BandCategorizeResult>(
+      "/assessments/bands/categorize", { cycle_id: cycleId }),
   // photo score capture (SC-2): photo → AI transcription → deterministic match →
   // human review grid → confirm. Scores persist only on confirm.
-  createCapture: (b: { cycle_id: string; class_id: string; subject_id?: string; skill_area_id?: string }) =>
+  // cycle_id omitted = a draft exam capture (SC-5), saved via saveExam.
+  createCapture: (b: { cycle_id?: string; class_id: string; subject_id?: string; skill_area_id?: string; student_ids?: string[] }) =>
     api.post<import("@/lib/school-types").Capture>("/assessments/captures", b),
   capture: (id: string) => api.get<import("@/lib/school-types").Capture>(`/assessments/captures/${id}`),
   captures: (opts?: { cycleId?: string; classId?: string }) =>

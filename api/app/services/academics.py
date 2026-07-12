@@ -169,12 +169,17 @@ class AcademicService:
         self.db.delete(self._scoped(Subject, m.org_id, subject_id))
 
     # ── classes ──────────────────────────────────────────────────────────────
-    def list_classes(self, m: CurrentMember, year_id: uuid.UUID | None) -> list[ClassOut]:
+    def list_classes(self, m: CurrentMember, year_id: uuid.UUID | None,
+                     mine: bool = False) -> list[ClassOut]:
         q = select(SchoolClass).where(SchoolClass.org_id == m.org_id).order_by(
             SchoolClass.name, SchoolClass.section
         )
         if year_id is not None:
             q = q.where(SchoolClass.academic_year_id == year_id)
+        if mine and not m.is_coordinator_up:
+            q = q.where(SchoolClass.id.in_(select(ClassSubject.class_id).where(
+                ClassSubject.org_id == m.org_id,
+                ClassSubject.teacher_member_id == m.membership.id)))
         return [ClassOut.model_validate(r) for r in self.db.scalars(q)]
 
     def create_class(self, m: CurrentMember, body: ClassCreate) -> ClassOut:

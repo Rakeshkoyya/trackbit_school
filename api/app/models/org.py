@@ -36,10 +36,16 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     razorpay_subscription_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Org-local hour for the admin report card (F7); configurable in settings.
     report_card_hour: Mapped[int] = mapped_column(Integer, nullable=False, server_default="18")
+    # Band categorization thresholds (SC-5): pct >= band_a_min → A,
+    # >= band_b_min → B, else C. Admin-configurable on the Bands screen.
+    band_a_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default="75")
+    band_b_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default="50")
 
     __table_args__ = (
         CheckConstraint("plan IN ('free', 'pro')", name="plan_valid"),
         CheckConstraint("plan_status IN ('none', 'active', 'grace')", name="plan_status_valid"),
+        CheckConstraint("band_b_min > 0 AND band_b_min < band_a_min AND band_a_min <= 100",
+                        name="band_thresholds_valid"),
     )
 
     def __repr__(self) -> str:

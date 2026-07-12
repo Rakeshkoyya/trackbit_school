@@ -10,11 +10,14 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_academic, require_coordinator_up
+from app.core.dependencies import require_academic, require_admin, require_coordinator_up
 from app.schemas.assessments import (
     BandApplyIn,
     BandApplyOut,
     BandBoard,
+    BandCategorizeIn,
+    BandCategorizeOut,
+    BandConfig,
     BandHistoryRow,
     BandSetIn,
     CaptureConfirmIn,
@@ -24,6 +27,9 @@ from app.schemas.assessments import (
     ClassAnalysis,
     CycleCreate,
     CycleOut,
+    ExamDetail,
+    ExamSaveIn,
+    ExamSummary,
     InterventionCreate,
     InterventionOut,
     ScoreGrid,
@@ -35,6 +41,7 @@ from app.schemas.assessments import (
 )
 from app.schemas.common import MessageResponse
 from app.services.assessments import AssessmentService
+from app.services.exams import ExamService
 from app.services.score_capture import ScoreCaptureService
 
 router = APIRouter()
@@ -104,6 +111,27 @@ def verify_scores(cycle_id: uuid.UUID, m: CurrentMember = Depends(require_coordi
                   db: Session = Depends(get_db)):
     AssessmentService(db).verify(m, cycle_id)
     return MessageResponse(message="Verified.")
+
+
+# ── exams (SC-5) — the scores screen's exam-first surface ────────────────────
+# require_academic; the service scopes a teacher to classes they teach and
+# keeps band tests admin-only.
+@router.get("/exams", response_model=list[ExamSummary])
+def exam_feed(class_id: uuid.UUID | None = None, limit: int = 30,
+              m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    return ExamService(db).feed(m, class_id, limit)
+
+
+@router.get("/exams/{cycle_id}", response_model=ExamDetail)
+def exam_detail(cycle_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                db: Session = Depends(get_db)):
+    return ExamService(db).detail(m, cycle_id)
+
+
+@router.post("/exams", response_model=ExamDetail)
+def save_exam(body: ExamSaveIn, m: CurrentMember = Depends(require_academic),
+              db: Session = Depends(get_db)):
+    return ExamService(db).save(m, body)
 
 
 # ── photo score capture (SC-1) ───────────────────────────────────────────────
@@ -177,6 +205,26 @@ def apply_band_suggestions(body: BandApplyIn, m: CurrentMember = Depends(require
                            db: Session = Depends(get_db)):
     n = AssessmentService(db).apply_band_suggestions(m, body.class_id, body.term_id)
     return BandApplyOut(applied=n)
+
+
+# ── band config + one-tap categorization (SC-5) ──────────────────────────────
+@router.get("/bands/config", response_model=BandConfig)
+def band_config(m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    return AssessmentService(db).band_config(m)
+
+
+@router.put("/bands/config", response_model=BandConfig)
+def set_band_config(body: BandConfig, m: CurrentMember = Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    return AssessmentService(db).set_band_config(m, body)
+
+
+# After a band test: tier every scored student of the class by the configured
+# thresholds (append-only band rows naming the source test).
+@router.post("/bands/categorize", response_model=BandCategorizeOut)
+def categorize_bands(body: BandCategorizeIn, m: CurrentMember = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    return AssessmentService(db).categorize_from_cycle(m, body.cycle_id)
 
 
 # student_id -> current tier for the whole org — staff-only directory chips (P4).
