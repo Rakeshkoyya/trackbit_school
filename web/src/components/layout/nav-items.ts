@@ -5,6 +5,7 @@ import {
   CheckSquare,
   GraduationCap,
   Settings2,
+  Sparkles,
   Sun,
   Wallet,
   type LucideIcon,
@@ -29,17 +30,19 @@ const tasks: NavItem = { label: "Tasks", href: "/tasks", icon: CheckSquare, tour
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
 const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
 const setup: NavItem = { label: "Setup", href: "/setup", icon: Settings2, tour: "nav-members" };
+const lucy: NavItem = { label: "Lucy", href: "/lucy", icon: Sparkles };
 
 // Role-aware primary nav (single source of truth for sidebar + bottom tabs).
-// SPRD2 §3 — teacher sidebar (5): My Day · Sessions · Plan · Students · Tasks.
-// Admin sidebar (6): Dashboard · Plan · Students · Fees · Tasks · Setup
-// (Members lives inside Setup). Hard rule (§2): teachers never see Fees/Setup.
+// SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
+// Hard rule (§2): teachers never see Fees/Setup. NOTE: bottom tabs cap at 5,
+// so Tasks falls off MOBILE tabs for both roles with Lucy inserted; it stays
+// in the desktop sidebar. Reorder here if that's the wrong trade.
 export function navForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [dashboard, plan, students, fees, tasks, setup];
+      return [dashboard, lucy, plan, students, fees, tasks, setup];
     case "teacher":
-      return [myDay, sessions, plan, students, tasks];
+      return [myDay, lucy, sessions, plan, students, tasks];
     default:
       return [tasks];
   }
