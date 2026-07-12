@@ -16,6 +16,7 @@ header). Event names: status · tool · text · widget · action · error · don
 
 import json
 import logging
+import threading
 import uuid
 from functools import partial
 
@@ -41,6 +42,7 @@ from app.services.lucy.agent import run_agent
 from app.services.lucy.service import (
     SUGGESTED_PROMPTS,
     LucyService,
+    autotitle,
     build_agent_context,
     lucy_session,
     member_session,
@@ -138,6 +140,13 @@ def send_message(request: Request, conversation_id: uuid.UUID, body: MessageIn,
                         final["content"], final["widgets"], final["trace"],
                         action_ids)
                     message_id = str(saved.id)
+                if not history:
+                    # First exchange — improve on the truncated-question title
+                    # off the stream's clock.
+                    threading.Thread(
+                        target=autotitle,
+                        args=(ctx.org_id, conversation_id, content),
+                        daemon=True).start()
             yield _sse("done", {"conversation_id": str(conversation_id),
                                 "message_id": message_id})
         except Exception:

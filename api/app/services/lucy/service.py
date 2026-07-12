@@ -11,6 +11,7 @@ StreamingResponse iterates) and, more importantly, because a session must never
 sit open across a 45-second model call on a 20-connection Postgres."""
 
 import json
+import logging
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -42,9 +43,12 @@ from app.schemas.lucy import (
     PendingActionOut,
     WidgetOut,
 )
+from app.services.ai.client import chat_json
 from app.services.lucy import registry
 from app.services.lucy.agent_context import AgentContext
 from app.services.lucy.widgets import WidgetConfigError, materialize
+
+logger = logging.getLogger(__name__)
 
 SUGGESTED_PROMPTS = {
     "admin": [
@@ -61,6 +65,26 @@ SUGGESTED_PROMPTS = {
         "Show the latest test results for my class",
     ],
 }
+
+
+def autotitle(org_id: uuid.UUID, conversation_id: uuid.UUID, question: str) -> None:
+    """Give a fresh conversation a short model-written title. Runs on a daemon
+    thread after the first exchange — never on the stream's clock; AI-off (or
+    any failure) just keeps the deterministic truncated-question title."""
+    data = chat_json(
+        "You title chats. Reply as JSON: {\"title\": \"...\"} — at most 6 words, "
+        "the user's language, no quotes or trailing punctuation.",
+        question[:500], model=settings.AI_MODEL_PARSE, max_tokens=60)
+    title = (data or {}).get("title")
+    if not isinstance(title, str) or not title.strip():
+        return
+    try:
+        with lucy_session(org_id) as db:
+            convo = db.get(LucyConversation, conversation_id)
+            if convo is not None and convo.org_id == org_id:
+                convo.title = title.strip()[:80]
+    except Exception:  # a failed nicety must never surface anywhere
+        logger.warning("lucy autotitle failed", exc_info=True)
 
 
 @contextmanager
