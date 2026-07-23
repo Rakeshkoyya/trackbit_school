@@ -86,6 +86,91 @@ def test_demo_requests_readable_only_by_super_admin(client, cleanup):
     _drop(posted["id"])
 
 
+def _as_super_admin(client, cleanup):
+    """A registered operator, promoted the only way the flag is ever granted."""
+    reg = _register(client, cleanup)
+    db = AdminSession()
+    try:
+        db.get(User, uuid.UUID(reg["user"]["id"])).is_super_admin = True
+        db.commit()
+    finally:
+        db.close()
+    return {"Authorization": f"Bearer {reg['access_token']}"}
+
+
+def test_status_and_remark_append_one_history_row(client, cleanup):
+    """Status moves and remarks are appended, never overwritten (law 3)."""
+    posted = client.post("/api/v1/marketing/demo-requests", json={
+        "school_name": "Green Valley", "contact_name": "Latha", "email": "latha@gv.edu",
+        "phone": "9222222222", "student_count": 700}).json()
+    h = _as_super_admin(client, cleanup)
+    rid = posted["id"]
+
+    # remark only — no status move recorded
+    r1 = client.post(f"/api/v1/marketing/demo-requests/{rid}/notes",
+                     json={"note": "  Called, asked us to ring back Monday.  "}, headers=h)
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["status"] == "new"
+    assert r1.json()["notes"][0]["note"] == "Called, asked us to ring back Monday."
+    assert r1.json()["notes"][0]["status_to"] is None
+    assert r1.json()["notes"][0]["author_name"] == "Operator"
+
+    # status move with a remark in the same action
+    r2 = client.post(f"/api/v1/marketing/demo-requests/{rid}/notes",
+                     json={"status": "scheduled", "note": "Demo booked for Friday."}, headers=h)
+    assert r2.status_code == 200, r2.text
+    detail = r2.json()
+    assert detail["status"] == "scheduled"          # cached on the lead
+    assert len(detail["notes"]) == 2                # appended, nothing rewritten
+    newest = detail["notes"][0]                     # newest first
+    assert (newest["status_from"], newest["status_to"]) == ("new", "scheduled")
+
+    # re-selecting the same status is not a move — the remark still lands
+    r3 = client.post(f"/api/v1/marketing/demo-requests/{rid}/notes",
+                     json={"status": "scheduled", "note": "Confirmed by email."}, headers=h)
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["notes"][0]["status_to"] is None
+    assert len(r3.json()["notes"]) == 3
+
+    # the list view carries the working state without opening the lead
+    listed = client.get("/api/v1/marketing/demo-requests", headers=h).json()
+    row = next(d for d in listed if d["id"] == rid)
+    assert row["status"] == "scheduled"
+    assert row["note_count"] == 3
+    _drop(rid)
+
+
+def test_note_rejects_empty_and_unknown_status(client, cleanup):
+    posted = client.post("/api/v1/marketing/demo-requests", json={
+        "school_name": "Blank Ltd", "contact_name": "B", "email": "b@blank.edu",
+        "phone": "9333333333"}).json()
+    h = _as_super_admin(client, cleanup)
+    rid = posted["id"]
+
+    assert client.post(f"/api/v1/marketing/demo-requests/{rid}/notes",
+                       json={"note": "   "}, headers=h).status_code == 422
+    assert client.post(f"/api/v1/marketing/demo-requests/{rid}/notes",
+                       json={"status": "archived"}, headers=h).status_code == 422
+    _drop(rid)
+
+
+def test_lead_history_is_super_admin_only(client, cleanup):
+    posted = client.post("/api/v1/marketing/demo-requests", json={
+        "school_name": "Private Eyes", "contact_name": "P", "email": "p@pe.edu",
+        "phone": "9444444444"}).json()
+    reg = _register(client, cleanup)          # an ordinary org admin
+    h = {"Authorization": f"Bearer {reg['access_token']}"}
+    rid = posted["id"]
+
+    assert client.get(f"/api/v1/marketing/demo-requests/{rid}").status_code == 401
+    denied = client.get(f"/api/v1/marketing/demo-requests/{rid}", headers=h)
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "super_admin_only"
+    assert client.post(f"/api/v1/marketing/demo-requests/{rid}/notes",
+                       json={"note": "sneaky"}, headers=h).status_code == 403
+    _drop(rid)
+
+
 def test_demo_request_row_carries_no_org(client):
     """A lead exists before its school does — nothing org-scoped may be required."""
     posted = client.post("/api/v1/marketing/demo-requests", json={

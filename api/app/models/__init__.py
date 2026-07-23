@@ -43,7 +43,7 @@ from app.models.lucy import (
     LucyPendingAction,
     LucyWidget,
 )
-from app.models.marketing import DemoRequest
+from app.models.marketing import DemoRequest, DemoRequestNote
 from app.models.notification import DeviceToken, Notification
 from app.models.onboarding import OnboardingState
 from app.models.org import Membership, Organization
@@ -89,6 +89,7 @@ __all__ = [
     "DailyCheck",
     "DailyReport",
     "DemoRequest",
+    "DemoRequestNote",
     "DeviceToken",
     "EVENT_TYPES",
     "ExamPortion",

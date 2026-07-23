@@ -323,6 +323,19 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   **ability radar** (diagnostic skill areas) beside subject performance, strengths | growth areas,
   score history, attendance by subject, then the chapter drill-down.
   `components/students/growth-analytics.tsx`. Bands stay staff-only (P4) throughout.
+- **EN-1 (enquiries desk, 2026-07-23)** — migration **`b3c4d5e6f7a8`** (head). The operator's inbox
+  for `demo_requests`: `demo_request_notes` is the **append-only** history on a lead (remark,
+  status move, or both in one row; `author_user_id` SET NULL so history outlives the account),
+  and `demo_requests.status` becomes the derived cache of the newest `status_to` — the
+  `plans.status` / `plan_approvals` shape (law 3). Re-selecting the current status is not a move:
+  the remark lands, `status_from/to` stay null. Platform-level like its parent — no `org_id`, no
+  RLS policy, `require_super_admin` on every read and write. New endpoints `GET
+  /marketing/demo-requests/{id}` + `POST /marketing/demo-requests/{id}/notes`; the list gains
+  `note_count`/`last_activity_at` from one grouped query and stays **unfiltered** so the screen's
+  status counts can't lie. Web: `/platform` is now a tabbed area (`layout.tsx` — Schools ·
+  Enquiries) with `/platform/enquiries` → `components/school/enquiries-screen.tsx` (status chips
+  with counts, search, lead rows, detail sheet with tel:/mailto:, status picker, remark box and
+  the history timeline). `test_marketing.py` +3.
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
