@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 
 import {
   AlertList,
+  DrilldownWidget,
   MarkdownWidget,
   ProgressList,
   RagBoard,
@@ -19,10 +20,14 @@ import {
 import { LucyTable } from "@/components/lucy/widgets/lucy-table";
 import type {
   AlertListData,
+  AreaChartData,
   ChartData,
   DonutData,
+  DrilldownData,
   MarkdownData,
+  MeterData,
   ProgressData,
+  RadarData,
   RagBoardData,
   ReportCardData,
   RosterGridData,
@@ -45,6 +50,15 @@ const LineChartW = dynamic(
 const DonutW = dynamic(
   () => import("@/components/lucy/widgets/charts").then((m) => m.LucyDonut),
   { ssr: false, loading: chartLoading });
+const MeterW = dynamic(
+  () => import("@/components/lucy/widgets/charts").then((m) => m.LucyMeter),
+  { ssr: false, loading: chartLoading });
+const RadarW = dynamic(
+  () => import("@/components/lucy/widgets/charts").then((m) => m.LucyRadar),
+  { ssr: false, loading: chartLoading });
+const AreaChartW = dynamic(
+  () => import("@/components/lucy/widgets/charts").then((m) => m.LucyAreaChart),
+  { ssr: false, loading: chartLoading });
 
 export function WidgetBody({ type, data }: { type: WidgetType; data: unknown }) {
   switch (type) {
@@ -52,7 +66,11 @@ export function WidgetBody({ type, data }: { type: WidgetType; data: unknown }) 
     case "stat_group": return <StatGroup data={data as StatGroupData} />;
     case "bar_chart": return <BarChartW data={data as ChartData} />;
     case "line_chart": return <LineChartW data={data as ChartData} />;
+    case "area_chart": return <AreaChartW data={data as AreaChartData} />;
     case "donut": return <DonutW data={data as DonutData} />;
+    case "meter": return <MeterW data={data as MeterData} />;
+    case "radar": return <RadarW data={data as RadarData} />;
+    case "drilldown": return <DrilldownWidget data={data as DrilldownData} />;
     case "rag_board": return <RagBoard data={data as RagBoardData} />;
     case "roster_grid": return <RosterGrid data={data as RosterGridData} />;
     case "timeline": return <TimelineWidget data={data as TimelineData} />;

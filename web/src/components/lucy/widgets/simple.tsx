@@ -5,11 +5,14 @@
 // server-materialized payload; the markdown widget is the one model-prose
 // surface and is rendered as escaped React nodes, never raw HTML.
 
-import { AlertTriangle, CheckCircle2, CircleAlert, Info } from "lucide-react";
+import { useState } from "react";
+
+import { AlertTriangle, CheckCircle2, ChevronRight, CircleAlert, Info } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type {
   AlertListData,
+  DrilldownData,
   MarkdownData,
   ProgressData,
   RagBoardData,
@@ -110,6 +113,51 @@ export function RosterGrid({ data }: { data: RosterGridData }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// --- drilldown ---------------------------------------------------------------------
+
+export function DrilldownWidget({ data }: { data: DrilldownData }) {
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  return (
+    <ul className="space-y-1.5">
+      {data.groups.map((g, i) => (
+        <li key={i} className="rounded-lg border border-border">
+          <button type="button"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left"
+            onClick={() => setOpen((o) => ({ ...o, [i]: !o[i] }))}>
+            <ChevronRight
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                open[i] ? "rotate-90" : ""}`} />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.label}</span>
+            {g.stats.map((s) => (
+              <span key={s.label} className="shrink-0 text-xs text-muted-foreground">
+                {s.label}: <span className="font-medium text-foreground">{fmt(s.value)}</span>
+              </span>
+            ))}
+            {g.children.length ? (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {g.children.length}
+              </span>
+            ) : null}
+          </button>
+          {open[i] && g.children.length ? (
+            <ul className="space-y-1 border-t border-border px-3 py-2">
+              {g.children.map((c, j) => (
+                <li key={j} className="flex items-center gap-2 text-sm">
+                  {c.status ? <Badge tone={toneFor(c.status)}>{c.status}</Badge> : null}
+                  <span className="min-w-0 flex-1 truncate">{c.label}</span>
+                  {c.detail ? (
+                    <span className="truncate text-xs text-muted-foreground">{c.detail}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </li>
+      ))}
+    </ul>
   );
 }
 

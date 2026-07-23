@@ -115,7 +115,8 @@ def get_teacher_load(m: CurrentMember, db: Session):
       "records, homework health and the live alert feed (pace/compliance/homework "
       "problems). Best single source for 'what needs attention right now'.",
       params={"year_id": _UUID}, role="admin",
-      widgets=("alert_list", "stat_group", "rag_board"), default_widget="alert_list")
+      widgets=("alert_list", "stat_group", "rag_board", "area_chart", "meter"),
+      default_widget="alert_list")
 def get_dashboard(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None):
     return DashboardService(db).overview(m, year_id)
 
@@ -145,7 +146,7 @@ def get_compliance(m: CurrentMember, db: Session, on_date: date | None = None):
       "Fee collection totals for a year: total, collected, pending installments and "
       "overdue amount.",
       params={"year_id": _UUID}, role="admin",
-      widgets=("stat_group", "donut"), default_widget="stat_group")
+      widgets=("stat_group", "donut", "meter"), default_widget="stat_group")
 def get_fee_summary(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None):
     return FeeService(db).summary(m, year_id)
 
@@ -198,7 +199,8 @@ def get_attendance_day(m: CurrentMember, db: Session, class_id: uuid.UUID,
       "skill profile, current band with history, and derived growth areas. Teachers "
       "can read only students they teach. THE tool for 'how is <student> doing'.",
       params={"student_id": {**_UUID, "required": True}},
-      widgets=("stat_group", "table", "line_chart"), default_widget="stat_group")
+      widgets=("stat_group", "drilldown", "table", "line_chart"),
+      default_widget="stat_group")
 def get_student_growth(m: CurrentMember, db: Session, student_id: uuid.UUID):
     return GrowthService(db).growth(m, student_id)
 
@@ -255,7 +257,7 @@ def get_band_history(m: CurrentMember, db: Session, student_id: uuid.UUID):
       "One student's per-skill scores across assessment cycles (e.g. Reading, "
       "Problem solving).",
       params={"student_id": {**_UUID, "required": True}},
-      widgets=("bar_chart", "table"), default_widget="bar_chart")
+      widgets=("radar", "bar_chart", "table"), default_widget="radar")
 def get_skill_profile(m: CurrentMember, db: Session, student_id: uuid.UUID):
     return AssessmentService(db).skill_profile(m, student_id)
 

@@ -30,41 +30,45 @@ from app.services.lucy import registry
 from app.services.lucy.agent_context import AgentContext
 from app.services.lucy.prompts import build_system_prompt
 from app.services.lucy.widgets import (
-    CONFIG_GUIDE,
-    WIDGET_TYPES,
     WidgetConfigError,
+    config_guide,
     materialize,
+    visible_types,
 )
 
 logger = logging.getLogger(__name__)
 
 MAX_WIDGETS_PER_MESSAGE = 8
 
-_RENDER_WIDGET = {
-    "type": "function",
-    "function": {
-        "name": "render_widget",
-        "description": (
-            "Render a widget in the UI from a tool result you already fetched, "
-            "referenced by its result_id. This is how you SHOW data — the widget "
-            "is built server-side from the real result, so configure keys/paths "
-            "that exist in it.\n" + CONFIG_GUIDE),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "result_id": {"type": "string",
-                              "description": "the r<N> id of a fetched result"},
-                "type": {"type": "string", "enum": list(WIDGET_TYPES)},
-                "title": {"type": "string",
-                          "description": "short human title for the widget"},
-                "config": {"type": "object",
-                           "description": "per-type config, see the guide"},
+
+def _render_widget_tool(is_admin: bool) -> dict:
+    """The internal render tool, with enum + guide generated from the catalog
+    for this member's role (an admin-only component never reaches a teacher)."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "render_widget",
+            "description": (
+                "Render a widget in the UI from a tool result you already fetched, "
+                "referenced by its result_id. This is how you SHOW data — the widget "
+                "is built server-side from the real result, so configure keys/paths "
+                "that exist in it.\n" + config_guide(is_admin)),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "result_id": {"type": "string",
+                                  "description": "the r<N> id of a fetched result"},
+                    "type": {"type": "string", "enum": list(visible_types(is_admin))},
+                    "title": {"type": "string",
+                              "description": "short human title for the widget"},
+                    "config": {"type": "object",
+                               "description": "per-type config, see the guide"},
+                },
+                "required": ["result_id", "type", "title"],
+                "additionalProperties": False,
             },
-            "required": ["result_id", "type", "title"],
-            "additionalProperties": False,
         },
-    },
-}
+    }
 
 
 def _tool_label(name: str) -> str:
@@ -86,7 +90,7 @@ def run_agent(
 
     # The member's tool schemas need a CurrentMember once, up front.
     with member_session() as (db, m):
-        tools = registry.to_openai_tools(m) + [_RENDER_WIDGET]
+        tools = registry.to_openai_tools(m) + [_render_widget_tool(m.is_admin)]
         specs = {s.name: s for s in registry.visible_tools(m)}
 
     messages: list[dict[str, Any]] = [

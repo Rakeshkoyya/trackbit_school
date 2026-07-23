@@ -4,6 +4,7 @@ Built fresh per message from an AgentContext snapshot. The guidance blocks are
 stable text (prompt-cache friendly); only the context header varies."""
 
 from app.services.lucy.agent_context import AgentContext
+from app.services.lucy.widgets import choice_guide
 
 _GUIDANCE = """
 ## Who you are
@@ -20,11 +21,7 @@ not a search engine.
   you were given. Prefer one great widget over three mediocre ones. Around a
   widget, keep prose to 1–3 sentences: what the widget shows and what stands
   out. Do not repeat the table's numbers in prose.
-- Choosing a widget: lists/detail → table; comparison across categories →
-  bar_chart; trend over time → line_chart; distribution → donut; headline
-  numbers → stat_group; syllabus status → rag_board; one class-period's
-  attendance → roster_grid; a student's day → timeline; the daily report →
-  report_card.
+- Choosing a widget: {widget_guide}.
 - If a tool returns {"error": ...} read the message: fix your parameters, or if
   it says the data is out of your scope, tell the user plainly instead of
   retrying.
@@ -64,5 +61,6 @@ def build_system_prompt(ctx: AgentContext) -> str:
     # so str.format() would blow up on them.
     guidance = _GUIDANCE \
         .replace("{fees_clause}", f", {_ADMIN_FEES}" if is_admin else "") \
-        .replace("{fees_rule}", _ADMIN_FEES_RULE if is_admin else _TEACHER_FEES_RULE)
+        .replace("{fees_rule}", _ADMIN_FEES_RULE if is_admin else _TEACHER_FEES_RULE) \
+        .replace("{widget_guide}", choice_guide(is_admin))
     return header + guidance

@@ -6,9 +6,13 @@ export type WidgetType =
   | "stat_group"
   | "bar_chart"
   | "line_chart"
+  | "area_chart"
   | "donut"
+  | "meter"
+  | "radar"
   | "rag_board"
   | "roster_grid"
+  | "drilldown"
   | "timeline"
   | "report_card"
   | "student_card"
@@ -34,6 +38,23 @@ export interface ChartData {
   rows: Record<string, unknown>[];
 }
 export interface DonutData { slices: { label: string; value: number }[] }
+export interface MeterData { label: string; value: number; sub?: string | null; unit: string }
+export interface RadarData {
+  series: { key: string; label: string }[];
+  rows: Record<string, unknown>[];
+}
+export interface AreaChartData {
+  label: string;
+  unit: string;
+  rows: { x: string | number | null; v: number | null }[];
+}
+export interface DrilldownData {
+  groups: {
+    label: string;
+    stats: { label: string; value: unknown }[];
+    children: { label: string; detail?: string | null; status?: string | null }[];
+  }[];
+}
 export interface RagBoardData {
   items: { label: string; status: string; detail?: string | null }[];
 }
