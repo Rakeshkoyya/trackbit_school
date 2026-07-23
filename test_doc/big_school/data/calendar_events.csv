@@ -1,0 +1,20 @@
+Type,Title,Start,End,Blocks periods
+holiday,Muharram,2026-06-26,2026-06-26,whole day
+holiday,Bonalu (local holiday),2026-07-13,2026-07-13,whole day
+holiday,Independence Day,2026-08-15,2026-08-15,whole day
+exam_block,Unit Test 1,2026-08-24,2026-08-28,1 2 3
+celebration,Teachers' Day,2026-09-05,2026-09-05,whole day
+holiday,Ganesh Chaturthi,2026-09-14,2026-09-14,whole day
+holiday,Gandhi Jayanti,2026-10-02,2026-10-02,whole day
+exam_block,Half-Yearly Examinations,2026-10-06,2026-10-15,whole day
+holiday,Dussehra Break,2026-10-19,2026-10-24,whole day
+holiday,Diwali Break,2026-11-07,2026-11-14,whole day
+holiday,Guru Nanak Jayanti,2026-11-24,2026-11-24,whole day
+event,Annual Sports Day,2026-12-11,2026-12-11,whole day
+holiday,Christmas & New Year Break,2026-12-24,2027-01-01,whole day
+exam_block,Unit Test 2,2027-01-04,2027-01-08,1 2 3
+holiday,Sankranti Break,2027-01-14,2027-01-16,whole day
+holiday,Republic Day,2027-01-26,2027-01-26,whole day
+celebration,Annual Day,2027-02-05,2027-02-05,whole day
+holiday,Holi,2027-03-03,2027-03-04,whole day
+exam_block,Annual Examinations,2027-03-15,2027-03-27,whole day

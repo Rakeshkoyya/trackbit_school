@@ -1,0 +1,7 @@
+Block,Kind,Days,Start,End,Classes,Hostellers only,Teacher
+Morning Study,study,Mon-Sat,06:00,07:00,"5, 6, 7, 8",yes,Ramesh Shastri
+Homework Hour,homework,Mon-Fri,17:30,18:30,"5, 6, 7, 8",yes,Farhan Khan
+Evening Prep (juniors),study,Mon-Sat,19:00,20:00,"1, 2, 3, 4",yes,Shalini Rao
+Evening Prep (seniors),study,Mon-Sat,19:00,20:30,"5, 6, 7, 8",yes,Vikram Singh
+Saturday Yoga,activity,Sat,06:30,07:30,"1, 2, 3, 4, 5, 6, 7, 8",yes,Imran Sheikh
+Sunday Games,activity,Sun,16:30,18:00,"1, 2, 3, 4, 5, 6, 7, 8",yes,Mohan Das
