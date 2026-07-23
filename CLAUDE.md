@@ -274,6 +274,34 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   dataviz-validated palette) · rag_board · roster_grid · timeline · report_card · student_card ·
   alert_list · progress · escaped-markdown. Titles autogen off-thread via `chat_json`.
   `test_lucy.py` (10). AI-off: `/lucy/meta` gates the page, streams degrade politely.
+- **V3-P0 (2026-07-20) COMPLETE: super-admin platform layer + mid-year adoption + partial
+  plans** — migration head **`fe5f6a7b8c9d`** (applied). `test_platform.py` (3) +
+  `test_midyear.py` (3) green; planner/dashboard/report/auth suites re-run green (2 tests in
+  `test_term_planning.py` updated to the v3 contract: partial approve is allowed, forecast
+  paces the planned portion). Founder redesign: **schools no longer self-onboard.** The dev (super-admin) creates each
+  school, runs setup from the data the school hands over, then hands over credentials.
+  - **Platform layer:** `users.is_super_admin` (granted only via seed/DB), `require_super_admin`
+    (lifts the RLS GUC — platform reads cross orgs by design), `services/platform.py` +
+    `/platform/orgs` (list w/ stats · create school+admin, temp password w/ forced change,
+    operator auto-joins as admin · enter → session via switch-org). Session/Me carry
+    `is_super_admin`; web `/platform` (org cards, New school sheet w/ copyable handover creds,
+    Enter&set-up), super-admin lands there, "Schools" nav item, wizard tab now operator-only,
+    login's register link removed, `ALLOW_PUBLIC_ORG_SIGNUP` config (set False in prod; default
+    True keeps tests green). Seed: `super@trackbit.app / demo1234`. `test_platform.py` (3).
+  - **Mid-year adoption:** `academic_years.tracking_start_date` (NULL = year start). Planner
+    windows clamp to the floor (`_window`, drafting a pre-tracking term is refused with a clear
+    message); forecast excludes pre-tracking terms' chapters from every number; exam-fit skips
+    pre-tracking exams + clamps gaps; `_recompute_plan_status` exempts pre-tracking buckets.
+    Rule: pre-adoption data = **no-data, never a warning**. Setup → Academic years gains
+    "tracking from" (create + inline edit).
+  - **Partial plans (chapter-level known, topic detail later):** forecast rates the **planned
+    portion** with a real RAG (`planned_topics`, `unestimated_topics` = info) — `unplanned` now
+    means NOTHING scheduled; new `current_term_unplanned` flag → dashboard alert only for a
+    running term with no plan (unsized future chapters alert nothing). `approve` locks partial
+    plans (refuses only an empty window); `set_topic_estimate` allows sizing a never-sized topic
+    under a locked term; **`extend_plan`** (`POST /planner/plan/{cs}/extend`) appends newly sized
+    chapters after the locked entries (P2: baseline never moves) — web PlanView gains
+    "Schedule new chapters" + pre-tracking term handling. `test_midyear.py` (3).
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep

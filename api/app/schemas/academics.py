@@ -20,6 +20,9 @@ class _Dated(BaseModel):
 # ── Academic year ────────────────────────────────────────────────────────────
 class YearCreate(_Dated):
     label: str = Field(min_length=1, max_length=32)  # "2026-27"
+    # Mid-year adoption (SPRD2 v2.1): when TrackBit started recording, if later
+    # than start_date. Before this date = no-data, never a warning.
+    tracking_start_date: date | None = None
 
 
 class YearUpdate(BaseModel):
@@ -27,6 +30,7 @@ class YearUpdate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     working_weekdays: list[int] | None = Field(default=None)
+    tracking_start_date: date | None = None
 
 
 class YearOut(BaseModel):
@@ -35,6 +39,7 @@ class YearOut(BaseModel):
     label: str
     start_date: date
     end_date: date
+    tracking_start_date: date | None = None
     is_active: bool
     working_weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5])
 

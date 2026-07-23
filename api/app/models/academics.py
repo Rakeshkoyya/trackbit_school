@@ -41,6 +41,11 @@ class AcademicYear(Base, UUIDPKMixin, CreatedAtMixin):
     label: Mapped[str] = mapped_column(Text, nullable=False)  # "2026-27"
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # When the school adopted TrackBit, if mid-year (NULL = from start_date).
+    # Everything before this date is "before our time": planning windows start
+    # here, and no surface may raise a warning about the absence of data from
+    # the pre-tracking window — that absence is expected, not a problem.
+    tracking_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Exactly one active year per org is enforced in the service layer, not the DB
     # (a partial unique index would fight the archive-on-replace flow).
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

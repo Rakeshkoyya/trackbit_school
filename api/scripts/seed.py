@@ -78,7 +78,8 @@ def _today_at(hour: int, minute: int = 0) -> datetime:
 
 
 DEMO_EMAILS = ["kc@demo.trackbit.app", "priya@demo.trackbit.app",
-               "ramesh@demo.trackbit.app", "anil@demo.trackbit.app"]
+               "ramesh@demo.trackbit.app", "anil@demo.trackbit.app",
+               "super@trackbit.app"]
 DEMO_PHONES = ["+919800000001", "+919800000002"]
 
 
@@ -478,13 +479,18 @@ def seed() -> None:
                       password_hash=hash_password("demo1234"))
         anil = User(name="Anil", email="anil@demo.trackbit.app", phone="+919800000002",
                     password_hash=hash_password("demo1234"))
-        db.add_all([kc, priya, ramesh, anil])
+        # The platform operator (dev/founder): creates schools, runs their setup,
+        # hands over creds. The demo org doubles as their default org.
+        superadmin = User(name="TrackBit Ops", email="super@trackbit.app",
+                          password_hash=hash_password("demo1234"), is_super_admin=True)
+        db.add_all([kc, priya, ramesh, anil, superadmin])
         db.flush()
 
         # School roles (SPRD v2 §2): KC + Priya run the school (admins); the rest teach.
         mships: dict[User, Membership] = {}
         for role, user in [
             ("admin", kc), ("admin", priya), ("teacher", ramesh), ("teacher", anil),
+            ("admin", superadmin),
         ]:
             mem = Membership(org_id=org.id, user_id=user.id, org_role=role, last_active_at=_now())
             db.add(mem)
@@ -615,6 +621,7 @@ def seed() -> None:
         print(f"  school: {counts['classes']} classes, {counts['students']} students, "
               f"{counts['enrolled']} fee enrolments (year 2026-27)")
         print("  login: kc@demo.trackbit.app / demo1234")
+        print("  super-admin: super@trackbit.app / demo1234")
     except Exception:
         db.rollback()
         raise

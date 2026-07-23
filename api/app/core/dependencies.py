@@ -77,6 +77,22 @@ def get_current_member(
     return CurrentMember(user=user, org=org, membership=membership)
 
 
+def require_super_admin(
+    member: CurrentMember = Depends(get_current_member),
+    db: Session = Depends(get_db),
+) -> CurrentMember:
+    """Platform operator (users.is_super_admin) — the layer ABOVE orgs.
+
+    Platform endpoints read/write across organizations by design, so this lifts
+    the request's RLS org scope after verifying the flag. The platform service
+    is then responsible for its own explicit org handling."""
+    if not member.user.is_super_admin:
+        raise ForbiddenError("This action requires the platform operator.",
+                             code="super_admin_only")
+    db.execute(text("SELECT set_config('app.current_org_id', '', true)"))
+    return member
+
+
 def require_admin(member: CurrentMember = Depends(get_current_member)) -> CurrentMember:
     if not member.is_admin:
         raise ForbiddenError("This action requires an admin.", code="admin_only")

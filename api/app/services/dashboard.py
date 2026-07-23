@@ -104,16 +104,25 @@ class DashboardService:
                     detail=(f"Projected finish {r.projected_finish} vs baseline {r.baseline_finish}. "
                             f"Plan a catch-up before the next test.")))
             elif r.status == "unplanned":
-                # No finish date can be computed, so this row has no RAG colour. Without
-                # an alert it would simply drop off the board — an unplanned subject is
-                # exactly what the director needs told, not hidden.
+                # Nothing is scheduled for this subject at all. Chapters that are
+                # merely unsized in a LATER term are deliberately not alerted (the
+                # school plans term by term — that's normal); a wholly unscheduled
+                # subject is what the director needs told.
                 alerts.append(Alert(
                     id=f"unplanned:{r.class_subject_id}", type="pace", severity="amber",
                     class_subject_id=r.class_subject_id,
-                    title=f"{r.class_label} {r.subject_name} has {r.unestimated_topics} "
-                          f"chapter(s) with no period estimate",
-                    detail=("They are not scheduled, so there is no finish date. "
-                            "Set periods for the term's chapters, then generate the plan.")))
+                    title=f"{r.class_label} {r.subject_name} has no plan yet",
+                    detail=("No chapter is scheduled, so there is no finish date. "
+                            "Size the current term's chapters and generate its plan.")))
+            elif r.current_term_unplanned:
+                # Paced fine on what's planned, but the term running TODAY has
+                # nothing scheduled — the plan ran out under the teacher's feet.
+                alerts.append(Alert(
+                    id=f"term-unplanned:{r.class_subject_id}", type="pace", severity="amber",
+                    class_subject_id=r.class_subject_id,
+                    title=f"{r.class_label} {r.subject_name}: current term has no plan",
+                    detail=("The running term's chapters are not scheduled yet. "
+                            "Size them and generate that term's plan.")))
         # today's logging compliance
         comp = ClassroomService(self.db).compliance(m)
         unlogged = comp.total - comp.logged_count

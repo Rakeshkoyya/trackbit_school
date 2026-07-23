@@ -157,6 +157,14 @@ class PlannerService:
     def _unsized(topics: list[SyllabusTopic]) -> list[SyllabusTopic]:
         return [t for t in topics if t.est_periods is None]
 
+    @staticmethod
+    def _tracking_floor(year: AcademicYear) -> date:
+        """Where TrackBit's record starts. A school adopting mid-year sets
+        `tracking_start_date`; everything before it is "before our time" —
+        planning windows clamp here and nothing warns about its absence."""
+        t = year.tracking_start_date
+        return max(year.start_date, t) if t else year.start_date
+
     def _term(self, org_id: uuid.UUID, term_id: uuid.UUID, year: AcademicYear) -> Term:
         term = self.db.scalar(
             select(Term).where(Term.id == term_id, Term.org_id == org_id))
@@ -168,11 +176,14 @@ class PlannerService:
 
     def _window(self, org_id: uuid.UUID, year: AcademicYear,
                 term_id: uuid.UUID | None) -> tuple[date, date, str]:
-        """(start, end, label) of the planning window."""
+        """(start, end, label) of the planning window, clamped to the tracking
+        floor — a plan made after mid-year adoption schedules only the remaining
+        stretch, never the months nobody recorded."""
+        floor = self._tracking_floor(year)
         if term_id is None:
-            return year.start_date, year.end_date, "this year"
+            return max(year.start_date, floor), year.end_date, "this year"
         term = self._term(org_id, term_id, year)
-        return term.start_date, term.end_date, f"in {term.name}"
+        return max(term.start_date, floor), term.end_date, f"in {term.name}"
 
     def _approval_state(self, org_id: uuid.UUID,
                         cs_id: uuid.UUID) -> dict[uuid.UUID | None, bool]:
@@ -215,7 +226,16 @@ class PlannerService:
         # whole is "approved" — including the untermed bucket. Looking only at the
         # termed ones would call a syllabus locked while its untermed chapters sit
         # unplanned. A whole-year approval (`None`) covers all of them at once.
-        buckets = {u.term_id for u in self._units(m.org_id, cs_id) if u.topics}
+        # Pre-tracking terms are exempt: they ended before this school's TrackBit
+        # record, can never be planned, and must not hold "approved" hostage.
+        year = self._year_for_cs(self._class_subject(m.org_id, cs_id))
+        floor = self._tracking_floor(year)
+        pre = {t.id for t in self.db.scalars(
+            select(Term).where(Term.org_id == m.org_id,
+                               Term.academic_year_id == year.id,
+                               Term.end_date < floor))}
+        buckets = {u.term_id for u in self._units(m.org_id, cs_id)
+                   if u.topics and u.term_id not in pre}
 
         if state.get(None) or (buckets and all(state.get(b) for b in buckets)):
             plan.status = "approved"
@@ -278,7 +298,11 @@ class PlannerService:
             raise NotFoundError("Topic")
         unit = self.db.get(SyllabusUnit, topic.unit_id)
         state = self._approval_state(m.org_id, unit.class_subject_id)
-        if self._is_locked(state, unit.term_id):
+        # Sizing a topic that was NEVER sized is allowed even under a locked
+        # baseline — that is how a partially-planned term grows (the new size
+        # joins the plan via extend_plan, without touching locked entries). Only
+        # re-sizing an already-sized chapter would invalidate what was approved.
+        if self._is_locked(state, unit.term_id) and topic.est_periods is not None:
             raise ValidationError(
                 "That chapter's plan is approved. Un-approve it before changing periods.")
         topic.est_periods = est
@@ -391,6 +415,7 @@ class PlannerService:
             if u.topics:
                 by_term.setdefault(u.term_id, []).extend(u.topics)
 
+        floor = self._tracking_floor(year)
         out: list[PlanTermOut] = []
         for term_id, term in terms.items():
             if term_id not in by_term:
@@ -400,7 +425,8 @@ class PlannerService:
                 term_id=term_id, name=term.name, start_date=term.start_date,
                 end_date=term.end_date, topic_count=len(tops),
                 unestimated_topics=len(self._unsized(tops)),
-                approved=bool(state.get(term_id)) or bool(state.get(None))))
+                approved=bool(state.get(term_id)) or bool(state.get(None)),
+                pre_tracking=term.end_date < floor))
         if None in by_term:
             tops = by_term[None]
             # With no termed chapters at all, the untermed bucket IS the year — that
@@ -469,6 +495,10 @@ class PlannerService:
                 else "Add syllabus topics before drafting a plan.")
         sized = self._sized(scoped)
         start, end, label = self._window(m.org_id, year, term_id)
+        if start > end:
+            raise ValidationError(
+                "That window ended before tracking started — it's before this "
+                "school's TrackBit record, so there is nothing left to plan in it.")
         blocked, partial = self._calendar(m.org_id, year.id)
         weeks = distribute(
             [t.est_periods for t in sized], periods_per_week=cs.periods_per_week,
@@ -480,6 +510,61 @@ class PlannerService:
                    term_id: uuid.UUID | None = None) -> PlanOut:
         _, _, scoped, sized, weeks, _ = self._plan_scope(m, cs_id, term_id)
         self._replace_entries(m, cs_id, scoped, sized, weeks)
+        plan = self.db.scalar(
+            select(Plan).where(Plan.org_id == m.org_id, Plan.class_subject_id == cs_id))
+        if plan is None:
+            self.db.add(Plan(org_id=m.org_id, class_subject_id=cs_id, status="draft"))
+        self.db.flush()
+        return self.get_plan(m, cs_id)
+
+    def extend_plan(self, m: CurrentMember, cs_id: uuid.UUID,
+                    term_id: uuid.UUID | None = None) -> PlanOut:
+        """Schedule the sized-but-unscheduled chapters of a window WITHOUT touching
+        what is already planned there — the locked baseline stays exactly where it
+        is (P2); new entries are appended after its last week.
+
+        This is how a partially-planned term grows: approve what you know, size
+        the next chapter when you reach it, extend. Works on unlocked windows too
+        (it simply adds the newly sized chapters instead of re-drafting)."""
+        cs = self._class_subject(m.org_id, cs_id)
+        if not cs.periods_per_week:
+            raise ValidationError(
+                "This subject has no periods/week on the class. Set the class's weekly "
+                "period allocation before planning.")
+        year = self._year_for_cs(cs)
+        units = self._scoped_units(self._units(m.org_id, cs_id), term_id)
+        scoped = self._ordered_topics(units)
+        if not scoped:
+            raise ValidationError(
+                "No syllabus chapters in that term yet." if term_id
+                else "Add syllabus topics before planning.")
+        entry_map = self._entry_map(m, cs_id)
+        todo = [t for t in scoped if t.est_periods is not None and t.id not in entry_map]
+        if not todo:
+            raise ValidationError(
+                "Nothing new to schedule — every sized chapter is already in the plan.")
+
+        start, end, _label = self._window(m.org_id, year, term_id)
+        if start > end:
+            raise ValidationError(
+                "That window ended before tracking started — it's before this "
+                "school's TrackBit record, so there is nothing left to plan in it.")
+        scoped_ids = {t.id for t in scoped}
+        existing = [wk for tid, wk in entry_map.items() if tid in scoped_ids]
+        if existing:
+            start = max(start, max(existing) + timedelta(days=7))
+        if start > end:
+            raise ValidationError(
+                "The plan already runs to the end of that window — there is no room "
+                "left for more chapters. Re-plan the window instead.")
+        blocked, partial = self._calendar(m.org_id, year.id)
+        weeks = distribute(
+            [t.est_periods for t in todo], periods_per_week=cs.periods_per_week,
+            working_weekdays=year.working_weekdays, blocked=blocked, partial=partial,
+            periods_per_day=year.periods_per_day, window_start=start, window_end=end)
+        for topic, wk in zip(todo, weeks, strict=True):
+            self.db.add(PlanEntry(org_id=m.org_id, class_subject_id=cs_id,
+                                  topic_id=topic.id, week_start=wk))
         plan = self.db.scalar(
             select(Plan).where(Plan.org_id == m.org_id, Plan.class_subject_id == cs_id))
         if plan is None:
@@ -505,13 +590,17 @@ class PlannerService:
             self._scoped_units(self._units(m.org_id, cs_id), term_id))
         if not scoped:
             raise ValidationError("Nothing to approve — that term has no chapters.")
-        # Locking a baseline that omits a third of its chapters would make the
-        # forecast confidently wrong. Size them first.
-        unsized = self._unsized(scoped)
-        if unsized:
+        # Partial planning is first-class: mid-term, a school often knows only some
+        # chapters at topic level. Approving locks what IS scheduled; the unsized
+        # chapters stay open, get sized as the term unfolds, and join the plan via
+        # extend_plan. The forecast paces the planned portion and carries the rest
+        # as info. What we refuse to lock is a window with NOTHING scheduled —
+        # that would be approving an empty promise.
+        entry_map = self._entry_map(m, cs_id)
+        if not any(t.id in entry_map for t in scoped):
             raise ValidationError(
-                f"{len(unsized)} chapter(s) have no period estimate, so they are not in "
-                f"the plan. Set their periods before approving.")
+                "Nothing in that window is scheduled yet. Size the chapters you know "
+                "and draft the plan, then approve.")
 
         self._append_approval(m, cs_id, term_id, "approve")
         self._recompute_plan_status(m, cs_id, plan)
@@ -680,6 +769,7 @@ class PlannerService:
             return ExamFitOut(class_id=class_id, exams=[])
 
         blocked, partial = self._calendar(m.org_id, year.id)
+        floor = self._tracking_floor(year)
         portions: dict[tuple[uuid.UUID, uuid.UUID], uuid.UUID] = {
             (p.exam_event_id, p.class_subject_id): p.upto_topic_id
             for p in self.db.scalars(select(ExamPortion).where(
@@ -692,8 +782,13 @@ class PlannerService:
 
         out: list[ExamFitExam] = []
         for i, ex in enumerate(exams):
+            if ex.end_date < floor:
+                # The exam happened before this school's TrackBit record — its
+                # portion still anchors the next exam's segment (exams[:i] below),
+                # but there is no gap to plan and nothing to verdict.
+                continue
             gap_start = year.start_date if i == 0 else exams[i - 1].end_date + timedelta(days=1)
-            gap_start = max(gap_start, year.start_date)
+            gap_start = max(gap_start, floor)
             gap_end = ex.start_date - timedelta(days=1)
             gap_ok = gap_end >= gap_start
             days_in_gap = teaching_days(
@@ -844,19 +939,32 @@ class PlannerService:
 
         year = self.db.get(AcademicYear, rows[0][2].academic_year_id)
         blocked, partial = self._calendar(m.org_id, year.id) if year else (set(), {})
+        floor = self._tracking_floor(year) if year else None
+        terms = list(self.db.scalars(
+            select(Term).where(Term.org_id == m.org_id,
+                               Term.academic_year_id == year.id))) if year else []
+        # Terms that ended before the school adopted TrackBit: their chapters are
+        # before our time — out of every count, never a warning.
+        pre_tracking_ids = {t.id for t in terms if t.end_date < floor}
+        today = datetime.now(UTC).date()
+        current_term = next(
+            (t for t in terms
+             if t.start_date <= today <= t.end_date and t.id not in pre_tracking_ids),
+            None)
 
         out: list[ForecastOut] = []
         for cs, subject_name, klass in rows:
             label = klass.name + (f"-{klass.section}" if klass.section else "")
-            units = units_by_cs.get(cs.id, [])
+            units = [u for u in units_by_cs.get(cs.id, [])
+                     if u.term_id not in pre_tracking_ids]
             topics = self._ordered_topics(units)
-            entries = entries_by_cs.get(cs.id, [])
+            topic_ids = {t.id for t in topics}
+            entries = [e for e in entries_by_cs.get(cs.id, []) if e.topic_id in topic_ids]
             unsized = self._unsized(topics)
-            if not topics or not entries:
+            if not topics:
                 out.append(ForecastOut(
                     class_subject_id=cs.id, subject_name=subject_name, class_label=label,
-                    status="none", total_topics=len(topics),
-                    unestimated_topics=len(unsized)))
+                    status="none", total_topics=0))
                 continue
             if not cs.periods_per_week:
                 # A pace computed from 0 periods/week is fiction — say so instead.
@@ -865,21 +973,38 @@ class PlannerService:
                     status="unallocated", total_topics=len(topics),
                     unestimated_topics=len(unsized)))
                 continue
-            if unsized:
-                # There is no honest finish date while chapters are unsized. Reporting
-                # green here — which is what a NOT NULL DEFAULT 1 used to do — tells the
-                # director a year nobody has planned is on track.
+
+            planned_ids = {e.topic_id for e in entries}
+            # A planned-then-unsized topic drops out on the next draft; until then
+            # it can't be paced honestly, so pace only the sized planned ones.
+            planned = [t for t in topics
+                       if t.id in planned_ids and t.est_periods is not None]
+            current_term_unplanned = False
+            if current_term is not None:
+                cur_topics = [t for u in units if u.term_id == current_term.id
+                              for t in u.topics]
+                current_term_unplanned = bool(cur_topics) and not any(
+                    t.id in planned_ids for t in cur_topics)
+
+            if not planned:
+                # Nothing scheduled at all. Not a colour — but unlike unsized
+                # chapters in a later term, a wholly unscheduled subject is
+                # something the admin should hear about.
                 out.append(ForecastOut(
                     class_subject_id=cs.id, subject_name=subject_name, class_label=label,
                     status="unplanned", total_topics=len(topics),
-                    unestimated_topics=len(unsized)))
+                    unestimated_topics=len(unsized),
+                    current_term_unplanned=current_term_unplanned))
                 continue
+
+            # RAG over the planned portion only. Chapters not yet sized (the later
+            # terms, planned when they begin) ride along as info, not a warning.
             baseline_finish = max(e.week_start for e in entries)
             projected = distribute(
-                [t.est_periods for t in topics], periods_per_week=cs.periods_per_week,
+                [t.est_periods for t in planned], periods_per_week=cs.periods_per_week,
                 working_weekdays=year.working_weekdays, blocked=blocked, partial=partial,
                 periods_per_day=year.periods_per_day,
-                window_start=year.start_date, window_end=year.end_date,
+                window_start=floor, window_end=year.end_date,
             )
             projected_finish = max(projected)
             weeks_behind = max(0, (projected_finish - baseline_finish).days // 7)
@@ -888,7 +1013,8 @@ class PlannerService:
                 class_subject_id=cs.id, subject_name=subject_name, class_label=label,
                 status=rag, total_topics=len(topics), baseline_finish=baseline_finish,
                 projected_finish=projected_finish, weeks_behind=weeks_behind,
-                unestimated_topics=0))
+                unestimated_topics=len(unsized), planned_topics=len(planned),
+                current_term_unplanned=current_term_unplanned))
         return out
 
     def _require_class(self, org_id: uuid.UUID, class_id: uuid.UUID) -> None:

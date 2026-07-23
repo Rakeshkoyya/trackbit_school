@@ -26,7 +26,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const me = await login(identifier.trim(), password);
-      router.replace(landingForRole(me.org_role));
+      router.replace(landingForRole(me.org_role, me.is_super_admin));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not sign in.");
     } finally {
@@ -35,18 +35,9 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthShell
-      title="Welcome back"
-      subtitle="Sign in to your TrackBit account."
-      footer={
-        <>
-          New here?{" "}
-          <Link href="/auth/register" className="font-medium text-primary">
-            Create an organization
-          </Link>
-        </>
-      }
-    >
+    // No self-serve signup: schools are created by the TrackBit operator, who
+    // runs setup and hands over credentials (founder decision 2026-07-20).
+    <AuthShell title="Welcome back" subtitle="Sign in to your TrackBit account.">
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <Label htmlFor="identifier">Email or username</Label>

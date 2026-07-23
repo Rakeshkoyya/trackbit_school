@@ -13,7 +13,7 @@ export function BottomTabs() {
   const { me } = useAuth();
   // Cap the bottom bar at 5 so it never overflows on a phone. Settings isn't in
   // the nav at all — it lives in the account menu (avatar popover).
-  const items = navForRole(me?.org_role).slice(0, 5);
+  const items = navForRole(me?.org_role, me?.is_super_admin).slice(0, 5);
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">

@@ -52,6 +52,7 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
   const [label, setLabel] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [editTracking, setEditTracking] = useState<string | null>(null);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["academic-years"] });
 
   const create = useMutation({
@@ -69,6 +70,12 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
     onSuccess: () => { invalidate(); toast.success("Year removed"); },
     onError: (e) => showApiError(e, "Could not remove"),
   });
+  const setTracking = useMutation({
+    mutationFn: ({ id, date }: { id: string; date: string | null }) =>
+      schoolApi.updateYear(id, { tracking_start_date: date }),
+    onSuccess: () => { invalidate(); setEditTracking(null); toast.success("Tracking start updated"); },
+    onError: (e) => showApiError(e, "Could not update"),
+  });
 
   return (
     <Card title="Academic years">
@@ -83,6 +90,24 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
               make current
             </button>
           ) : null}
+          {/* Mid-year adoption: everything before this date is "before our time" —
+              excluded from plans and forecasts, shown as no-data, never warned about. */}
+          {editTracking === y.id ? (
+            <span className="ml-2 inline-flex items-center gap-1">
+              <Input className="h-6 w-36 text-xs" type="date" autoFocus
+                defaultValue={y.tracking_start_date ?? ""}
+                onChange={(e) => setTracking.mutate({ id: y.id, date: e.target.value || null })} />
+              <button onClick={() => setEditTracking(null)} className="text-xs text-muted-foreground hover:underline">done</button>
+            </span>
+          ) : (
+            <button
+              onClick={canEdit ? () => setEditTracking(y.id) : undefined}
+              className={cn("ml-2 text-xs", canEdit ? "text-primary hover:underline" : "text-muted-foreground")}
+              title="If the school adopted TrackBit mid-year, data before this date is treated as no-data (never a warning)."
+            >
+              {y.tracking_start_date ? `tracking from ${y.tracking_start_date}` : canEdit ? "set tracking start" : null}
+            </button>
+          )}
         </Row>
       ))}
       {canEdit ? (

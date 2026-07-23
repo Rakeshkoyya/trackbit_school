@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_member
+from app.core.exceptions import ForbiddenError
 from app.core.rate_limit import limiter
 from app.models import User
 from app.schemas.auth import (
@@ -38,6 +39,10 @@ router = APIRouter()
 def register_org(
     request: Request, body: RegisterOrgRequest, db: Session = Depends(get_db)
 ) -> SessionResponse:
+    if not settings.ALLOW_PUBLIC_ORG_SIGNUP:
+        raise ForbiddenError(
+            "Sign-ups are by invitation — contact TrackBit to onboard your school.",
+            code="signup_disabled")
     session = AuthService(db).register_org(
         org_name=body.org_name, name=body.name, email=body.email,
         password=body.password, tz=body.timezone,
@@ -110,6 +115,7 @@ def verify(request: Request, body: VerifyTokenRequest, db: Session = Depends(get
 def me(member=Depends(get_current_member), db: Session = Depends(get_db)) -> MeResponse:
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
+        is_super_admin=member.user.is_super_admin,
         user=member.user, org=member.org,
         orgs=AuthService(db).list_user_orgs(member.user_id),
     )
@@ -151,6 +157,7 @@ def update_me(
     AuthService(db).update_profile(member.user, name=body.name)
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
+        is_super_admin=member.user.is_super_admin,
         user=member.user, org=member.org,
     )
 

@@ -17,21 +17,26 @@ function FullScreenSpinner() {
 }
 
 /** Gate authenticated areas; redirect to login when there's no session.
- *  `requireRole` locks to one role; `allow` accepts any role in the list. */
+ *  `requireRole` locks to one role; `allow` accepts any role in the list;
+ *  `requireSuperAdmin` locks to the platform operator (org role irrelevant). */
 export function AuthGuard({
   children,
   requireRole,
   allow,
+  requireSuperAdmin,
 }: {
   children: React.ReactNode;
   requireRole?: OrgRole;
   allow?: OrgRole[];
+  requireSuperAdmin?: boolean;
 }) {
   const { me, loading, mustSetPassword } = useAuth();
   const router = useRouter();
 
   const denied = (r: OrgRole) =>
-    (requireRole && r !== requireRole) || (allow && !allow.includes(r));
+    (requireRole && r !== requireRole) ||
+    (allow && !allow.includes(r)) ||
+    (requireSuperAdmin && !me?.is_super_admin);
 
   useEffect(() => {
     if (loading) return;
@@ -43,7 +48,7 @@ export function AuthGuard({
       router.replace(landingForRole(me.org_role));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, me, mustSetPassword, requireRole, allow, router]);
+  }, [loading, me, mustSetPassword, requireRole, allow, requireSuperAdmin, router]);
 
   if (loading || !me || mustSetPassword || denied(me.org_role)) {
     return <FullScreenSpinner />;

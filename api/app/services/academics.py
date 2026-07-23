@@ -83,6 +83,7 @@ class AcademicService:
         year = AcademicYear(
             org_id=m.org_id, label=body.label, start_date=body.start_date,
             end_date=body.end_date, is_active=has_any is None,
+            tracking_start_date=body.tracking_start_date,
         )
         self.db.add(year)
         self.db.flush()

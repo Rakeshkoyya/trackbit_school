@@ -22,9 +22,10 @@ export const RAG: Record<string, "success" | "warning" | "neutral"> = {
 /** What the pace row should say when there is no forecast to show. */
 export const forecastLabel = (status: string, unestimated: number) =>
   status === "none" ? "no plan"
-    : status === "unplanned" ? `${unestimated} chapter${unestimated === 1 ? "" : "s"} unsized`
+    : status === "unplanned" ? "nothing scheduled yet"
       : status === "unallocated" ? "no periods/week"
-        : status;
+        : unestimated > 0 ? `${status} · ${unestimated} to size`
+          : status;
 export const weekLabel = (d: string) =>
   new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 
@@ -202,11 +203,14 @@ export function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit:
   const draft = useMutation({ mutationFn: () => schoolApi.draftPlan(csId, termId), onSuccess: () => { inv(); toast.success("Plan drafted"); }, onError: (e) => showApiError(e, "Could not draft") });
   const approve = useMutation({ mutationFn: () => schoolApi.approvePlan(csId, termId), onSuccess: () => { inv(); toast.success("Baseline locked"); }, onError: (e) => showApiError(e, "Could not approve") });
   const unapprove = useMutation({ mutationFn: () => schoolApi.unapprovePlan(csId, termId), onSuccess: () => { inv(); toast.success("Baseline unlocked"); }, onError: (e) => showApiError(e, "Could not un-approve") });
+  const extend = useMutation({ mutationFn: () => schoolApi.extendPlan(csId, termId), onSuccess: () => { inv(); toast.success("New chapters scheduled"); }, onError: (e) => showApiError(e, "Could not extend") });
 
   // With terms, "locked" and "unsized" are per-window; without, they are the plan's.
   const locked = active ? active.approved : plan?.status === "approved";
   const unsized = active ? active.unestimated_topics : (plan?.unestimated_topics ?? 0);
   const hasPlan = plan && plan.status !== "none";
+  // Ended before the school adopted TrackBit — nothing to plan, nothing to nag.
+  const preTracking = active?.pre_tracking ?? false;
 
   const byWeek = new Map<string, string[]>();
   plan?.entries.forEach((e) => { byWeek.set(e.week_start, [...(byWeek.get(e.week_start) ?? []), e.topic_title]); });
@@ -219,7 +223,9 @@ export function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit:
             <button key={t.term_id} onClick={() => setPickedTerm(t.term_id)}
               className={`rounded-md border px-2.5 py-1 text-xs ${t.term_id === termId ? "border-primary bg-primary/10 font-medium" : "border-border text-muted-foreground hover:bg-muted"}`}>
               {t.name}
-              {t.approved ? <Lock className="ml-1 inline h-3 w-3" /> : t.unestimated_topics > 0 ? <span className="ml-1 text-warning">·{t.unestimated_topics}</span> : null}
+              {t.pre_tracking ? <span className="ml-1 text-muted-foreground">· before tracking</span>
+                : t.approved ? <Lock className="ml-1 inline h-3 w-3" />
+                  : t.unestimated_topics > 0 ? <span className="ml-1 text-warning">·{t.unestimated_topics}</span> : null}
             </button>
           ))}
         </div>
@@ -237,14 +243,20 @@ export function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit:
           <Badge tone="warning">{unsized} chapter{unsized === 1 ? "" : "s"} not sized</Badge>
         ) : null}
 
-        {canEdit && !locked ? (
+        {preTracking ? (
+          <span className="text-xs text-muted-foreground">
+            This term ended before tracking started — it&apos;s before this school&apos;s TrackBit record.
+          </span>
+        ) : null}
+        {canEdit && !locked && !preTracking ? (
           <Button size="sm" variant="outline" onClick={() => draft.mutate()} disabled={draft.isPending}>
             <Sparkles className="h-4 w-4" /> {hasPlan ? "Re-draft" : "Draft plan"}{active ? ` ${active.name}` : ""}
           </Button>
         ) : null}
-        {/* Approving a window with unsized chapters would lock a plan that silently
-            omits them, so the button is not offered — the server refuses it too. */}
-        {canApprove && !locked && hasPlan && unsized === 0 ? (
+        {/* Partial approval is allowed: the sized chapters lock, unsized ones stay
+            open and join later via "Schedule new chapters". The server refuses only
+            a window where NOTHING is scheduled. */}
+        {canApprove && !locked && hasPlan && !preTracking ? (
           <Button size="sm" onClick={() => approve.mutate()} disabled={approve.isPending}><CheckCircle2 className="h-4 w-4" /> Approve{active ? ` ${active.name}` : ""}</Button>
         ) : null}
         {canApprove && locked ? (
@@ -252,12 +264,21 @@ export function PlanView({ csId, canEdit, canApprove }: { csId: string; canEdit:
             <LockOpen className="h-4 w-4" /> Un-approve{active ? ` ${active.name}` : ""}
           </Button>
         ) : null}
+        {/* The partial-plan growth path: size a chapter on the Syllabus tab, then
+            schedule it here — appended after the locked entries, which never move. */}
+        {canEdit && locked && !preTracking ? (
+          <Button size="sm" variant="outline" onClick={() => extend.mutate()} disabled={extend.isPending}>
+            <Plus className="h-4 w-4" /> Schedule new chapters
+          </Button>
+        ) : null}
       </div>
 
-      {unsized > 0 ? (
+      {unsized > 0 && !preTracking ? (
         <p className="mb-3 text-xs text-muted-foreground">
-          Unsized chapters are recorded but not scheduled. Set their periods on the Syllabus tab
-          {active ? ` when ${active.name} begins` : ""} — until then there is no finish date to forecast.
+          {unsized} chapter{unsized === 1 ? " is" : "s are"} recorded but not sized yet — that&apos;s
+          normal, not a problem. Size {unsized === 1 ? "it" : "them"} on the Syllabus tab when you
+          reach {unsized === 1 ? "it" : "them"}, then tap “Schedule new chapters”; the approved
+          part of the plan stays exactly where it is.
         </p>
       ) : null}
 

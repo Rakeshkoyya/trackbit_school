@@ -39,6 +39,8 @@ export interface Session {
   token_type: string;
   org_role: OrgRole;
   must_set_password: boolean;
+  // Platform operator (the TrackBit dev): sees /platform, creates schools.
+  is_super_admin: boolean;
   user: User;
   org: Org;
   orgs: OrgSummary[];
@@ -47,6 +49,7 @@ export interface Session {
 export interface Me {
   org_role: OrgRole;
   must_set_password: boolean;
+  is_super_admin: boolean;
   user: User;
   org: Org;
   orgs: OrgSummary[];

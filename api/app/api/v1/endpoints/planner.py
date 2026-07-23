@@ -161,6 +161,15 @@ def topic_progress(cs_id: uuid.UUID, m: CurrentMember = Depends(require_academic
     return PlannerService(db).topic_progress(m, cs_id)
 
 
+@router.post("/plan/{cs_id}/extend", response_model=PlanOut)
+def extend_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
+                m: CurrentMember = Depends(require_coordinator_up),
+                db: Session = Depends(get_db)):
+    """Schedule newly sized chapters after the existing (possibly locked) entries —
+    the partial-plan growth path. Never reshuffles what is already planned (P2)."""
+    return PlannerService(db).extend_plan(m, cs_id, term_id)
+
+
 @router.post("/plan/{cs_id}/generate", response_model=PlanGenerateOut)
 def generate_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
                   m: CurrentMember = Depends(require_coordinator_up),

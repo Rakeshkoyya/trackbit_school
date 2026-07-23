@@ -29,6 +29,7 @@ function sessionToMe(s: Session): Me {
   return {
     org_role: s.org_role,
     must_set_password: s.must_set_password,
+    is_super_admin: s.is_super_admin,
     user: s.user,
     org: s.org,
     orgs: s.orgs,

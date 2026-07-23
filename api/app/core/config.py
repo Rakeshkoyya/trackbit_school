@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Background jobs. Enable on exactly ONE instance (never multi-worker).
     ENABLE_SCHEDULER: bool = False
 
+    # Self-serve org registration. Schools are created by the platform operator
+    # (super-admin) who runs setup and hands over credentials — set this False in
+    # production. Defaults True so dev + the test suite keep working.
+    ALLOW_PUBLIC_ORG_SIGNUP: bool = True
+
     # How often last_active_at is allowed to be written per member (seconds)
     LAST_ACTIVE_THROTTLE_SECONDS: int = 300
 

@@ -73,6 +73,9 @@ class PlanTermOut(BaseModel):
     topic_count: int
     unestimated_topics: int
     approved: bool
+    # The term ended before the school adopted TrackBit (tracking_start_date):
+    # "before our time" — never planned, never warned about.
+    pre_tracking: bool = False
 
 
 class PlanOut(BaseModel):
@@ -92,14 +95,23 @@ class ForecastOut(BaseModel):
     subject_name: str
     class_label: str
     # rag: green | amber | red | none | unplanned | unallocated
-    # `unplanned` = chapters remain unsized, so no finish date can be computed.
+    # `unplanned` = NOTHING is scheduled yet (no plan entries at all).
     # `unallocated` = the class-subject has 0 periods/week, so no pace exists.
+    # A partially planned subject gets a real RAG over its planned portion, with
+    # `unestimated_topics` counting the chapters still to be sized — info, not a
+    # warning (the school plans term by term; that's normal, not broken).
+    # Chapters filed under terms that ended before tracking_start_date are
+    # excluded from every number here — they are before our time.
     status: str
     total_topics: int
     baseline_finish: date | None = None
     projected_finish: date | None = None
     weeks_behind: int = 0
     unestimated_topics: int = 0
+    planned_topics: int = 0
+    # The term running today has chapters but not one of them is scheduled —
+    # the one "no plan" state worth an alert.
+    current_term_unplanned: bool = False
 
 
 # ── generation pipeline (V2-M2, SPRD2 §5.2) ──────────────────────────────────

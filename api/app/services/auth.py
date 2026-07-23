@@ -83,6 +83,7 @@ class AuthService:
             "token_type": "bearer",
             "org_role": membership.org_role,
             "must_set_password": user.must_set_password,
+            "is_super_admin": user.is_super_admin,
             "user": user,
             "org": org,
             "orgs": self.list_user_orgs(user.id),

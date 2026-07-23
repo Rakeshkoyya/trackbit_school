@@ -24,6 +24,12 @@ class User(Base, UUIDPKMixin, CreatedAtMixin):
     must_set_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Platform operator (the TrackBit dev/founder): can list every school, create
+    # new ones, and enter any of them as an admin. Granted only via seed/DB —
+    # there is deliberately NO endpoint that sets this flag.
+    is_super_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, name={self.name!r})>"

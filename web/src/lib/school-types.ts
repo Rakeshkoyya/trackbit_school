@@ -5,6 +5,9 @@ export interface AcademicYear {
   label: string;
   start_date: string;
   end_date: string;
+  /** Mid-year adoption: when TrackBit started recording (null = start_date).
+   *  Before this date = no-data, never a warning. */
+  tracking_start_date: string | null;
   is_active: boolean;
 }
 
@@ -161,6 +164,8 @@ export interface PlanTerm {
   topic_count: number;
   unestimated_topics: number;
   approved: boolean;
+  /** Ended before the school adopted TrackBit — never planned, never warned. */
+  pre_tracking: boolean;
 }
 
 export interface Plan {
@@ -177,13 +182,18 @@ export interface Forecast {
   class_subject_id: string;
   subject_name: string;
   class_label: string;
-  /** `unplanned` = chapters unsized; `unallocated` = 0 periods/week on the class. */
+  /** `unplanned` = NOTHING scheduled yet; `unallocated` = 0 periods/week.
+   *  A partially planned subject gets a real RAG over its planned portion,
+   *  with `unestimated_topics` as info (chapters still to be sized). */
   status: "green" | "amber" | "red" | "none" | "unplanned" | "unallocated";
   total_topics: number;
   baseline_finish: string | null;
   projected_finish: string | null;
   weeks_behind: number;
   unestimated_topics: number;
+  planned_topics: number;
+  /** The term running today has chapters but none scheduled. */
+  current_term_unplanned: boolean;
 }
 
 export interface MyDayClass {

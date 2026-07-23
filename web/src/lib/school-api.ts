@@ -27,8 +27,10 @@ const qs = (params: Record<string, string | undefined>) => {
 export const schoolApi = {
   // ── academics (master data) ───────────────────────────────────────────────
   years: () => api.get<AcademicYear[]>("/academics/years"),
-  createYear: (b: { label: string; start_date: string; end_date: string }) =>
+  createYear: (b: { label: string; start_date: string; end_date: string; tracking_start_date?: string | null }) =>
     api.post<AcademicYear>("/academics/years", b),
+  updateYear: (id: string, b: { label?: string; start_date?: string; end_date?: string; tracking_start_date?: string | null }) =>
+    api.patch<AcademicYear>(`/academics/years/${id}`, b),
   activateYear: (id: string) => api.post<AcademicYear>(`/academics/years/${id}/activate`),
   deleteYear: (id: string) => api.del<{ message: string }>(`/academics/years/${id}`),
 
@@ -119,6 +121,11 @@ export const schoolApi = {
   unapprovePlan: (csId: string, termId?: string | null) =>
     api.post<import("@/lib/school-types").Plan>(
       `/planner/plan/${csId}/unapprove${qs({ term_id: termId ?? undefined })}`),
+  /** Schedule newly sized chapters after the existing (locked) entries — the
+   *  partial-plan growth path. Never reshuffles what's already planned. */
+  extendPlan: (csId: string, termId?: string | null) =>
+    api.post<import("@/lib/school-types").Plan>(
+      `/planner/plan/${csId}/extend${qs({ term_id: termId ?? undefined })}`),
   generatePlan: (csId: string, termId?: string | null) =>
     api.post<import("@/lib/school-types").PlanGenerateResult>(
       `/planner/plan/${csId}/generate${qs({ term_id: termId ?? undefined })}`),

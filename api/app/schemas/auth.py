@@ -91,6 +91,7 @@ class SessionResponse(BaseModel):
     token_type: str = "bearer"
     org_role: str
     must_set_password: bool = False
+    is_super_admin: bool = False
     user: UserOut
     org: OrgOut
     # Every org this user can switch into (includes the current one).
@@ -100,6 +101,7 @@ class SessionResponse(BaseModel):
 class MeResponse(BaseModel):
     org_role: str
     must_set_password: bool = False
+    is_super_admin: bool = False
     user: UserOut
     org: OrgOut
     orgs: list[OrgMembershipOut] = []

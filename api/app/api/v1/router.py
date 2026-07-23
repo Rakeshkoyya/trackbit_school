@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     overview,
     periods,
     planner,
+    platform,
     push,
     recurring,
     sessions,
@@ -33,6 +34,7 @@ from app.api.v1.endpoints import (
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(org.router, prefix="/org", tags=["org"])
+api_router.include_router(platform.router, prefix="/platform", tags=["platform"])
 api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
 api_router.include_router(boards.router, prefix="/boards", tags=["boards"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])

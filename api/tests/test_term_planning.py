@@ -126,20 +126,25 @@ def test_whole_year_generate_reports_unsized_and_does_not_fit(client, cleanup):
     assert gen["fits"] is False
 
 
-def test_forecast_is_unplanned_not_green_while_chapters_are_unsized(client, cleanup):
-    """The bug this packet exists to kill: est_periods NOT NULL DEFAULT 1 meant the
-    unsized Term-2 chapters were planned as 1 period each, baseline == projected,
-    weeks_behind == 0, and the director's dashboard went green on an unplanned year."""
+def test_forecast_paces_the_planned_portion_and_carries_unsized_as_info(client, cleanup):
+    """The original bug: est_periods NOT NULL DEFAULT 1 planned unsized Term-2
+    chapters as 1 period each and the dashboard went green on an unplanned year with
+    NO trace. The first cure was 'unplanned' whenever anything was unsized; the v3
+    cure (2026-07-20) is finer — a term-wise school is not "unplanned" for eight
+    months just because Term 2 isn't sized yet. The planned portion gets a real RAG
+    and the unsized chapters are carried as an explicit count, never silently."""
     h, _y, klass, cs, t1, t2 = _setup(client, cleanup)
     _termwise(client, h, cs["id"], t1, t2)
     client.post(f"/api/v1/planner/plan/{cs['id']}/generate?term_id={t1['id']}", headers=h)
 
     rows = client.get(f"/api/v1/planner/plan/forecast?class_id={klass['id']}", headers=h).json()
     row = next(r for r in rows if r["class_subject_id"] == cs["id"])
-    assert row["status"] == "unplanned"
-    assert row["status"] != "green"
-    assert row["unestimated_topics"] == 2
-    assert row["projected_finish"] is None  # no honest finish date exists
+    assert row["status"] in ("green", "amber", "red")  # a pace for what IS planned
+    assert row["planned_topics"] == 2
+    assert row["unestimated_topics"] == 2  # …and the unsized chapters stay visible
+    assert row["projected_finish"] is not None
+    # An entirely unscheduled subject still refuses to show a colour.
+    assert row["status"] != "unplanned"
 
 
 def test_planning_term_2_does_not_touch_approved_term_1(client, cleanup):
@@ -207,14 +212,17 @@ def test_approved_term_is_locked_and_unapprove_is_an_append(client, cleanup):
                        headers=h).status_code == 422
 
 
-def test_cannot_approve_a_term_with_unsized_chapters(client, cleanup):
-    """Locking a baseline that omits chapters would make the forecast confidently wrong."""
+def test_cannot_approve_a_term_where_nothing_is_scheduled(client, cleanup):
+    """v3 (2026-07-20): unsized chapters no longer block approval — a partially
+    planned term locks its scheduled portion (test_midyear covers that). What is
+    still refused is a window with NOTHING scheduled: Term 2 here is all-unsized,
+    so its 'plan' is empty, and locking an empty promise stays an error."""
     h, _y, _k, cs, t1, t2 = _setup(client, cleanup)
     _termwise(client, h, cs["id"], t1, t2)
     client.post(f"/api/v1/planner/plan/{cs['id']}/generate?term_id={t2['id']}", headers=h)
     r = client.post(f"/api/v1/planner/plan/{cs['id']}/approve?term_id={t2['id']}", headers=h)
     assert r.status_code == 422
-    assert "no period estimate" in r.json()["error"]["message"]
+    assert "scheduled" in r.json()["error"]["message"].lower()
 
 
 def test_whole_year_replan_refused_while_a_term_is_approved(client, cleanup):

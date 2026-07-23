@@ -54,12 +54,13 @@ function WeekPlanInner() {
                   <p className="text-sm font-medium">{f.subject_name}</p>
                   <p className="text-xs text-muted-foreground">
                     {f.status === "unplanned"
-                      ? "no finish date — size the remaining chapters to forecast"
+                      ? "nothing scheduled yet — size the chapters you know and draft the plan"
                       : f.status === "unallocated"
                       ? "no periods/week set for this subject — fix the class allocation"
                       : <>
                           {f.baseline_finish ? `baseline ${weekLabel(f.baseline_finish)}` : "no plan"}
                           {f.projected_finish && f.weeks_behind > 0 ? ` · projected ${weekLabel(f.projected_finish)} (${f.weeks_behind}w behind)` : ""}
+                          {f.unestimated_topics > 0 ? ` · ${f.unestimated_topics} chapter${f.unestimated_topics === 1 ? "" : "s"} to size later` : ""}
                         </>}
                   </p>
                 </div>

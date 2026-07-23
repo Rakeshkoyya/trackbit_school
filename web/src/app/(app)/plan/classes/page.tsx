@@ -41,7 +41,7 @@ const RAG_LABEL: Record<Rag, string> = {
   none: "no plan",
   amber: "slipping",
   red: "behind",
-  unplanned: "not sized",
+  unplanned: "no plan yet",
   unallocated: "no periods/week",
 };
 
