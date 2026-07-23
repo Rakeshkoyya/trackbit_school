@@ -24,6 +24,9 @@ export const viewport: Viewport = {
   themeColor: "#2f6f4f",
   width: "device-width",
   initialScale: 1,
+  // Draw under the notch/home-indicator so fixed bars can pad themselves with
+  // env(safe-area-inset-*); without this the insets always resolve to 0.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

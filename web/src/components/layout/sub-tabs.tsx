@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,13 @@ export type SubTab = { label: string; href: string };
 export function SubTabs({ tabs }: { tabs: SubTab[] }) {
   const pathname = usePathname();
   const rootHref = tabs[0]?.href;
+  const activeRef = useRef<HTMLAnchorElement>(null);
+
+  // Keep the current tab visible on a narrow, horizontally-scrolling bar so a
+  // trailing tab (e.g. "Timetable") is never clipped off-screen.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [pathname]);
 
   return (
     <div className="mb-5 flex gap-1 overflow-x-auto border-b border-border">
@@ -26,6 +34,7 @@ export function SubTabs({ tabs }: { tabs: SubTab[] }) {
           <Link
             key={t.href}
             href={t.href}
+            ref={active ? activeRef : undefined}
             className={cn(
               "whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors",
               active

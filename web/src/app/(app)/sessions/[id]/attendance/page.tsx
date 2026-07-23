@@ -72,7 +72,7 @@ function AttendanceInner({ id }: { id: string }) {
   }));
 
   return (
-    <div className="mx-auto max-w-2xl pb-24">
+    <div className="mx-auto max-w-2xl pb-40 lg:pb-24">
       <div className="mb-4">
         <Link href={`/sessions/${id}`} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> {session?.name ?? "Session"}
@@ -109,8 +109,9 @@ function AttendanceInner({ id }: { id: string }) {
         })}
       </div>
 
-      {/* Sticky save — one thumb, one tap. */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-4 py-3 backdrop-blur lg:pl-64">
+      {/* Sticky save — one thumb, one tap. Sits above the mobile bottom-tab bar
+          (h-16) and clears the desktop sidebar; pads for the home indicator. */}
+      <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 border-t border-border bg-card/95 px-4 pt-3 pb-3 backdrop-blur lg:bottom-0 lg:z-40 lg:pl-64 lg:pb-3">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <p className="shrink-0 text-xs text-muted-foreground">
             {counts.present + counts.late}/{rows.length} present

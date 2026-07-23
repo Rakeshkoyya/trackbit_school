@@ -57,7 +57,7 @@ export default function ParentTodayPage() {
       {/* Attendance — one calm daily line, never a per-period feed. */}
       <section className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs text-muted-foreground">{child.full_name}</p>
             <p className="mt-0.5 text-base font-semibold">{status.label}</p>
             {data.status === "partial" ? (
@@ -74,7 +74,7 @@ export default function ParentTodayPage() {
               <p className="mt-0.5 text-xs text-muted-foreground">{status.hint}</p>
             ) : null}
           </div>
-          <Badge tone={status.tone}>{data.date}</Badge>
+          <Badge tone={status.tone} className="shrink-0">{data.date}</Badge>
         </div>
       </section>
 

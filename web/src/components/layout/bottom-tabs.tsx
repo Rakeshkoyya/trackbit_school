@@ -16,7 +16,7 @@ export function BottomTabs() {
   const items = navForRole(me?.org_role, me?.is_super_admin).slice(0, 5);
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
       <ul className="mx-auto flex max-w-md items-stretch justify-around">
         {items.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");

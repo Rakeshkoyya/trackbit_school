@@ -13,7 +13,7 @@ export function MainContainer({ children }: { children: React.ReactNode }) {
     return <main className="flex min-h-0 flex-1 flex-col">{children}</main>;
   }
   return (
-    <main className="flex-1 px-4 pb-24 pt-4 lg:px-8 lg:pb-8">
+    <main className="flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 lg:px-8 lg:pb-8">
       <div className="mx-auto w-full max-w-2xl lg:max-w-4xl">{children}</div>
     </main>
   );

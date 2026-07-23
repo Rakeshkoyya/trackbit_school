@@ -46,7 +46,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   const { me } = useParentPortal();
   const { logout } = useAuth();
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col px-4 pb-10 pt-4">
+    <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col px-4 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-4">
       <header className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
