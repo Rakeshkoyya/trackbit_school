@@ -471,6 +471,10 @@ export interface ReportHighlights {
   risks: string[];
   ambiguities: string[];
   wins: string[];
+  /** 2-3 sentence headline the dashboard leads with (AI-written when a key is
+   * configured, deterministic otherwise — `summary_source` says which). */
+  summary: string;
+  summary_source: string;
 }
 
 export interface DailyReport {
@@ -687,6 +691,31 @@ export interface HomeworkHealth {
   classes: HomeworkClassHealth[];
 }
 
+export interface AttendanceDay {
+  date: string;
+  periods_marked: number;
+  roster: number;          // student-periods covered by those marked periods
+  absent: number;
+  late: number;
+  present_pct: number | null;
+}
+
+export interface AttendanceClassToday {
+  class_label: string;
+  periods_marked: number;
+  periods_expected: number;
+  absent: number;
+  late: number;
+  present_pct: number | null;
+}
+
+export interface AttendancePulse {
+  window_days: number;
+  today: AttendanceDay | null;
+  days: AttendanceDay[];   // oldest → newest, marked days only
+  classes_today: AttendanceClassToday[];
+}
+
 export interface DashboardOverview {
   academic_year_id: string | null;
   rag_green: number;
@@ -696,6 +725,7 @@ export interface DashboardOverview {
   fees: FeeSummary | null;
   sessions: SessionRecord[];
   homework: HomeworkHealth;
+  attendance: AttendancePulse;
   alerts: DashboardAlert[];
 }
 
@@ -1376,4 +1406,6 @@ export interface StudentGrowth {
   subjects: GrowthSubject[];
   skills: GrowthSkill[];
   growth_areas: string[];
+  /** The mirror of `growth_areas` — what this student is visibly good at. */
+  strengths: string[];
 }

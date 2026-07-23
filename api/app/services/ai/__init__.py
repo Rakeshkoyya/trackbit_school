@@ -18,7 +18,7 @@ from app.services.ai.extract import (
     split_syllabus_text,
     suggest_mapping,
 )
-from app.services.ai.report import report_write
+from app.services.ai.report import report_summary, report_write
 from app.services.ai.timetable import parse_timetable
 
 __all__ = [
@@ -28,6 +28,7 @@ __all__ = [
     "ocr_document",
     "parse_timetable",
     "phrase_gap_question",
+    "report_summary",
     "report_write",
     "split_syllabus_text",
     "suggest_mapping",

@@ -10,6 +10,10 @@ class ReportHighlights(BaseModel):
     risks: list[str] = []
     ambiguities: list[str] = []
     wins: list[str] = []
+    # The 2-3 sentence headline the dashboard leads with; every section stays
+    # folded behind "More". `summary_source` is 'ai' or 'fixture'.
+    summary: str = ""
+    summary_source: str = "fixture"
 
 
 class ReportSection(BaseModel):

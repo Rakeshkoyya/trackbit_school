@@ -1,6 +1,7 @@
 """Director Dashboard schemas (M4, SPRD §5.4 — DB-1)."""
 
 import uuid
+from datetime import date as date_
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,38 @@ class HomeworkHealth(BaseModel):
     window_days: int
     overall_completion: float | None
     classes: list[HomeworkClassHealth]
+
+
+class AttendanceDay(BaseModel):
+    """One school day's attendance roll-up (capture-by-exception maths: a marked
+    period is a full roster minus its exception rows)."""
+    date: date_
+    periods_marked: int
+    roster: int      # student-periods covered by those marked periods
+    absent: int
+    late: int
+    present_pct: float | None
+
+
+class AttendanceClassToday(BaseModel):
+    class_label: str
+    periods_marked: int
+    periods_expected: int
+    absent: int
+    late: int
+    present_pct: float | None
+
+
+class AttendancePulse(BaseModel):
+    """Attendance as a shape, not a sentence — the dashboard charts read this.
+
+    Computed, never stored (P2/P5): the same exception rows the teacher tapped,
+    rolled up per day and per class.
+    """
+    window_days: int
+    today: AttendanceDay | None = None
+    days: list[AttendanceDay] = []          # oldest → newest, marked days only
+    classes_today: list[AttendanceClassToday] = []
 
 
 class Alert(BaseModel):
@@ -40,6 +73,7 @@ class DashboardOverview(BaseModel):
     fees: FeeSummary | None   # director-only (coordinators never read fees, §3.3)
     sessions: list[SessionRecord]
     homework: HomeworkHealth
+    attendance: AttendancePulse
     alerts: list[Alert]
 
 

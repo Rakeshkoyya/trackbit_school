@@ -302,6 +302,27 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     under a locked term; **`extend_plan`** (`POST /planner/plan/{cs}/extend`) appends newly sized
     chapters after the locked entries (P2: baseline never moves) — web PlanView gains
     "Schedule new chapters" + pre-tracking term handling. `test_midyear.py` (3).
+- **RD-1 (reporting redesign, 2026-07-23)** — no migration; additive fields only. The dashboard
+  now **leads with a written briefing**: `ai/report.py::report_summary` asks the model (via
+  `chat_json`, `AI_MODEL_DRAFT`) for 2–3 sentences over the already-computed figures and falls
+  back to `deterministic_summary` on no-key/timeout/bad-JSON, so the headline exists offline;
+  it is written once at `generate` time into `daily_reports.highlights.summary`
+  (+`summary_source`), and `_to_out` composes it deterministically for rows written before this
+  existed. Every figure folds behind **More**. `DashboardService._attendance_pulse` adds a
+  computed `attendance` block (14-day per-day roll-up + per-class today, three grouped queries,
+  no per-class loop) so the day has a *shape*: present% area chart, RAG donut, per-class
+  attendance and homework bars, fee gauge. `GrowthService._strengths` mirrors `_growth_areas`
+  (high attendance · "excellent" observations · strong scores, capped at 6) so a report card is
+  not only deficits. Frontend: **`components/charts/`** is now the one chart kit
+  (`palette.ts` = the dataviz-validated series palette + reserved status colours, `school-charts.tsx`
+  = Recharts marks, `index.tsx` = next/dynamic wrappers + `ChartCard`/`StatTile`/`MeterBar`), one
+  lazy chunk shared by all three screens. `students/trends` → `components/school/class-analytics.tsx`
+  (subject trajectories, class average with a first-test reference line, subject-profile radar,
+  score distribution, support-tier donut, movers, full table) replaces the old `TrendsView`.
+  `students/[id]` is a report card: identity band + attendance gauge, tiles,
+  **ability radar** (diagnostic skill areas) beside subject performance, strengths | growth areas,
+  score history, attendance by subject, then the chapter drill-down.
+  `components/students/growth-analytics.tsx`. Bands stay staff-only (P4) throughout.
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep

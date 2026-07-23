@@ -10,20 +10,27 @@ import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError
 from app.models import (
     AcademicYear,
+    AttendanceException,
+    ClassPeriod,
     ClassSubject,
     HomeworkAssignment,
     HomeworkCheck,
     SchoolClass,
+    Student,
+    TimetableSlot,
 )
 from app.schemas.dashboard import (
     Alert,
+    AttendanceClassToday,
+    AttendanceDay,
+    AttendancePulse,
     DashboardOverview,
     DigestOut,
     HomeworkClassHealth,
@@ -37,6 +44,7 @@ from app.services.sessions import SessionService
 from app.services.task import TaskService
 
 HOMEWORK_WINDOW_DAYS = 14
+ATTENDANCE_WINDOW_DAYS = 14
 LOW_COMPLETION = 0.6  # below this a class is flagged
 
 
@@ -92,6 +100,94 @@ class DashboardService:
         overall = round(tot_done / tot_total, 2) if tot_total else None
         return HomeworkHealth(window_days=HOMEWORK_WINDOW_DAYS, overall_completion=overall,
                               classes=classes)
+
+    # ── attendance pulse (the charts read this; nothing here is stored) ──────
+    def _attendance_pulse(self, m: CurrentMember, year_id: uuid.UUID) -> AttendancePulse:
+        """Roll the exception rows up per day and per class.
+
+        Capture-by-exception means a marked period IS a full roster minus its
+        exceptions (P1v2) — so present = roster − absent, and a day with no marked
+        period is a no-data day, never a 0% day. Three grouped queries, no
+        per-class loop: every read here is a round-trip to a remote database.
+        """
+        today = self._today(m)
+        since = today - timedelta(days=ATTENDANCE_WINDOW_DAYS - 1)
+
+        labels = {
+            cid: name + (f"-{section}" if section else "")
+            for cid, name, section in self.db.execute(
+                select(SchoolClass.id, SchoolClass.name, SchoolClass.section)
+                .where(SchoolClass.org_id == m.org_id, SchoolClass.academic_year_id == year_id)
+                .order_by(SchoolClass.name, SchoolClass.section)).all()
+        }
+        if not labels:
+            return AttendancePulse(window_days=ATTENDANCE_WINDOW_DAYS)
+
+        roster = {
+            cid: int(n) for cid, n in self.db.execute(
+                select(Student.class_id, func.count(Student.id))
+                .where(Student.org_id == m.org_id, Student.status == "active",
+                       Student.class_id.in_(labels.keys()))
+                .group_by(Student.class_id)).all()
+        }
+        rows = self.db.execute(
+            select(
+                ClassPeriod.date, ClassPeriod.class_id,
+                func.count(func.distinct(ClassPeriod.id)),
+                func.count(func.distinct(
+                    case((AttendanceException.status == "absent", AttendanceException.id)))),
+                func.count(func.distinct(
+                    case((AttendanceException.status == "late", AttendanceException.id)))),
+            )
+            .join(AttendanceException, AttendanceException.period_id == ClassPeriod.id, isouter=True)
+            .where(ClassPeriod.org_id == m.org_id, ClassPeriod.class_id.in_(labels.keys()),
+                   ClassPeriod.date >= since, ClassPeriod.date <= today,
+                   ClassPeriod.attendance_marked_at.is_not(None))
+            .group_by(ClassPeriod.date, ClassPeriod.class_id)
+        ).all()
+        # Periods scheduled TODAY per class — the denominator for "how much of
+        # today has been captured", read off the effective-dated grid.
+        expected_today = {
+            cid: int(n) for cid, n in self.db.execute(
+                select(TimetableSlot.class_id, func.count(TimetableSlot.id))
+                .where(TimetableSlot.org_id == m.org_id, TimetableSlot.weekday == today.weekday(),
+                       TimetableSlot.effective_from <= today,
+                       or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > today))
+                .group_by(TimetableSlot.class_id)).all()
+        }
+
+        per_day: dict[date, list[int]] = {}       # date → [periods, student-periods, absent, late]
+        per_class_today: dict[uuid.UUID, list[int]] = {}
+        for d, cid, periods, absent, late in rows:
+            size = roster.get(cid, 0)
+            for acc in (per_day.setdefault(d, [0, 0, 0, 0]),
+                        *([per_class_today.setdefault(cid, [0, 0, 0, 0])] if d == today else [])):
+                acc[0] += int(periods)
+                acc[1] += int(periods) * size
+                acc[2] += int(absent)
+                acc[3] += int(late)
+
+        def pct(student_periods: int, absent: int) -> float | None:
+            if not student_periods:
+                return None
+            return round((student_periods - absent) / student_periods * 100, 1)
+
+        days = [
+            AttendanceDay(date=d, periods_marked=v[0], roster=v[1], absent=v[2], late=v[3],
+                          present_pct=pct(v[1], v[2]))
+            for d, v in sorted(per_day.items())
+        ]
+        classes_today = [
+            AttendanceClassToday(
+                class_label=labels.get(cid, "?"), periods_marked=v[0],
+                periods_expected=expected_today.get(cid, 0), absent=v[2], late=v[3],
+                present_pct=pct(v[1], v[2]))
+            for cid, v in sorted(per_class_today.items(), key=lambda kv: labels.get(kv[0], ""))
+        ]
+        return AttendancePulse(
+            window_days=ATTENDANCE_WINDOW_DAYS,
+            today=next((x for x in days if x.date == today), None),
+            days=days, classes_today=classes_today)
 
     def _alerts(self, m: CurrentMember, rag_rows, homework: HomeworkHealth) -> list[Alert]:
         alerts: list[Alert] = []
@@ -158,6 +254,7 @@ class DashboardService:
                 academic_year_id=None, rag_green=0, rag_amber=0, rag_red=0, rag=[], fees=fees,
                 sessions=SessionService(self.db).records(m),
                 homework=HomeworkHealth(window_days=HOMEWORK_WINDOW_DAYS, overall_completion=None, classes=[]),
+                attendance=AttendancePulse(window_days=ATTENDANCE_WINDOW_DAYS),
                 alerts=[])
         rag_rows = self._rag_rows(m, year.id)
         homework = self._homework_health(m, year.id)
@@ -169,6 +266,7 @@ class DashboardService:
             rag=[r for r in rag_rows if r.status in ("amber", "red")], fees=fees,
             sessions=SessionService(self.db).records(m),
             homework=homework,
+            attendance=self._attendance_pulse(m, year.id),
             alerts=self._alerts(m, rag_rows, homework))
 
     # ── Monday digest (M4, DB-4) ─────────────────────────────────────────────

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, TrendingDown } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -167,91 +167,6 @@ export function BandBoard({ classId, termId, canEdit }: { classId: string; termI
         ))}
       </div>
       <InterventionSheet row={ivFor} termId={termId} onClose={() => setIvFor(null)} />
-    </div>
-  );
-}
-
-export function TrendsView({ classId }: { classId: string }) {
-  const { data: trends = [] } = useQuery({ queryKey: ["trends", classId], queryFn: () => schoolApi.trends(classId) });
-  const { data: analysis } = useQuery({ queryKey: ["class-analysis", classId], queryFn: () => schoolApi.classAnalysis(classId) });
-  if (!trends.length && !analysis?.cycles.length) return <p className="text-sm text-muted-foreground">No test cycles yet.</p>;
-  const bands = analysis?.band_counts ?? {};
-  const drops = analysis?.movers.filter((m) => m.delta < -5).slice(0, 5) ?? [];
-  const gains = analysis?.movers.filter((m) => m.delta > 5).slice(-5).reverse() ?? [];
-  const maxBucket = Math.max(1, ...(analysis?.histogram.map((h) => h.count) ?? [1]));
-  return (
-    <div className="space-y-4">
-      {/* class at a glance (SC-4) */}
-      {analysis ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-card p-4">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Band distribution (staff-only)</p>
-            <div className="flex items-center gap-2">
-              {(["A", "B", "C"] as const).map((t) => (
-                <Badge key={t} tone={TIER_TONE[t]}>{t} · {bands[t] ?? 0}</Badge>
-              ))}
-              {bands.unset ? <span className="text-xs text-muted-foreground">{bands.unset} unbanded</span> : null}
-            </div>
-          </div>
-          {analysis.histogram.length ? (
-            <div className="rounded-lg border border-border bg-card p-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Latest test · {analysis.latest_cycle_name}</p>
-              <div className="space-y-1">
-                {analysis.histogram.map((h) => (
-                  <div key={h.bucket} className="flex items-center gap-2 text-xs">
-                    <span className="w-16 shrink-0 text-muted-foreground">{h.bucket}</span>
-                    <div className="h-2 rounded-full bg-primary/70" style={{ width: `${(h.count / maxBucket) * 100}%`, minWidth: h.count ? 8 : 0 }} />
-                    <span>{h.count}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {drops.length || gains.length ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {drops.length ? (
-            <div className="rounded-lg border border-border bg-card p-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Dropped since the previous test</p>
-              <div className="space-y-1.5">
-                {drops.map((mv) => (
-                  <div key={mv.student_id} className="flex items-center justify-between text-sm">
-                    <span className="truncate">{mv.full_name}</span>
-                    <Badge tone="warning"><TrendingDown className="h-3 w-3" /> {mv.prev_pct}% → {mv.latest_pct}%</Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {gains.length ? (
-            <div className="rounded-lg border border-border bg-card p-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Improved since the previous test</p>
-              <div className="space-y-1.5">
-                {gains.map((mv) => (
-                  <div key={mv.student_id} className="flex items-center justify-between text-sm">
-                    <span className="truncate">{mv.full_name}</span>
-                    <Badge tone="success">{mv.prev_pct}% → {mv.latest_pct}%</Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="space-y-2">
-        {trends.map((t) => (
-          <div key={t.subject_id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">{t.subject_name}</p>
-              <p className="text-xs text-muted-foreground">{t.points.map((p) => `${p.cycle_name} ${p.avg_pct}%`).join(" → ")}</p>
-            </div>
-            {t.weak ? <Badge tone="warning"><TrendingDown className="h-3 w-3" /> weak</Badge> : null}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

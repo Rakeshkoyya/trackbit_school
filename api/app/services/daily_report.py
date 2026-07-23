@@ -42,7 +42,8 @@ from app.models import (
     User,
 )
 from app.schemas.reports_daily import DailyReportOut, ReportHighlights, ReportSection
-from app.services.ai import report_write
+from app.services.ai import report_summary, report_write
+from app.services.ai.report import deterministic_summary
 from app.services.planner import PlannerService
 from app.services.sessions import SessionService
 
@@ -248,7 +249,16 @@ class DailyReportService:
         sections, highlights = self._assemble(m, for_date, include_fees=include_fees)
         source, content_md = report_write(
             org.name, for_date.isoformat(), sections, highlights)
-        stored = {**highlights, "sections": [{"heading": h, "lines": ls} for h, ls in sections]}
+        # The headline is written once, at generate time, and stored — the dashboard
+        # must not pay for a model round-trip on every load.
+        summary_source, summary = report_summary(
+            org.name, for_date.isoformat(), sections, highlights)
+        stored = {
+            **highlights,
+            "summary": summary,
+            "summary_source": summary_source,
+            "sections": [{"heading": h, "lines": ls} for h, ls in sections],
+        }
         if existing is None:
             existing = DailyReport(org_id=org.id, for_date=for_date)
             self.db.add(existing)
@@ -270,11 +280,21 @@ class DailyReportService:
 
     def _to_out(self, report: DailyReport) -> DailyReportOut:
         h = report.highlights or {}
+        sections = [ReportSection(heading=s["heading"], lines=s.get("lines", []))
+                    for s in h.get("sections", [])]
+        summary = h.get("summary", "")
+        if not summary:
+            # A row written before the briefing existed. Compose the headline from
+            # what was stored rather than showing an empty card — deterministic, so
+            # this costs nothing and never calls a model on a read path.
+            summary = deterministic_summary(
+                [(s.heading, s.lines) for s in sections],
+                {k: h.get(k, []) for k in ("risks", "ambiguities", "wins")})
         return DailyReportOut(
             id=report.id, for_date=report.for_date, generated_at=report.generated_at,
             status=report.status, content_md=report.content_md,
             highlights=ReportHighlights(
                 risks=h.get("risks", []), ambiguities=h.get("ambiguities", []),
-                wins=h.get("wins", [])),
-            sections=[ReportSection(heading=s["heading"], lines=s.get("lines", []))
-                      for s in h.get("sections", [])])
+                wins=h.get("wins", []), summary=summary,
+                summary_source=h.get("summary_source", "fixture")),
+            sections=sections)

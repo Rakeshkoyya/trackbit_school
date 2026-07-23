@@ -1,12 +1,28 @@
 "use client";
 
+// The admin dashboard. Two jobs, in this order:
+//   1. THE BRIEFING — the day written as prose (AI when a key is configured,
+//      deterministic otherwise). It answers "how did today go?" in one read;
+//      every figure behind it folds away under "More" so the page opens calm.
+//   2. THE SHAPE — the same day as charts: attendance over the fortnight,
+//      syllabus pace, homework health, fee collection. A number tells you
+//      where you are; the shape tells you where you're heading.
+// Everything below that is work: alerts you can turn into tasks, then sessions.
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, BookOpen, CalendarClock, Camera, FileText, IndianRupee, RefreshCw, Send, Wand2 } from "lucide-react";
+import {
+  AlertTriangle, CalendarClock, Camera, ChevronDown, ChevronUp,
+  RefreshCw, Send, Sparkles, Wand2,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import {
+  ChartCard, Donut, Gauge, PulseArea, RowBars, StatTile, STATUS_COLOR, toneForPct,
+  type ChartRow,
+} from "@/components/charts";
 import { SetupGate } from "@/components/school/setup-gate";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -20,16 +36,12 @@ import { useYear } from "@/contexts/year-context";
 import { showApiError } from "@/lib/errors";
 import { money } from "@/lib/school-format";
 import { schoolApi } from "@/lib/school-api";
-import type { DashboardAlert } from "@/lib/school-types";
+import type { DashboardAlert, DashboardOverview } from "@/lib/school-types";
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${tone ?? ""}`}>{value}</p>
-    </div>
-  );
-}
+const dayTick = (iso: string) => {
+  const d = new Date(`${iso}T00:00:00`);
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
 
 function AlertToTaskSheet({ alert, onClose }: { alert: DashboardAlert | null; onClose: () => void }) {
   const qc = useQueryClient();
@@ -83,49 +95,86 @@ function DigestSheet({ open, onClose, yearId }: { open: boolean; onClose: () => 
   );
 }
 
-// The 8 AM report — the day, written by the system (V2-P4 §5.6). Leads the board.
-function ReportView() {
+// ── the briefing ──────────────────────────────────────────────────────────────
+
+/** The day, written. The summary is the page's opening sentence and the only
+ * thing an admin must read; sections, capture gaps and wins live under More. */
+function Briefing() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const { data } = useQuery({ queryKey: ["daily-report"], queryFn: () => schoolApi.dailyReport() });
+  const { data, isLoading } = useQuery({ queryKey: ["daily-report"], queryFn: () => schoolApi.dailyReport() });
   const regen = useMutation({
     mutationFn: () => schoolApi.regenerateReport(),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["daily-report"] }); toast.success("Report refreshed"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["daily-report"] }); toast.success("Report rewritten"); },
     onError: (e) => showApiError(e, "Could not refresh"),
   });
+
+  if (isLoading) {
+    return <div className="mb-6 h-36 animate-pulse rounded-xl border border-border bg-card" />;
+  }
   if (!data) return null;
-  const { risks, ambiguities, wins } = data.highlights;
+
+  const { risks, ambiguities, wins, summary, summary_source } = data.highlights;
+  const written = summary?.trim()
+    || "Today's figures are in — open the report for the detail.";
+  const detailCount = data.sections.length + (ambiguities.length ? 1 : 0) + (wins.length ? 1 : 0);
+
   return (
-    <section className="mb-6 rounded-xl border border-border bg-card p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <FileText className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">Daily report · {data.for_date}</h2>
-        <Badge tone={risks.length ? "warning" : "success"}>
-          {risks.length ? `${risks.length} need attention` : "all calm"}
-        </Badge>
-        <div className="ml-auto flex items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => regen.mutate()} disabled={regen.isPending}>
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Read"}</Button>
+    <section className="mb-6 overflow-hidden rounded-xl border border-border bg-card">
+      <div className="p-5">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <Sparkles className="h-3.5 w-3.5" /> Today’s briefing
+          </span>
+          <span className="text-xs text-muted-foreground">· {data.for_date}</span>
+          <Badge tone={risks.length ? "warning" : "success"}>
+            {risks.length ? `${risks.length} need${risks.length === 1 ? "s" : ""} attention` : "all calm"}
+          </Badge>
+          <div className="ml-auto flex items-center gap-1">
+            <Button size="sm" variant="ghost" title="Rewrite from today’s figures"
+              onClick={() => regen.mutate()} disabled={regen.isPending}>
+              <RefreshCw className={`h-3.5 w-3.5 ${regen.isPending ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
+
+        {/* The one thing to read. Wide leading, short measure — this is prose. */}
+        <p className="max-w-[62ch] text-[15px] leading-relaxed text-foreground">{written}</p>
+
+        {risks.length > 0 ? (
+          <ul className="mt-3 flex flex-wrap gap-1.5">
+            {risks.slice(0, 4).map((r, i) => (
+              <li key={i} className="inline-flex items-center gap-1.5 rounded-full border border-danger/25 bg-danger/8 px-2.5 py-1 text-xs">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />
+                {r}
+              </li>
+            ))}
+            {risks.length > 4 ? (
+              <li className="inline-flex items-center rounded-full px-2 py-1 text-xs text-muted-foreground">
+                +{risks.length - 4} more
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
       </div>
 
-      {risks.length > 0 ? (
-        <ul className="mb-1 space-y-0.5">
-          {risks.map((r, i) => <li key={i} className="flex gap-2 text-sm"><span className="text-danger">•</span>{r}</li>)}
-        </ul>
-      ) : null}
-      {ambiguities.length > 0 ? (
-        <p className="text-xs text-muted-foreground">{ambiguities.length} thing(s) worth a look — open the report.</p>
-      ) : null}
+      <div className="flex items-center gap-3 border-t border-border bg-muted/25 px-5 py-2.5">
+        <button type="button" onClick={() => setOpen((v) => !v)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-foreground hover:underline">
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {open ? "Hide the detail" : `More — ${detailCount} section${detailCount === 1 ? "" : "s"}`}
+        </button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          {summary_source === "ai" ? "Written by TrackBit AI from today’s captures" : "Assembled from today’s captures"}
+        </span>
+      </div>
 
       {open ? (
-        <div className="mt-3 space-y-3 border-t border-border pt-3">
+        <div className="grid gap-x-8 gap-y-4 border-t border-border p-5 sm:grid-cols-2">
           {data.sections.map((s) => (
             <div key={s.heading}>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{s.heading}</p>
-              <ul className="mt-0.5 space-y-0.5">
+              <ul className="mt-1 space-y-0.5">
                 {s.lines.map((l, i) => <li key={i} className="text-sm">{l}</li>)}
               </ul>
             </div>
@@ -133,15 +182,15 @@ function ReportView() {
           {ambiguities.length > 0 ? (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-warning">Worth a look</p>
-              <ul className="mt-0.5 space-y-0.5">
+              <ul className="mt-1 space-y-0.5">
                 {ambiguities.map((a, i) => <li key={i} className="text-sm">{a}</li>)}
               </ul>
             </div>
           ) : null}
           {wins.length > 0 ? (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#234a37]">Wins</p>
-              <ul className="mt-0.5 space-y-0.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-success">Wins</p>
+              <ul className="mt-1 space-y-0.5">
                 {wins.map((w, i) => <li key={i} className="text-sm">{w}</li>)}
               </ul>
             </div>
@@ -152,7 +201,145 @@ function ReportView() {
   );
 }
 
-function InsightsInner() {
+// ── the shape ────────────────────────────────────────────────────────────────
+
+function PulseRow({ data }: { data: DashboardOverview | undefined }) {
+  const att = data?.attendance;
+  const today = att?.today ?? null;
+  const trend = (att?.days ?? []).map((d) => d.present_pct);
+  const capturedToday = (att?.classes_today ?? []).reduce((s, c) => s + c.periods_marked, 0);
+  const expectedToday = (att?.classes_today ?? []).reduce((s, c) => s + c.periods_expected, 0);
+  const hw = data?.homework.overall_completion;
+  const totalRag = (data?.rag_green ?? 0) + (data?.rag_amber ?? 0) + (data?.rag_red ?? 0);
+  const onTrackPct = totalRag ? Math.round(((data?.rag_green ?? 0) / totalRag) * 100) : null;
+
+  return (
+    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <StatTile
+        label="Attendance today"
+        value={today?.present_pct != null ? `${today.present_pct}%` : "—"}
+        sub={today ? `${today.absent} absent · ${today.late} late` : "nothing marked yet"}
+        tone={today?.present_pct == null ? "neutral" : today.present_pct >= 90 ? "green" : today.present_pct >= 80 ? "amber" : "red"}
+        trend={trend}
+      />
+      <StatTile
+        label="Periods captured today"
+        value={expectedToday ? `${capturedToday}/${expectedToday}` : String(capturedToday)}
+        sub={expectedToday ? `${Math.round((capturedToday / expectedToday) * 100)}% of the timetable` : "no timetable for today"}
+        tone={!expectedToday ? "neutral" : capturedToday >= expectedToday ? "green" : capturedToday >= expectedToday / 2 ? "amber" : "red"}
+      />
+      <StatTile
+        label="Syllabus on track"
+        value={onTrackPct != null ? `${onTrackPct}%` : "—"}
+        sub={totalRag ? `${data?.rag_green ?? 0} of ${totalRag} class-subjects` : "no plans yet"}
+        tone={onTrackPct == null ? "neutral" : onTrackPct >= 80 ? "green" : onTrackPct >= 60 ? "amber" : "red"}
+        href="/plan/week"
+      />
+      {data?.fees ? (
+        <StatTile
+          label="Fees collected"
+          value={money(data.fees.collected_fee)}
+          sub={`${money(data.fees.overdue_amount)} overdue`}
+          href="/fees"
+        />
+      ) : (
+        <StatTile
+          label={`Homework done (${data?.homework.window_days ?? 14}d)`}
+          value={hw != null ? `${Math.round(hw * 100)}%` : "—"}
+          sub={hw != null ? "across every class" : "no checks recorded"}
+          tone={hw == null ? "neutral" : hw >= 0.75 ? "green" : hw >= 0.6 ? "amber" : "red"}
+        />
+      )}
+    </div>
+  );
+}
+
+function ShapeGrid({ data }: { data: DashboardOverview }) {
+  const att = data.attendance;
+  const attRows: ChartRow[] = att.days.map((d) => ({ x: dayTick(d.date), pct: d.present_pct }));
+  const ragSlices = [
+    { label: "On track", value: data.rag_green, color: STATUS_COLOR.green },
+    { label: "Slipping", value: data.rag_amber, color: STATUS_COLOR.amber },
+    { label: "Behind", value: data.rag_red, color: STATUS_COLOR.red },
+  ].filter((s) => s.value > 0);
+  const ragTotal = data.rag_green + data.rag_amber + data.rag_red;
+
+  const hwRows: ChartRow[] = data.homework.classes
+    .filter((c) => c.completion != null)
+    .map((c) => ({ x: c.class_label, pct: Math.round((c.completion ?? 0) * 100) }));
+  const classRows: ChartRow[] = att.classes_today
+    .filter((c) => c.present_pct != null)
+    .map((c) => ({ x: c.class_label, pct: c.present_pct }));
+
+  const feePct = data.fees && Number(data.fees.total_fee) > 0
+    ? (Number(data.fees.collected_fee) / Number(data.fees.total_fee)) * 100
+    : null;
+
+  return (
+    <div className="mb-6 grid gap-4 lg:grid-cols-2">
+      <ChartCard
+        title={`Attendance, last ${att.window_days} days`}
+        hint="Share of student-periods present. Only days with marked periods appear."
+        className="lg:col-span-2">
+        {attRows.length > 1 ? (
+          <PulseArea rows={attRows} dataKey="pct" label="Present" yUnit="%" yDomain={[0, 100]} height={170} />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Not enough marked days yet — the line starts once two days are captured.
+          </p>
+        )}
+      </ChartCard>
+
+      <ChartCard title="Syllabus pace" hint="Every class-subject, rated against its approved plan.">
+        {ragTotal ? (
+          <Donut slices={ragSlices} centerValue={String(ragTotal)} centerLabel="class-subjects" />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">No plans approved yet.</p>
+        )}
+      </ChartCard>
+
+      <ChartCard title="Attendance by class, today" hint="Present share per class from today’s marked periods.">
+        {classRows.length ? (
+          <RowBars rows={classRows} dataKey="pct" unit="%" max={100}
+            height={Math.max(140, classRows.length * 30)}
+            colorFor={(r) => toneForPct(r.pct as number, { good: 90, fair: 80 })} />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">No attendance marked today yet.</p>
+        )}
+      </ChartCard>
+
+      <ChartCard title={`Homework completion (${data.homework.window_days}d)`}
+        hint="Done vs set, per class. Under 60% raises an alert.">
+        {hwRows.length ? (
+          <RowBars rows={hwRows} dataKey="pct" unit="%" max={100}
+            height={Math.max(140, hwRows.length * 30)}
+            colorFor={(r) => toneForPct(r.pct as number, { good: 75, fair: 60 })} />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">No homework checks recorded yet.</p>
+        )}
+      </ChartCard>
+
+      {data.fees ? (
+        <ChartCard title="Fee collection" hint="Collected against the year’s billed total.">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <Gauge value={feePct} label={money(data.fees.collected_fee)}
+              sub={`of ${money(data.fees.total_fee)} billed`}
+              color={feePct != null && feePct >= 75 ? STATUS_COLOR.green : STATUS_COLOR.amber} />
+            <div className="text-right text-sm">
+              <p className="text-muted-foreground">Overdue</p>
+              <p className="text-lg font-semibold tabular-nums text-warning">{money(data.fees.overdue_amount)}</p>
+              <Link href="/fees" className="text-xs text-muted-foreground underline">Open fees</Link>
+            </div>
+          </div>
+        </ChartCard>
+      ) : null}
+    </div>
+  );
+}
+
+// ── page ─────────────────────────────────────────────────────────────────────
+
+function DashboardInner() {
   const { yearId } = useYear();
   const [alertFor, setAlertFor] = useState<DashboardAlert | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
@@ -174,7 +361,7 @@ function InsightsInner() {
         </div>
       </div>
 
-      <ReportView />
+      <Briefing />
 
       {/* Photo score captures waiting on a human (SC-4) — a pending review is actionable. */}
       {pendingCaptures.length > 0 ? (
@@ -188,17 +375,8 @@ function InsightsInner() {
         </Link>
       ) : null}
 
-      {/* RAG + fees + homework summary */}
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="On track" value={String(data?.rag_green ?? 0)} tone="text-[#234a37]" />
-        <Stat label="Behind (amber)" value={String(data?.rag_amber ?? 0)} tone="text-warning" />
-        <Stat label="Behind (red)" value={String(data?.rag_red ?? 0)} tone="text-danger" />
-        {data?.fees ? (
-          <Stat label="Fees collected" value={money(data.fees.collected_fee)} />
-        ) : (
-          <Stat label="Homework done" value={data?.homework.overall_completion != null ? `${Math.round(data.homework.overall_completion * 100)}%` : "—"} />
-        )}
-      </div>
+      <PulseRow data={data} />
+      {data ? <ShapeGrid data={data} /> : null}
 
       {/* Alerts feed — each with Create task */}
       <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><AlertTriangle className="h-4 w-4" /> Alerts</h2>
@@ -219,51 +397,24 @@ function InsightsInner() {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Today's sessions */}
-        <section>
-          <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><CalendarClock className="h-4 w-4" /> Today’s sessions</h2>
-          {!data || data.sessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No sessions recorded today.</p>
-          ) : (
-            <div className="space-y-2">
-              {data.sessions.map((s) => (
-                <div key={s.meeting_id} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
-                  <p className="font-medium">{s.session_name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {s.present + s.late}/{s.total} attended · {s.late} late · {s.homework_done} did homework
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Homework health */}
-        <section>
-          <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><BookOpen className="h-4 w-4" /> Homework health (14d)</h2>
-          <div className="space-y-2">
-            {data?.homework.classes.map((c) => (
-              <div key={c.class_label} className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
-                <span>{c.class_label} <span className="text-xs text-muted-foreground">· {c.assignments} set</span></span>
-                <Badge tone={c.completion == null ? "neutral" : c.completion < 0.6 ? "warning" : "success"}>
-                  {c.completion == null ? "no data" : `${Math.round(c.completion * 100)}%`}
-                </Badge>
+      {/* Today's sessions */}
+      <section className="mb-6">
+        <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><CalendarClock className="h-4 w-4" /> Today’s sessions</h2>
+        {!data || data.sessions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No sessions recorded today.</p>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {data.sessions.map((s) => (
+              <div key={s.meeting_id} className="rounded-lg border border-border bg-card px-4 py-3 text-sm">
+                <p className="font-medium">{s.session_name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {s.present + s.late}/{s.total} attended · {s.late} late · {s.homework_done} did homework
+                </p>
               </div>
             ))}
           </div>
-        </section>
-      </div>
-
-      {data?.fees ? (
-        <div className="mt-6 flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-          <IndianRupee className="h-5 w-5 text-muted-foreground" />
-          <div className="flex-1 text-sm">
-            <p className="font-medium">Fee collection</p>
-            <p className="text-xs text-muted-foreground">{money(data.fees.collected_fee)} of {money(data.fees.total_fee)} · {money(data.fees.overdue_amount)} overdue</p>
-          </div>
-        </div>
-      ) : null}
+        )}
+      </section>
 
       <AlertToTaskSheet alert={alertFor} onClose={() => setAlertFor(null)} />
       <DigestSheet open={digestOpen} onClose={() => setDigestOpen(false)} yearId={yearId} />
@@ -274,7 +425,7 @@ function InsightsInner() {
 export default function DashboardPage() {
   return (
     <AuthGuard allow={["admin"]}>
-      <InsightsInner />
+      <DashboardInner />
     </AuthGuard>
   );
 }

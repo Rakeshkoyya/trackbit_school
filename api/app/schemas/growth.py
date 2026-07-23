@@ -97,3 +97,5 @@ class StudentGrowthOut(BaseModel):
     # Derived attention list — repeated needs_work concepts, repeated check
     # flags, weak scores, low attendance. Phrases, never tiers.
     growth_areas: list[str] = []
+    # The mirror list — high attendance, 'excellent' observations, strong scores.
+    strengths: list[str] = []

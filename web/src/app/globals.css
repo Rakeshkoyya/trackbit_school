@@ -38,6 +38,21 @@
   --danger: #b3402f;            /* reserved; used sparingly (destructive only) */
   --danger-foreground: #ffffff;
 
+  /*
+    Chart status marks. NOT the same values as --success/--warning/--danger:
+    those are tuned as text and badge colours, and as adjacent arcs on a donut
+    the amber and the red fail the dataviz normal-vision separation floor
+    (ΔE 13.7, below 15 — hard to tell apart even with full colour vision).
+    These steps are re-stepped for marks and validated with
+    scripts/validate_palette.js: green↔amber↔red all pass lightness, chroma,
+    normal-vision separation and 3:1 contrast on white. The one WARN is CVD
+    separation at ΔE 7.3, which is legal only alongside secondary encoding —
+    every use ships direct labels with counts, so keep the labels.
+  */
+  --chart-green: #2f8f5b;
+  --chart-amber: #bd8a1c;
+  --chart-red: #93231c;
+
   --radius: 0.75rem;
 }
 
@@ -74,6 +89,18 @@
 
   --danger: #d8624e;
   --danger-foreground: #1a0a07;
+
+  /*
+    Chart status marks on the dark canvas — validated against #21211b. Lightness,
+    chroma, CVD separation, normal-vision separation (ΔE 18.7) and contrast all
+    pass except the lightness band: the amber sits at L 0.756, above the 0.67
+    ceiling. That is deliberate. Every darker amber we tried collapsed the amber
+    ↔ red distance under the ΔE-15 floor, and legibility beats weight uniformity
+    — a reader who cannot tell "slipping" from "behind" has lost the chart.
+  */
+  --chart-green: #43a771;
+  --chart-amber: #dba63a;
+  --chart-red: #d05a41;
 }
 
 @theme inline {

@@ -56,6 +56,11 @@ from app.schemas.growth import (
 
 _LOW_ATTENDANCE_PCT = 85.0
 _LOW_SCORE_PCT = 40.0
+# The strengths side of the same evidence — deliberately a high bar, so the list
+# stays short enough to be worth reading.
+_HIGH_ATTENDANCE_PCT = 95.0
+_HIGH_SCORE_PCT = 75.0
+_MAX_STRENGTHS = 6
 
 
 def _pct(part: int, whole: int) -> float | None:
@@ -244,6 +249,7 @@ class GrowthService:
 
         out.skills = self._skills(m.org_id, student.id)
         out.growth_areas = self._growth_areas(out, obs_rows)
+        out.strengths = self._strengths(out, obs_rows)
         return out
 
     def _bands(self, org_id: uuid.UUID, student_id: uuid.UUID,
@@ -303,3 +309,37 @@ class GrowthService:
                 areas.append(f"{skill.skill_area}: {skill.score:g}/{skill.max_score:g} "
                              f"in {skill.cycle_name}")
         return areas
+
+    def _strengths(self, out: StudentGrowthOut,
+                   obs_rows: list[LessonObservation]) -> list[str]:
+        """The mirror of `_growth_areas` — what this student is visibly good at.
+
+        Same evidence, opposite threshold. A report that only lists deficits is a
+        complaint, not a report; the teacher needs the sentence they can open a
+        parent conversation with. Phrases, never tiers (P4).
+        """
+        strengths: list[str] = []
+        if out.attendance.pct is not None and out.attendance.pct >= _HIGH_ATTENDANCE_PCT:
+            strengths.append(f"Attendance {out.attendance.pct}% — rarely misses class")
+        excellent: dict[tuple[str, str | None], int] = defaultdict(int)
+        for o in obs_rows:
+            if o.rating == "excellent":
+                excellent[(o.section, o.concept)] += 1
+        for (section, concept), n in excellent.items():
+            label = f"{section} · {concept}" if concept else section
+            strengths.append(f"{label} — noted excellent{f' {n}×' if n > 1 else ''} in class")
+        for subj in out.subjects:
+            if subj.scores:
+                last = subj.scores[-1]
+                if last.max_score and last.score * 100.0 / last.max_score >= _HIGH_SCORE_PCT:
+                    strengths.append(f"{subj.subject_name}: scored {last.score:g}/{last.max_score:g} "
+                                     f"in {last.cycle_name}")
+        for skill in out.skills:
+            if skill.max_score and skill.score * 100.0 / skill.max_score >= _HIGH_SCORE_PCT:
+                strengths.append(f"{skill.skill_area}: {skill.score:g}/{skill.max_score:g} "
+                                 f"in {skill.cycle_name}")
+        # A strong student clears the bar in everything, and a fifteen-line list
+        # of strengths reads as noise. Keep the first few — the order above is
+        # already most-telling first (attendance, then what a teacher saw in
+        # class, then test scores, then diagnostics).
+        return strengths[:_MAX_STRENGTHS]

@@ -1,7 +1,8 @@
 "use client";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { TrendsView, useClassPick } from "@/components/school/assessments";
+import { useClassPick } from "@/components/school/assessments";
+import { ClassAnalytics } from "@/components/school/class-analytics";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { PageHeader } from "@/components/ui/page-header";
 import { useYear } from "@/contexts/year-context";
@@ -12,8 +13,8 @@ function TrendsInner() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <PageHeader title="Trends" subtitle="Subject-wise progress across cycles" />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <PageHeader title="Trends" subtitle="How this class is moving, subject by subject" />
         <div className="flex items-center gap-2">
           <YearSwitcher />
           <select className="rounded-md border border-border bg-card px-2.5 py-1.5 text-sm" value={classId} onChange={(e) => setClassId(e.target.value)}>
@@ -21,7 +22,7 @@ function TrendsInner() {
           </select>
         </div>
       </div>
-      {classId ? <TrendsView classId={classId} /> : null}
+      {classId ? <ClassAnalytics classId={classId} /> : null}
     </div>
   );
 }
