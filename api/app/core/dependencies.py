@@ -10,11 +10,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.context import CurrentMember
+from app.core.context import CurrentMember, CurrentParent
 from app.core.database import get_db
 from app.core.exceptions import AuthError, ForbiddenError
 from app.core.security import decode_access_token
-from app.models import Membership, Organization, User
+from app.models import Guardian, Membership, Organization, Student, User
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -75,6 +75,66 @@ def get_current_member(
     _touch_last_active(db, membership)
 
     return CurrentMember(user=user, org=org, membership=membership)
+
+
+def _decode_payload(creds: HTTPAuthorizationCredentials | None) -> dict:
+    if creds is None or not creds.credentials:
+        raise AuthError("Authentication required.", code="missing_token")
+    try:
+        return decode_access_token(creds.credentials)
+    except jwt.ExpiredSignatureError as exc:
+        raise AuthError("Session expired.", code="token_expired") from exc
+    except jwt.PyJWTError as exc:
+        raise AuthError("Invalid authentication token.", code="bad_token") from exc
+
+
+def get_current_parent(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> CurrentParent:
+    """Parent-portal principal. Only tokens minted with role='parent' pass —
+    staff sessions never reach parent endpoints (and parent sessions fail
+    get_current_member because parents have no membership).
+
+    Revocation is live: no active-student guardian link in this org => 401,
+    so an admin deleting/re-phoning a guardian ends the session at once."""
+    payload = _decode_payload(creds)
+    if payload.get("role") != "parent":
+        raise AuthError("This action needs a parent login.", code="not_parent")
+    try:
+        user_id = uuid.UUID(payload["sub"])
+        org_id = uuid.UUID(payload["org"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise AuthError("Malformed authentication token.", code="bad_token") from exc
+
+    _engage_rls(db, org_id)
+    org = db.get(Organization, org_id)
+    user = db.get(User, user_id)
+    if org is None or user is None or not org.parent_portal_enabled:
+        raise AuthError("Session is no longer valid.", code="revoked")
+    students = list(db.scalars(
+        select(Student)
+        .join(Guardian, Guardian.student_id == Student.id)
+        .where(Guardian.org_id == org_id, Guardian.user_id == user_id,
+               Student.status == "active")
+        .distinct()
+    ))
+    if not students:
+        raise AuthError("Session is no longer valid.", code="revoked")
+    return CurrentParent(user=user, org=org, students=students)
+
+
+def get_current_principal(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> CurrentMember | CurrentParent:
+    """Member OR parent, decided by the token's role claim. Only for surfaces
+    genuinely shared by both (e.g. /auth/me); feature endpoints keep the
+    specific guard."""
+    payload = _decode_payload(creds)
+    if payload.get("role") == "parent":
+        return get_current_parent(creds, db)
+    return get_current_member(creds, db)
 
 
 def require_super_admin(

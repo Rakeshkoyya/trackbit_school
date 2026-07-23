@@ -53,3 +53,28 @@ class CurrentMember:
     @property
     def is_office_up(self) -> bool:
         return self.membership.org_role in roles.OFFICE_UP
+
+
+@dataclass
+class CurrentParent:
+    """Resolved parent auth context (parent portal): a guardian user plus the
+    active students their claimed guardian rows link to in this org.
+
+    Not a CurrentMember — parents have no membership and no staff role; staff
+    guards never accept a parent token and vice versa. org_id still comes only
+    from the verified token (law 1)."""
+
+    user: "User"
+    org: Organization
+    students: list  # active Student rows in this org, the parent's children
+
+    @property
+    def user_id(self) -> uuid.UUID:
+        return self.user.id
+
+    @property
+    def org_id(self) -> uuid.UUID:
+        return self.org.id
+
+    def child_ids(self) -> set[uuid.UUID]:
+        return {s.id for s in self.students}

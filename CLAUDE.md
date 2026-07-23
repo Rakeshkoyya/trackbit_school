@@ -336,6 +336,25 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   Enquiries) with `/platform/enquiries` → `components/school/enquiries-screen.tsx` (status chips
   with counts, search, lead rows, detail sheet with tel:/mailto:, status picker, remark box and
   the history timeline). `test_marketing.py` +3.
+- **PC-1 (parent portal, 2026-07-23)** — migration **`c4d5e6f7a8b9`** (head). Guardians get a
+  **read-only login** (founder decision; supersedes the "no parent login" fence — P4 intact).
+  `guardians.user_id` (claimed at first OTP login), `otp_codes` (phone-keyed, hashed code,
+  attempt-capped — the failed-attempt bump commits in its own session so lockout survives the
+  request rollback), `organizations.parent_portal_enabled`. `parent_auth.py`: last-10-digit
+  phone matching, OTP request/verify (5/hr throttle, 5-attempt lock), find-or-create user +
+  link ALL guardian rows with that phone (siblings roll up), `role='parent'` session (no
+  membership, no token_version — revocation is the live link check in `get_current_parent`);
+  `/auth/login`+`/auth/refresh`+`/auth/me` fall back to parent sessions so the web token
+  machinery is shared; optional username/email+password (`/parent/auth/credentials`).
+  `otp_delivery.py`: WhatsApp auth-template first, MSG91 SMS fallback, console stub with no
+  keys (`OTP_ECHO_IN_RESPONSE` echoes the code in dev). `parent_portal.py`: **curated
+  projection** (allowlist, field-by-field — never a spread) over Timeline (today: DAILY
+  attendance status present|partial|absent|not_marked|no_school, topics taught, homework,
+  evening sessions) and Growth (report: coverage + missed-while-absent, scores, derived
+  strengths/growth areas) — **no bands/skills/observations/check-flags**, asserted by
+  `test_parent_portal.py` (5). Web: `/parent` area (own mobile-first shell, no staff nav) —
+  OTP login, Today/Progress/Report/Profile tabs, sibling switcher; `OrgRole` gains `"parent"`,
+  staff shell is `allow={["admin","teacher"]}`. Fees view = PC phase 2 (founder call).
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
@@ -492,7 +511,13 @@ their students, tasks). Migration `e9fab0c1d2e3` collapsed coordinator/office �
 `require_coordinator_up` / `require_office_up` are now **admin-only aliases** (consolidate to
 `require_admin` opportunistically when touching a file); `require_academic` = any member.
 Non-negotiable: **teachers never see fees; band tiers never reach parents/guardians.**
-Parents have **no login** — guardians are records that receive outbound notifications only.
+**Parents (PC-1, founder decision 2026-07-23):** guardians get a **read-only portal login** —
+NOT a membership. A `guardians.user_id` link + a `role='parent'` token (no token_version;
+revocation = the live guardian-link check). Phone-OTP login (`/parent/auth/*`), optional
+username/email+password later. Everything a parent sees goes through the **curated projection**
+in `services/parent_portal.py` (allowlist, never a spread): attendance/topics/homework/coverage/
+scores/derived phrases — never bands, skills, raw observations, or check flags (P4 tests in
+`test_parent_portal.py`). Staff guards reject parent tokens and vice versa.
 
 ## AI services & stubs
 
@@ -526,13 +551,15 @@ Two rules make it safe in the setup wizard's critical path:
 timetable (import-first + AI-assisted draft with **deterministic** validators — still no guaranteed
 solver) · daily report generation · per-student homework · **Lucy, a staff-only agentic chat
 surface (2026-07-12)** — tools wrap existing services only, widget data is server-materialized,
-writes are human-confirmed pending actions; the registry is the seed of a future MCP server.
+writes are human-confirmed pending actions; the registry is the seed of a future MCP server ·
+**parent portal login (PC-1, 2026-07-23)** — read-only, phone-OTP, curated projection only
+(see Roles above); fees view is planned as PC-phase-2.
 
 **Still OUT:** payroll/HR/library/transport/inventory/visitor/social modules · report-card
-designer · test authoring/conducting · parent app or login (notifications only) · **any
-parent/guardian-facing chat or AI surface** · **mandatory per-student capture** (exception-only,
-always — P1v2) · per-student evidence photos (batch only). LMS + teacher training = Playground's
-lane.
+designer · test authoring/conducting · **any parent/guardian-facing chat or AI surface** ·
+parent WRITES of any kind (the portal is read-only; leave requests/messages are a future
+decision) · **mandatory per-student capture** (exception-only, always — P1v2) · per-student
+evidence photos (batch only). LMS + teacher training = Playground's lane.
 
 ## Build order
 

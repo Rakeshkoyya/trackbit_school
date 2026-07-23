@@ -51,6 +51,8 @@ export function navForRole(
       return [...extra, dashboard, lucy, plan, students, fees, tasks, setup];
     case "teacher":
       return [...extra, myDay, lucy, sessions, plan, students, tasks];
+    case "parent":
+      return []; // parents never see the staff shell — they live under /parent
     default:
       return [...extra, tasks];
   }
@@ -66,5 +68,6 @@ export function landingForRole(
   if (isSuperAdmin) return "/platform";
   if (role === "admin") return "/dashboard"; // school dashboard / daily report
   if (role === "teacher") return "/my-day"; // My Day period timeline
+  if (role === "parent") return "/parent"; // parent portal (child's day)
   return "/tasks";
 }

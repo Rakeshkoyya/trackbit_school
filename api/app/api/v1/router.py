@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
     ops,
     org,
     overview,
+    parent,
     periods,
     planner,
     platform,
@@ -61,3 +62,4 @@ api_router.include_router(assessments.router, prefix="/assessments", tags=["asse
 api_router.include_router(students.router, prefix="/students", tags=["students"])
 api_router.include_router(fees.router, prefix="/fees", tags=["fees"])
 api_router.include_router(lucy.router, prefix="/lucy", tags=["lucy"])
+api_router.include_router(parent.router, prefix="/parent", tags=["parent"])

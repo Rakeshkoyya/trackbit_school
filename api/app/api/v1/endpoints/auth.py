@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.context import CurrentParent
 from app.core.database import get_db
-from app.core.dependencies import get_current_member
+from app.core.dependencies import get_current_member, get_current_principal
 from app.core.exceptions import ForbiddenError
 from app.core.rate_limit import limiter
 from app.models import User
@@ -112,7 +113,13 @@ def verify(request: Request, body: VerifyTokenRequest, db: Session = Depends(get
 
 
 @router.get("/me", response_model=MeResponse)
-def me(member=Depends(get_current_member), db: Session = Depends(get_db)) -> MeResponse:
+def me(principal=Depends(get_current_principal), db: Session = Depends(get_db)) -> MeResponse:
+    if isinstance(principal, CurrentParent):
+        return MeResponse(
+            org_role="parent", must_set_password=principal.user.must_set_password,
+            user=principal.user, org=principal.org, orgs=[],
+        )
+    member = principal
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
         is_super_admin=member.user.is_super_admin,

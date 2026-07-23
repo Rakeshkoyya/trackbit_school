@@ -13,7 +13,8 @@ import { YearProvider } from "@/contexts/year-context";
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthGuard>
+    // Staff only — a parent session bounces to /parent via landingForRole.
+    <AuthGuard allow={["admin", "teacher"]}>
       <CelebrationProvider>
         <YearProvider>
         <div className="flex min-h-dvh">

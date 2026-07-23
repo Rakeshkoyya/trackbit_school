@@ -1,13 +1,16 @@
 // Shapes mirrored from the backend Pydantic schemas.
 
-// SPRD v2 §2 — two roles: admin (runs the school) · teacher (all staff).
-export type OrgRole = "admin" | "teacher";
+// SPRD v2 §2 — two staff roles: admin (runs the school) · teacher (all staff).
+// "parent" is NOT a membership: it's the guardian-login session role (parent
+// portal, founder decision 2026-07-23) and never appears in Members.
+export type OrgRole = "admin" | "teacher" | "parent";
 
-// Assignable roles + their plain-school-language labels (SPRD §6.1 voice).
+// Assignable STAFF roles + their plain-school-language labels (SPRD §6.1 voice).
 export const ORG_ROLES: OrgRole[] = ["admin", "teacher"];
 export const ROLE_LABELS: Record<OrgRole, string> = {
   admin: "Admin",
   teacher: "Teacher",
+  parent: "Parent",
 };
 
 export interface User {

@@ -47,6 +47,7 @@ from app.models.marketing import DemoRequest, DemoRequestNote
 from app.models.notification import DeviceToken, Notification
 from app.models.onboarding import OnboardingState
 from app.models.org import Membership, Organization
+from app.models.otp import OtpCode
 from app.models.periods import AttendanceException, ClassPeriod
 from app.models.planner import (
     Plan,
@@ -112,6 +113,7 @@ __all__ = [
     "Notification",
     "OnboardingState",
     "Organization",
+    "OtpCode",
     "Plan",
     "PlanApproval",
     "PlanComment",

@@ -74,6 +74,12 @@ class Guardian(Base, UUIDPKMixin, CreatedAtMixin):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     relation: Mapped[str | None] = mapped_column(Text, nullable=True)  # "Father" / "Mother" / …
     phone: Mapped[str] = mapped_column(Text, nullable=False)  # E.164
+    # Set when the guardian claims a parent login via phone OTP. SET NULL keeps
+    # the guardian record if the user account is ever deleted.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     # Consent flag captured at roster import; every guardian message honours it (SPRD §7).
     notify_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

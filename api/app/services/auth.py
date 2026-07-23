@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import nulls_last, select, text
+from sqlalchemy import func, nulls_last, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -127,11 +127,20 @@ class AuthService:
         return self._build_session(user, org, membership)
 
     def login(self, *, identifier: str, password: str) -> dict:
+        from app.services.parent_auth import ParentAuthService, phone_key
+
         ident = (identifier or "").strip()
         if "@" in ident:
             user = self.db.scalar(select(User).where(User.email == ident))
         else:
             user = self.db.scalar(select(User).where(User.username == ident.lower()))
+            if user is None and len(phone_key(ident)) >= 10:
+                # Parents may sign in by the phone number they registered with
+                # (matched on the last 10 digits, like the guardian lookup).
+                user = self.db.scalar(select(User).where(
+                    func.right(func.regexp_replace(func.coalesce(User.phone, ""),
+                                                   r"\D", "", "g"), 10)
+                    == phone_key(ident)))
         if user is None or not user.password_hash or not verify_password(password, user.password_hash):
             raise AuthError("Incorrect email/username or password.", code="bad_credentials")
 
@@ -145,6 +154,12 @@ class AuthService:
             .limit(1)
         )
         if membership is None:
+            # No staff membership — a linked guardian with credentials continues
+            # as a parent session (parent portal).
+            parents = ParentAuthService(self.db)
+            org = parents.parent_org_for(user.id)
+            if org is not None:
+                return parents.build_session(user, org)
             raise AuthError("This account is not active in any organization.", code="no_membership")
 
         org = self.db.get(Organization, membership.org_id)
@@ -241,6 +256,15 @@ class AuthService:
             )
         )
         if membership is None:
+            # Parent sessions have no membership — continue as a parent session
+            # while the guardian link is still live (parent portal).
+            from app.services.parent_auth import ParentAuthService
+            parents = ParentAuthService(self.db)
+            if parents.has_links(token_row.user_id, token_row.org_id):
+                token_row.used_at = _now()
+                user = self.db.get(User, token_row.user_id)
+                org = self.db.get(Organization, token_row.org_id)
+                return parents.build_session(user, org)
             raise AuthError("Session is no longer valid.", code="revoked")
 
         token_row.used_at = _now()  # rotation: old token can never be reused

@@ -187,6 +187,25 @@ class Settings(BaseSettings):
     def whatsapp_configured(self) -> bool:
         return bool(self.WHATSAPP_API_KEY and self.WHATSAPP_SENDER)
 
+    # ── Parent portal OTP login ─────────────────────────────────────────────
+    # Delivery is WhatsApp-first (authentication template — no DLT paperwork),
+    # MSG91 SMS fallback (needs a DLT-registered OTP template). Neither key set
+    # => the code is logged to console (dev/pilot), same stub doctrine as above.
+    OTP_EXPIRE_MINUTES: int = 5
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_MAX_SENDS_PER_HOUR: int = 5
+    # Dev-only convenience: echo the code in the request-otp response so the
+    # flow is testable without any delivery channel. NEVER enable in prod.
+    OTP_ECHO_IN_RESPONSE: bool = False
+    # Meta WhatsApp authentication template name (pre-approved, one {{code}} var).
+    WHATSAPP_OTP_TEMPLATE: str = "login_otp"
+    MSG91_AUTH_KEY: str = ""
+    MSG91_OTP_TEMPLATE_ID: str = ""
+
+    @property
+    def msg91_configured(self) -> bool:
+        return bool(self.MSG91_AUTH_KEY and self.MSG91_OTP_TEMPLATE_ID)
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -40,6 +41,11 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     # >= band_b_min → B, else C. Admin-configurable on the Bands screen.
     band_a_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default="75")
     band_b_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default="50")
+    # Parent portal (phone-OTP login for guardians). Per-school switch so rollout
+    # can go school-by-school; OTP requests are refused while it's off.
+    parent_portal_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
 
     __table_args__ = (
         CheckConstraint("plan IN ('free', 'pro')", name="plan_valid"),
