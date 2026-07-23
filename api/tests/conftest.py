@@ -1,16 +1,67 @@
 """Shared pytest fixtures."""
 
+import os
 import uuid
+from urllib.parse import urlsplit
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, delete
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
-from app.core.rate_limit import limiter
-from app.main import app
-from app.models import Organization, User
+
+# ─────────────────────────────────────────────────────────────────────────
+# Test-database guard — MUST run before anything imports app.core.database,
+# because that module builds the engine from settings.DATABASE_URL at import.
+#
+# The `cleanup` fixture below hard-deletes organizations and users, and the
+# suite creates orgs freely. That was safe only while DATABASE_URL pointed at
+# a throwaway dev database. It now points at production (DigitalOcean), so the
+# suite runs against TEST_DATABASE_URL and refuses to start if that would be
+# the same database as DATABASE_URL.
+#
+# Escape hatch for a dev-only machine where both URLs are the same throwaway
+# database: ALLOW_TESTS_ON_DATABASE_URL=1.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _target(url: str) -> tuple:
+    """(host, port, database) — the identity that matters for "is this the same DB"."""
+    parts = urlsplit(url)
+    return (parts.hostname, parts.port, parts.path)
+
+
+_APP_URL = settings.DATABASE_URL
+_TEST_URL = os.environ.get("TEST_DATABASE_URL") or settings.TEST_DATABASE_URL
+
+if os.environ.get("ALLOW_TESTS_ON_DATABASE_URL") != "1":
+    if not _TEST_URL:
+        pytest.exit(
+            "TEST_DATABASE_URL is not set. The suite hard-deletes orgs and users, and "
+            "DATABASE_URL currently points at production. Set TEST_DATABASE_URL in "
+            "api/.env to a throwaway database, or export ALLOW_TESTS_ON_DATABASE_URL=1 "
+            "if DATABASE_URL really is disposable.",
+            returncode=4,
+        )
+    if _target(_TEST_URL) == _target(_APP_URL):
+        pytest.exit(
+            f"TEST_DATABASE_URL and DATABASE_URL are the same database "
+            f"({_target(_APP_URL)[0]}{_target(_APP_URL)[2]}). The suite would hard-delete "
+            "orgs out of it. Point TEST_DATABASE_URL somewhere disposable.",
+            returncode=4,
+        )
+
+# Redirect BOTH engines at the test database. `migration_database_url` (used by
+# the privileged cleanup engine below) reads ADMIN_DATABASE_URL first, so it has
+# to move too — otherwise cleanup would delete from production.
+settings.DATABASE_URL = _TEST_URL
+settings.ADMIN_DATABASE_URL = _TEST_URL
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.core.rate_limit import limiter  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Organization, User  # noqa: E402
 
 # Privileged session for setup/teardown (bypasses RLS) — never used by app code.
 # One connection at a time is plenty: this engine only runs the cleanup deletes, and
