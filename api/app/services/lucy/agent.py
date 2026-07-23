@@ -21,6 +21,7 @@ the representation, the numbers come from the stored result (widgets.py)."""
 import json
 import logging
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -71,6 +72,94 @@ def _render_widget_tool(is_admin: bool) -> dict:
     }
 
 
+_ASK_USER = {
+    "type": "function",
+    "function": {
+        "name": "ask_user",
+        "description": (
+            "Ask the user ONE clarifying question with tappable options, then STOP "
+            "— their choice arrives as the next message. Use it when a lookup "
+            "matches several entities (two students with the same name: option "
+            "label = name + class, value = the id) or a required choice is "
+            "genuinely ambiguous. Never ask when there is exactly one match, and "
+            "never ask more than one question per turn."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string",
+                                      "description": "what the user sees on the chip"},
+                            "value": {"type": "string",
+                                      "description": "id/value carried back with the "
+                                                     "choice (e.g. a student_id)"},
+                            "detail": {"type": "string",
+                                       "description": "small print under the label"},
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False,
+                    },
+                },
+                "allow_free_text": {"type": "boolean",
+                                    "description": "let the user type their own "
+                                                   "answer too (default true)"},
+            },
+            "required": ["question", "options"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+_COMPOSE_VIEW = {
+    "type": "function",
+    "function": {
+        "name": "compose_view",
+        "description": (
+            "Organize widgets you already rendered THIS turn into one titled, "
+            "saved view (a mini-dashboard the user can reopen, refresh and "
+            "print). Use it for broad asks — meeting prep, 'full report on X', "
+            "'how is class Y doing overall' — after fetching from several tools "
+            "and rendering the widgets. Each section groups related widgets under "
+            "a heading with an optional 1-2 sentence narrative (no numbers you "
+            "did not fetch). Call it at most once, after your last render_widget."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string",
+                          "description": "short name for the view, e.g. "
+                                         "'Rohit Sharma — parent meeting brief'"},
+                "summary": {"type": "string",
+                            "description": "one-line description of what it covers"},
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "narrative": {"type": "string",
+                                          "description": "1-2 sentences of context; "
+                                                         "cite only fetched data"},
+                            "widget_ids": {"type": "array",
+                                           "items": {"type": "string"},
+                                           "description": "widget_id values returned "
+                                                          "by render_widget this turn"},
+                        },
+                        "required": ["heading", "widget_ids"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["title", "sections"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
 def _tool_label(name: str) -> str:
     return name.removeprefix("get_").replace("_", " ")
 
@@ -90,7 +179,8 @@ def run_agent(
 
     # The member's tool schemas need a CurrentMember once, up front.
     with member_session() as (db, m):
-        tools = registry.to_openai_tools(m) + [_render_widget_tool(m.is_admin)]
+        tools = registry.to_openai_tools(m) + [
+            _render_widget_tool(m.is_admin), _ASK_USER, _COMPOSE_VIEW]
         specs = {s.name: s for s in registry.visible_tools(m)}
 
     messages: list[dict[str, Any]] = [
@@ -103,6 +193,8 @@ def run_agent(
     widgets: list[dict] = []
     actions: list[dict] = []
     trace: list[dict] = []
+    # One question and one composed view per turn (GA §4/§5); a question ends it.
+    extras: dict[str, Any] = {"question": None, "view": None}
     content = ""
     started = time.monotonic()
 
@@ -136,12 +228,16 @@ def run_agent(
             for tc in tool_calls:
                 reply = _handle_tool_call(
                     tc, ctx=ctx, specs=specs, results=results, widgets=widgets,
-                    actions=actions, trace=trace, member_session=member_session,
-                    propose_action=propose_action)
+                    actions=actions, trace=trace, extras=extras,
+                    member_session=member_session, propose_action=propose_action)
                 # _handle_tool_call returns (ui_events, tool_reply_for_model)
                 yield from reply[0]
                 messages.append({"role": "tool", "tool_call_id": tc["id"],
                                  "content": reply[1]})
+
+            if extras["question"] is not None:
+                # The turn ends on a question — the answer starts the next one.
+                break
 
             if out_of_budget():
                 yield {"event": "status",
@@ -167,7 +263,9 @@ def run_agent(
         content = content or "Something went wrong — please try again."
 
     yield {"event": "final", "data": {"content": content, "widgets": widgets,
-                                      "actions": actions, "trace": trace}}
+                                      "actions": actions, "trace": trace,
+                                      "question": extras["question"],
+                                      "view": extras["view"]}}
 
 
 def _wrap_up(messages: list[dict]) -> Any:
@@ -189,7 +287,7 @@ def _wrap_up(messages: list[dict]) -> Any:
 
 
 def _handle_tool_call(tc: dict, *, ctx: AgentContext, specs: dict, results: dict,
-                      widgets: list, actions: list, trace: list,
+                      widgets: list, actions: list, trace: list, extras: dict,
                       member_session: Callable, propose_action: Callable | None,
                       ) -> tuple[list[dict], str]:
     """Execute one tool call; returns (ui_events, tool_reply_for_model)."""
@@ -205,6 +303,10 @@ def _handle_tool_call(tc: dict, *, ctx: AgentContext, specs: dict, results: dict
 
     if name == "render_widget":
         return _render(args, results=results, widgets=widgets, events=events)
+    if name == "ask_user":
+        return _ask(args, extras=extras, events=events)
+    if name == "compose_view":
+        return _compose(args, widgets=widgets, extras=extras, events=events)
 
     spec = specs.get(name)
     if spec is None:
@@ -265,6 +367,82 @@ def _render(args: dict, *, results: dict, widgets: list,
     events.append({"event": "widget", "data": envelope})
     return events, json.dumps({"ok": True, "widget_id": envelope["id"],
                                "note": "rendered — do not repeat its numbers in prose"})
+
+
+def _ask(args: dict, *, extras: dict, events: list) -> tuple[list[dict], str]:
+    """Show a clarifying question with option chips and END the turn (GA §4)."""
+    question = str(args.get("question") or "").strip()
+    raw_options = args.get("options") or []
+    options = [{
+        "label": str(o["label"]).strip(),
+        "value": str(o["value"]).strip() if o.get("value") else None,
+        "detail": str(o["detail"]).strip() if o.get("detail") else None,
+    } for o in raw_options
+        if isinstance(o, dict) and str(o.get("label") or "").strip()][:6]
+    if not question or not options:
+        return events, json.dumps(
+            {"error": "bad_question",
+             "message": "ask_user needs a question and 1-6 options with labels"})
+    if extras["question"] is not None:
+        return events, json.dumps(
+            {"error": "already_asked",
+             "message": "one question per turn — stop and wait for the answer"})
+    extras["question"] = {
+        "question": question,
+        "options": options,
+        "allow_free_text": bool(args.get("allow_free_text", True)),
+    }
+    events.append({"event": "question", "data": extras["question"]})
+    return events, json.dumps({
+        "ok": True,
+        "note": ("Question shown with options — STOP now. The user's choice "
+                 "arrives as their next message.")})
+
+
+def _compose(args: dict, *, widgets: list, extras: dict,
+             events: list) -> tuple[list[dict], str]:
+    """Group this turn's rendered widgets into one saved view (GA §5). The
+    model can only reference widget ids it already materialized — a view is
+    fabrication-proof by construction."""
+    title = str(args.get("title") or "").strip()
+    raw_sections = args.get("sections") or []
+    if not title or not isinstance(raw_sections, list) or not raw_sections:
+        return events, json.dumps(
+            {"error": "bad_view", "message": "compose_view needs a title and "
+                                             "at least one section"})
+    known = {env["id"] for env in widgets}
+    sections = []
+    for s in raw_sections[:8]:
+        if not isinstance(s, dict) or not str(s.get("heading") or "").strip():
+            return events, json.dumps(
+                {"error": "bad_view", "message": "every section needs a heading"})
+        ids = [str(w) for w in (s.get("widget_ids") or [])]
+        unknown = [w for w in ids if w not in known]
+        if unknown:
+            return events, json.dumps(
+                {"error": "unknown_widget_ids",
+                 "message": f"widget id(s) {unknown} were not rendered this turn "
+                            "— use the widget_id values render_widget returned"})
+        if not ids:
+            return events, json.dumps(
+                {"error": "bad_view",
+                 "message": "every section needs at least one widget_id"})
+        sections.append({
+            "heading": str(s["heading"]).strip(),
+            "narrative": str(s["narrative"]).strip() if s.get("narrative") else None,
+            "widget_ids": ids,
+        })
+    extras["view"] = {
+        "id": str(uuid.uuid4()),
+        "title": title[:120],
+        "summary": str(args.get("summary") or "").strip()[:300] or None,
+        "sections": sections,
+    }
+    events.append({"event": "view", "data": extras["view"]})
+    return events, json.dumps({
+        "ok": True, "view_id": extras["view"]["id"],
+        "note": ("View composed and shown — it is saved for the user to reopen. "
+                 "Close with 1-2 sentences; do not repeat its contents.")})
 
 
 def _propose(spec, args: dict, *, ctx: AgentContext, actions: list, trace: list,

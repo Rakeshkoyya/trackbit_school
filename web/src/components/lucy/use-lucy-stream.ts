@@ -7,7 +7,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 
-import type { LucyStreamEvent, StreamAction, StreamWidget } from "@/lib/lucy-types";
+import type {
+  LucyQuestion,
+  LucyStreamEvent,
+  StreamAction,
+  StreamView,
+  StreamWidget,
+} from "@/lib/lucy-types";
 import { fetchEventStream } from "@/lib/sse";
 
 export interface LiveTurn {
@@ -17,12 +23,14 @@ export interface LiveTurn {
   text: string;
   widgets: StreamWidget[];
   actions: StreamAction[];
+  question: LucyQuestion | null;
+  view: StreamView | null;
   error: { code: string; message: string } | null;
 }
 
 const emptyTurn = (userContent: string): LiveTurn => ({
   userContent, statusLabel: null, tools: [], text: "",
-  widgets: [], actions: [], error: null,
+  widgets: [], actions: [], question: null, view: null, error: null,
 });
 
 export function useLucyStream(conversationId: string) {
@@ -62,6 +70,10 @@ export function useLucyStream(conversationId: string) {
                 return { ...t, widgets: [...t.widgets, ev.data], statusLabel: null };
               case "action":
                 return { ...t, actions: [...t.actions, ev.data], statusLabel: null };
+              case "question":
+                return { ...t, question: ev.data, statusLabel: null };
+              case "view":
+                return { ...t, view: ev.data, statusLabel: null };
               case "error":
                 return { ...t, error: ev.data, statusLabel: null };
               default:

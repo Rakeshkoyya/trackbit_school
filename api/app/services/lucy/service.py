@@ -29,6 +29,7 @@ from app.models import (
     LucyConversation,
     LucyMessage,
     LucyPendingAction,
+    LucyView,
     LucyWidget,
     Membership,
     Organization,
@@ -39,6 +40,8 @@ from app.models import (
 from app.schemas.lucy import (
     ConversationDetail,
     ConversationOut,
+    LucyViewOut,
+    LucyViewSummary,
     MessageOut,
     PendingActionOut,
     WidgetOut,
@@ -228,6 +231,8 @@ class LucyService:
                 created_at=msg.created_at,
                 widgets=[_widget_out(w) for w in msg.widgets],
                 actions=[_action_out(a) for a in by_message.get(msg.id, [])],
+                question=(msg.meta or {}).get("question"),
+                view_id=(msg.meta or {}).get("view_id"),
             ) for msg in messages])
 
     def delete_conversation(self, m: CurrentMember,
@@ -268,12 +273,16 @@ class LucyService:
                                content: str, widgets: list[dict],
                                trace: list[dict],
                                action_ids: list[uuid.UUID] | None = None,
+                               question: dict | None = None,
+                               view_id: str | None = None,
                                ) -> MessageOut:
         convo = self._own(m, conversation_id)
         convo.updated_at = datetime.now(UTC)
+        meta = {k: v for k, v in (("trace", trace), ("question", question),
+                                  ("view_id", view_id)) if v}
         msg = LucyMessage(org_id=m.org_id, conversation_id=convo.id,
                           role="assistant", content=content,
-                          meta={"trace": trace} if trace else None)
+                          meta=meta or None)
         self.db.add(msg)
         self.db.flush()
         rows: list[LucyWidget] = []
@@ -295,7 +304,8 @@ class LucyService:
         self.db.flush()
         return MessageOut(id=msg.id, role="assistant", content=content,
                           created_at=msg.created_at,
-                          widgets=[_widget_out(w) for w in rows])
+                          widgets=[_widget_out(w) for w in rows],
+                          question=question, view_id=view_id)
 
     # -- widgets / pins -----------------------------------------------------
 
@@ -349,6 +359,95 @@ class LucyService:
         widget.refreshed_at = datetime.now(UTC)
         self.db.flush()
         return _widget_out(widget)
+
+    # -- views (composed answers, GA §5) -------------------------------------
+
+    def _view_out(self, v: LucyView) -> LucyViewOut:
+        return LucyViewOut(
+            id=v.id, title=v.title, summary=v.summary,
+            signature=v.signature,
+            sections=(v.layout or {}).get("sections") or [],
+            widgets=v.widgets or [],
+            created_at=v.created_at, refreshed_at=v.refreshed_at)
+
+    def _own_view(self, m: CurrentMember, view_id: uuid.UUID) -> LucyView:
+        view = self.db.scalar(select(LucyView).where(
+            LucyView.id == view_id, LucyView.org_id == m.org_id,
+            LucyView.membership_id == m.membership.id))
+        if view is None:
+            raise NotFoundError("View", str(view_id))
+        return view
+
+    def save_view(self, m: CurrentMember, conversation_id: uuid.UUID,
+                  view: dict, widgets: list[dict]) -> LucyViewOut:
+        """Persist a composed view SELF-CONTAINED: it owns copies of the
+        referenced widget envelopes, so it outlives its conversation. The
+        signature (sorted source tools) is the GA-3 frequency signal."""
+        referenced: list[str] = []
+        for s in view["sections"]:
+            referenced.extend(w for w in s["widget_ids"] if w not in referenced)
+        by_id = {env["id"]: env for env in widgets}
+        own_widgets = [by_id[w] for w in referenced if w in by_id]
+        signature = ",".join(sorted(
+            {env["source_tool"] for env in own_widgets if env.get("source_tool")}))
+        row = LucyView(
+            id=uuid.UUID(view["id"]), org_id=m.org_id,
+            membership_id=m.membership.id, conversation_id=conversation_id,
+            title=view["title"], summary=view.get("summary"),
+            layout={"sections": view["sections"]},
+            widgets=own_widgets, signature=signature)
+        self.db.add(row)
+        self.db.flush()
+        return self._view_out(row)
+
+    def list_views(self, m: CurrentMember, limit: int = 30) -> list[LucyViewSummary]:
+        rows = self.db.scalars(
+            select(LucyView).where(
+                LucyView.org_id == m.org_id,
+                LucyView.membership_id == m.membership.id)
+            .order_by(LucyView.created_at.desc()).limit(limit))
+        return [LucyViewSummary(
+            id=v.id, title=v.title, summary=v.summary,
+            widget_count=len(v.widgets or []), created_at=v.created_at)
+            for v in rows]
+
+    def get_view(self, m: CurrentMember, view_id: uuid.UUID) -> LucyViewOut:
+        return self._view_out(self._own_view(m, view_id))
+
+    def delete_view(self, m: CurrentMember, view_id: uuid.UUID) -> None:
+        self.db.delete(self._own_view(m, view_id))
+        self.db.flush()
+
+    def refresh_view(self, m: CurrentMember, view_id: uuid.UUID) -> LucyViewOut:
+        """Re-execute every widget's source tool with the viewer's LIVE role
+        (pin-board semantics: any failure keeps that widget's snapshot — a
+        saved view must never 500)."""
+        view = self._own_view(m, view_id)
+        fresh: list[dict] = []
+        changed = False
+        for env in view.widgets or []:
+            fresh.append(env)
+            spec = registry.REGISTRY.get(env.get("source_tool") or "")
+            if spec is None or (spec.role == "admin" and not m.is_admin):
+                continue
+            execution = registry.execute(spec, m, self.db,
+                                         env.get("source_params") or {})
+            if not execution.ok:
+                continue
+            try:
+                new_env = materialize(env["type"], env.get("title") or "",
+                                      execution.result, env.get("config"),
+                                      source_tool=env.get("source_tool"),
+                                      source_params=env.get("source_params"))
+            except WidgetConfigError:
+                continue
+            fresh[-1] = {**env, "data": new_env["data"]}
+            changed = True
+        if changed:
+            view.widgets = fresh
+            view.refreshed_at = datetime.now(UTC)
+            self.db.flush()
+        return self._view_out(view)
 
     # -- pending actions (write proposals) -----------------------------------
 

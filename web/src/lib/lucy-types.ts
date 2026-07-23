@@ -115,6 +115,50 @@ export interface PendingAction {
   created_at: string;
 }
 
+// A clarifying question the assistant ended a turn on (GA §4).
+export interface LucyQuestion {
+  question: string;
+  options: { label: string; value?: string | null; detail?: string | null }[];
+  allow_free_text: boolean;
+}
+
+// A composed view as announced on the stream (GA §5).
+export interface StreamView {
+  id: string;
+  title: string;
+  summary?: string | null;
+  sections: { heading: string; narrative?: string | null; widget_ids: string[] }[];
+}
+
+export interface LucyViewSummary {
+  id: string;
+  title: string;
+  summary: string | null;
+  widget_count: number;
+  created_at: string;
+}
+
+// A saved view: self-contained widget envelopes + section layout.
+export interface LucyViewWidget {
+  id: string;
+  type: WidgetType;
+  title: string;
+  data: unknown;
+  config: Record<string, unknown>;
+  source_tool: string | null;
+}
+
+export interface LucyViewDetail {
+  id: string;
+  title: string;
+  summary: string | null;
+  signature: string;
+  sections: { heading: string; narrative?: string | null; widget_ids: string[] }[];
+  widgets: LucyViewWidget[];
+  created_at: string;
+  refreshed_at: string | null;
+}
+
 export interface LucyMessage {
   id: string;
   role: "user" | "assistant";
@@ -122,6 +166,8 @@ export interface LucyMessage {
   created_at: string;
   widgets: LucyWidget[];
   actions: PendingAction[];
+  question?: LucyQuestion | null;
+  view_id?: string | null;
 }
 
 export interface LucyConversation {
@@ -147,6 +193,8 @@ export type LucyStreamEvent =
   | { event: "text"; data: { delta: string } }
   | { event: "widget"; data: StreamWidget }
   | { event: "action"; data: StreamAction }
+  | { event: "question"; data: LucyQuestion }
+  | { event: "view"; data: StreamView }
   | { event: "error"; data: { code: string; message: string } }
   | { event: "done"; data: { conversation_id: string; message_id: string | null } };
 
