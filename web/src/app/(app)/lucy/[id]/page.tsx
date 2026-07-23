@@ -100,11 +100,13 @@ export default function LucyChatPage({ params }: { params: Promise<{ id: string 
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <div className="lg:hidden">
-            <MessageList messages={messages} inlineWidgets />
+            <MessageList messages={messages} inlineWidgets
+              onAnswer={streaming ? undefined : (t) => void send(t)} />
             {turn ? <div className="mt-4"><LiveTurnView turn={turn} inlineWidgets /></div> : null}
           </div>
           <div className="hidden lg:block">
-            <MessageList messages={messages} inlineWidgets={false} />
+            <MessageList messages={messages} inlineWidgets={false}
+              onAnswer={streaming ? undefined : (t) => void send(t)} />
             {turn ? <div className="mt-4"><LiveTurnView turn={turn} inlineWidgets={false} /></div> : null}
           </div>
           {!messages.length && !turn ? (

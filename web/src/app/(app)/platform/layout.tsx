@@ -9,6 +9,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
         tabs={[
           { label: "Schools", href: "/platform" },
           { label: "Enquiries", href: "/platform/enquiries" },
+          { label: "Gallery", href: "/platform/gallery" },
         ]}
       />
       {children}

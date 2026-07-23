@@ -149,6 +149,11 @@ SCHOOL_LUCY_TABLES = (
     "lucy_pending_actions",
 )
 
+# GA-1 composed views (GA §5) — engaged in migration d5e6f7a8b9c0.
+SCHOOL_LUCY_VIEW_TABLES = (
+    "lucy_views",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

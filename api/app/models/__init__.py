@@ -41,6 +41,7 @@ from app.models.lucy import (
     LucyConversation,
     LucyMessage,
     LucyPendingAction,
+    LucyView,
     LucyWidget,
 )
 from app.models.marketing import DemoRequest, DemoRequestNote
@@ -108,6 +109,7 @@ __all__ = [
     "LucyConversation",
     "LucyMessage",
     "LucyPendingAction",
+    "LucyView",
     "LucyWidget",
     "Membership",
     "Notification",

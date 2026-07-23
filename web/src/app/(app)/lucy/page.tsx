@@ -5,7 +5,7 @@
 // widgets, and their recent conversations.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, MessageSquareText, Sparkles, Trash2 } from "lucide-react";
+import { KeyRound, LayoutDashboard, MessageSquareText, Sparkles, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Composer } from "@/components/lucy/composer";
@@ -30,6 +30,10 @@ export default function LucyHomePage() {
   const { data: conversations } = useQuery({
     queryKey: ["lucy", "conversations"],
     queryFn: lucyApi.listConversations,
+  });
+  const { data: views } = useQuery({
+    queryKey: ["lucy", "views"],
+    queryFn: lucyApi.views,
   });
 
   const start = useMutation({
@@ -82,6 +86,37 @@ export default function LucyHomePage() {
         <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Pinned</h2>
         <PinBoard />
       </section>
+
+      {views?.length ? (
+        <section className="mb-8">
+          <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Saved views</h2>
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            {views.map((v) => (
+              <div key={v.id}
+                className="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/40"
+                role="button" tabIndex={0}
+                onClick={() => router.push(`/lucy/views/${v.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    router.push(`/lucy/views/${v.id}`);
+                  }
+                }}>
+                <LayoutDashboard className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">{v.title}</p>
+                  {v.summary ? (
+                    <p className="truncate text-xs text-muted-foreground">{v.summary}</p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {v.widget_count} widgets · {timeAgo(v.created_at)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {conversations?.length ? (
         <section>

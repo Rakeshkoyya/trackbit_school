@@ -34,6 +34,8 @@ from app.schemas.lucy import (
     ConversationDetail,
     ConversationOut,
     LucyMeta,
+    LucyViewOut,
+    LucyViewSummary,
     MessageIn,
     PendingActionOut,
     WidgetOut,
@@ -133,13 +135,21 @@ def send_message(request: Request, conversation_id: uuid.UUID, body: MessageIn,
                 yield _sse(ev["event"], ev["data"])
 
             message_id = None
-            if final is not None and (final["content"] or final["widgets"]):
+            if final is not None and (final["content"] or final["widgets"]
+                                      or final.get("question")):
+                view = final.get("view")
                 with lucy_session(ctx.org_id) as sdb:
-                    saved = LucyService(sdb).save_assistant_message(
-                        rebuild_member(sdb, ctx), conversation_id,
+                    svc2 = LucyService(sdb)
+                    sm2 = rebuild_member(sdb, ctx)
+                    saved = svc2.save_assistant_message(
+                        sm2, conversation_id,
                         final["content"], final["widgets"], final["trace"],
-                        action_ids)
+                        action_ids, question=final.get("question"),
+                        view_id=view["id"] if view else None)
                     message_id = str(saved.id)
+                    if view:
+                        svc2.save_view(sm2, conversation_id, view,
+                                       final["widgets"])
                 if not history:
                     # First exchange — improve on the truncated-question title
                     # off the stream's clock.
@@ -158,6 +168,35 @@ def send_message(request: Request, conversation_id: uuid.UUID, body: MessageIn,
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers=_SSE_HEADERS)
+
+
+# -- views (composed answers, GA §5) ------------------------------------------
+
+@router.get("/views", response_model=list[LucyViewSummary])
+def list_views(m: CurrentMember = Depends(require_academic),
+               db: Session = Depends(get_db)):
+    return LucyService(db).list_views(m)
+
+
+@router.get("/views/{view_id}", response_model=LucyViewOut)
+def get_view(view_id: uuid.UUID,
+             m: CurrentMember = Depends(require_academic),
+             db: Session = Depends(get_db)):
+    return LucyService(db).get_view(m, view_id)
+
+
+@router.post("/views/{view_id}/refresh", response_model=LucyViewOut)
+def refresh_view(view_id: uuid.UUID,
+                 m: CurrentMember = Depends(require_academic),
+                 db: Session = Depends(get_db)):
+    return LucyService(db).refresh_view(m, view_id)
+
+
+@router.delete("/views/{view_id}", status_code=204)
+def delete_view(view_id: uuid.UUID,
+                m: CurrentMember = Depends(require_academic),
+                db: Session = Depends(get_db)):
+    LucyService(db).delete_view(m, view_id)
 
 
 # -- widgets / pins ----------------------------------------------------------
