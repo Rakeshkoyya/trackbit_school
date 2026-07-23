@@ -6,6 +6,8 @@ import type {
   LucyConversation,
   LucyConversationDetail,
   LucyMeta,
+  LucyViewDetail,
+  LucyViewSummary,
   LucyWidget,
   PendingAction,
 } from "@/lib/lucy-types";
@@ -19,6 +21,11 @@ export const lucyApi = {
   conversation: (id: string) =>
     api.get<LucyConversationDetail>(`/lucy/conversations/${id}`),
   deleteConversation: (id: string) => api.del<null>(`/lucy/conversations/${id}`),
+
+  views: () => api.get<LucyViewSummary[]>("/lucy/views"),
+  view: (id: string) => api.get<LucyViewDetail>(`/lucy/views/${id}`),
+  refreshView: (id: string) => api.post<LucyViewDetail>(`/lucy/views/${id}/refresh`),
+  deleteView: (id: string) => api.del<null>(`/lucy/views/${id}`),
 
   pins: () => api.get<LucyWidget[]>("/lucy/pins"),
   pin: (widgetId: string) => api.post<LucyWidget>(`/lucy/widgets/${widgetId}/pin`),

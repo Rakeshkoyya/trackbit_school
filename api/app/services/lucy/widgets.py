@@ -15,32 +15,33 @@ widgets keep rendering.
 """
 
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from app.services.lucy.registry import WIDGET_ROW_CAP, ToolResult
 
 SPEC_VERSION = 1
 
-WIDGET_TYPES = (
-    "table", "stat_group", "bar_chart", "line_chart", "donut", "rag_board",
-    "roster_grid", "timeline", "report_card", "student_card", "alert_list",
-    "progress", "markdown",
-)
 
-# One compact cheat-sheet the model reads inside render_widget's description.
-CONFIG_GUIDE = """Widget types and their config:
-- table: {rows_key?, columns: [{key, label?, kind?: text|number|pct|badge|date}], group_by?, sort_by?}
-- stat_group: {items: [{label, value_path, sub_path?, tone?: neutral|success|warning|danger}]}
-- bar_chart | line_chart: {rows_key?, x_key, series: [{key, label?}]}
-- donut: {rows_key?, label_key, value_key} or {slices: [{label, value_path}]}
-- rag_board: {rows_key?, label_key, status_key, detail_key?}  (status values green/amber/red)
-- roster_grid: {} (attendance roster results only)
-- timeline: {rows_key?, title_key, time_key?, detail_key?, status_key?}
-- report_card: {} (daily report results only)
-- student_card: {title_path, subtitle_path?, fields: [{label, value_path}]}
-- alert_list: {rows_key?, title_key?, detail_key?, severity_key?}
-- progress: {rows_key?, label_key, pct_key?, done_key?, total_key?, detail_key?}
-- markdown: {md} (your own prose — never invent numbers, cite tool data)
+@dataclass(frozen=True)
+class ComponentManifest:
+    """One renderable component of the School UI Kit (GA §3.1).
+
+    The CATALOG below is the single source of truth: WIDGET_TYPES, the config
+    guide and the render_widget schema are all generated from it. `role`
+    mirrors the tool registry — an admin-only component never even appears in
+    a teacher's render enum."""
+
+    name: str
+    summary: str  # one line: what it renders
+    when_to_use: str  # the sentence that steers the agent's choice
+    config_guide: str  # the config contract shown inside render_widget
+    shaper: Callable[[Any, dict], dict] | None  # None → model prose (markdown)
+    role: str = "academic"  # "academic" (any member) | "admin"
+
+
+_PATHS_NOTE = """
 Paths are dotted with [i] for list items (e.g. "attendance.pct", "subjects[0].name").
 rows_key is a path to a list of objects; omit it when the result itself is a list.
 Keys/paths must exist in the tool result — you saw its JSON."""
@@ -281,20 +282,184 @@ def _shape_progress(data: Any, config: dict) -> dict:
     return {"items": items}
 
 
-_SHAPERS = {
-    "table": _shape_table,
-    "stat_group": _shape_stat_group,
-    "bar_chart": _shape_chart,
-    "line_chart": _shape_chart,
-    "donut": _shape_donut,
-    "rag_board": _shape_rag_board,
-    "roster_grid": _shape_roster_grid,
-    "timeline": _shape_timeline,
-    "report_card": _shape_report_card,
-    "student_card": _shape_student_card,
-    "alert_list": _shape_alert_list,
-    "progress": _shape_progress,
-}
+def _shape_meter(data: Any, config: dict) -> dict:
+    label, value_path = config.get("label"), config.get("value_path")
+    if not label or not value_path:
+        raise WidgetConfigError('meter needs "label" and "value_path" (a 0-100 number)')
+    value = _num(_pluck(data, value_path))
+    if value is None:
+        raise WidgetConfigError(f'value_path "{value_path}" did not resolve to a number')
+    sub = _pluck(data, config["sub_path"]) if config.get("sub_path") else None
+    return {"label": str(label), "value": value,
+            "sub": None if sub is None else str(sub),
+            "unit": str(config.get("unit") or "%")}
+
+
+def _shape_radar(data: Any, config: dict) -> dict:
+    axis_key = config.get("axis_key")
+    series = [s for s in (config.get("series") or [])
+              if isinstance(s, dict) and s.get("key")][:2]
+    if not axis_key or not series:
+        raise WidgetConfigError(
+            'radar needs "axis_key" and "series": [{key, label?}] (max 2 series)')
+    rows = _rows(data, config)
+    skeys = [s["key"] for s in series]
+    _require_keys(rows, [axis_key, *skeys], "radar")
+    return {
+        "series": [{"key": s["key"], "label": s.get("label") or s["key"]}
+                   for s in series],
+        "rows": [{"x": r.get(axis_key), **{k: _num(r.get(k)) for k in skeys}}
+                 for r in rows[:12]],
+    }
+
+
+def _shape_area(data: Any, config: dict) -> dict:
+    x_key, y_key = config.get("x_key"), config.get("y_key")
+    if not x_key or not y_key:
+        raise WidgetConfigError(
+            'area_chart needs "x_key" and "y_key" (ONE measure over time)')
+    rows = _rows(data, config)
+    _require_keys(rows, [x_key, y_key], "area_chart")
+    return {"label": str(config.get("label") or y_key.replace("_", " ")),
+            "unit": str(config.get("unit") or ""),
+            "rows": [{"x": r.get(x_key), "v": _num(r.get(y_key))} for r in rows]}
+
+
+def _shape_drilldown(data: Any, config: dict) -> dict:
+    label_key = config.get("label_key")
+    children_key = config.get("children_key")
+    child_label_key = config.get("child_label_key")
+    if not label_key or not children_key or not child_label_key:
+        raise WidgetConfigError(
+            'drilldown needs "label_key", "children_key" and "child_label_key" '
+            "(plus optional stats / child_detail_key / child_status_key)")
+    rows = _rows(data, config)
+    _require_keys(rows, [label_key], "drilldown")
+    stats_cfg = [s for s in (config.get("stats") or [])
+                 if isinstance(s, dict) and s.get("label") and s.get("key")][:6]
+    cdk, csk = config.get("child_detail_key"), config.get("child_status_key")
+    groups = []
+    for r in rows:
+        raw = r.get(children_key)
+        children = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+        groups.append({
+            "label": str(r.get(label_key)),
+            "stats": [{"label": s["label"], "value": r.get(s["key"])}
+                      for s in stats_cfg],
+            "children": [{
+                "label": str(c.get(child_label_key)),
+                "detail": str(c.get(cdk)) if cdk and c.get(cdk) is not None else None,
+                "status": str(c.get(csk)) if csk and c.get(csk) is not None else None,
+            } for c in children[:60]],
+        })
+    return {"groups": groups}
+
+
+# --- the catalog (GA §3.2) ---------------------------------------------------
+
+CATALOG: dict[str, ComponentManifest] = {man.name: man for man in [
+    ComponentManifest(
+        "table", "data table",
+        "lists and detail rows",
+        "{rows_key?, columns: [{key, label?, kind?: text|number|pct|badge|date}], "
+        "group_by?, sort_by?}", _shape_table),
+    ComponentManifest(
+        "stat_group", "headline number tiles",
+        "a few headline numbers",
+        "{items: [{label, value_path, sub_path?, "
+        "tone?: neutral|success|warning|danger}]}", _shape_stat_group),
+    ComponentManifest(
+        "bar_chart", "vertical bars",
+        "comparison across categories",
+        "{rows_key?, x_key, series: [{key, label?}]}", _shape_chart),
+    ComponentManifest(
+        "line_chart", "multi-series trend lines",
+        "trend over time",
+        "{rows_key?, x_key, series: [{key, label?}]}", _shape_chart),
+    ComponentManifest(
+        "area_chart", "one filled measure over time",
+        "the shape of ONE measure over time (e.g. daily attendance %)",
+        "{rows_key?, x_key, y_key, label?, unit?}", _shape_area),
+    ComponentManifest(
+        "donut", "parts of a whole",
+        "distribution / parts of a whole",
+        "{rows_key?, label_key, value_key} or {slices: [{label, value_path}]}",
+        _shape_donut),
+    ComponentManifest(
+        "meter", "a single gauge",
+        "one standalone percentage (fee collection %, attendance %, pace %)",
+        "{label, value_path, sub_path?, unit?}", _shape_meter),
+    ComponentManifest(
+        "radar", "profile shape across axes",
+        "a profile across skill areas or subjects (max 2 series)",
+        "{rows_key?, axis_key, series: [{key, label?}] (max 2)}", _shape_radar),
+    ComponentManifest(
+        "rag_board", "green/amber/red status board",
+        "syllabus or health status per item",
+        "{rows_key?, label_key, status_key, detail_key?}  "
+        "(status values green/amber/red)", _shape_rag_board),
+    ComponentManifest(
+        "roster_grid", "one class-period's attendance sheet",
+        "one class-period's attendance",
+        "{} (attendance roster results only)", _shape_roster_grid),
+    ComponentManifest(
+        "drilldown", "two-level expandable list",
+        "grouped data with expandable children (chapters→topics, units→topics)",
+        "{rows_key?, label_key, stats?: [{label, key}], children_key, "
+        "child_label_key, child_detail_key?, child_status_key?}", _shape_drilldown),
+    ComponentManifest(
+        "timeline", "time-ordered entries",
+        "a student's or teacher's day, period by period",
+        "{rows_key?, title_key, time_key?, detail_key?, status_key?}",
+        _shape_timeline),
+    ComponentManifest(
+        "report_card", "the generated daily report",
+        "the daily report",
+        "{} (daily report results only)", _shape_report_card),
+    ComponentManifest(
+        "student_card", "one entity's identity + facts",
+        "one student's profile facts",
+        "{title_path, subtitle_path?, fields: [{label, value_path}]}",
+        _shape_student_card),
+    ComponentManifest(
+        "alert_list", "prioritized warnings",
+        "warnings and alerts, worst first",
+        "{rows_key?, title_key?, detail_key?, severity_key?}", _shape_alert_list),
+    ComponentManifest(
+        "progress", "completion bars per item",
+        "completion per item",
+        "{rows_key?, label_key, pct_key?, done_key?, total_key?, detail_key?}",
+        _shape_progress),
+    ComponentManifest(
+        "markdown", "your own prose",
+        "prose only — when no data component fits",
+        "{md} (your own prose — never invent numbers, cite tool data)", None),
+]}
+
+WIDGET_TYPES = tuple(CATALOG)
+
+
+def visible_types(is_admin: bool) -> tuple[str, ...]:
+    """Component names this member's model may render (mirrors tool visibility)."""
+    return tuple(n for n, man in CATALOG.items()
+                 if man.role != "admin" or is_admin)
+
+
+def config_guide(is_admin: bool = True) -> str:
+    """The per-type config cheat-sheet inside render_widget's description."""
+    lines = [f"- {n}: {man.config_guide}" for n, man in CATALOG.items()
+             if man.role != "admin" or is_admin]
+    return "Widget types and their config:\n" + "\n".join(lines) + _PATHS_NOTE
+
+
+def choice_guide(is_admin: bool = True) -> str:
+    """The when-to-use line for the system prompt, generated from the catalog."""
+    return "; ".join(f"{man.when_to_use} → {n}" for n, man in CATALOG.items()
+                     if (man.role != "admin" or is_admin) and n != "markdown")
+
+
+# Back-compat constant (full catalog view).
+CONFIG_GUIDE = config_guide()
 
 
 def materialize(widget_type: str, title: str, result: ToolResult | None,
@@ -310,13 +475,13 @@ def materialize(widget_type: str, title: str, result: ToolResult | None,
             raise WidgetConfigError('markdown needs config {"md": "..."}')
         data: dict[str, Any] = {"md": md}
     else:
-        shaper = _SHAPERS.get(widget_type)
-        if shaper is None:
+        man = CATALOG.get(widget_type)
+        if man is None or man.shaper is None:
             raise WidgetConfigError(
                 f"unknown widget type {widget_type!r}; valid: {', '.join(WIDGET_TYPES)}")
         if result is None:
             raise WidgetConfigError("result_id does not match a fetched tool result")
-        data = shaper(result.data, config)
+        data = man.shaper(result.data, config)
     return {
         "id": str(uuid.uuid4()),
         "spec_version": SPEC_VERSION,

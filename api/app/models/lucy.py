@@ -125,6 +125,42 @@ class LucyWidget(Base, UUIDPKMixin, CreatedAtMixin):
     )
 
 
+class LucyView(Base, UUIDPKMixin, CreatedAtMixin):
+    """A composed answer (GA §5): titled sections of widgets + narrative, saved
+    as one reopenable artifact. Self-contained — it owns COPIES of its widget
+    envelopes (snapshot + source bindings), so it survives its conversation's
+    deletion and can refresh itself with the viewer's live role.
+
+    `signature` is the request fingerprint (sorted source tools) recorded for
+    the GA-3 frequency judgment — written from day one so the data accrues."""
+
+    __tablename__ = "lucy_views"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("lucy_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # {"sections": [{"heading", "narrative"?, "widget_ids": [...]}]}
+    layout: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # The referenced widget envelopes, copied verbatim (data+config+source).
+    widgets: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    signature: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_lucy_views_member_created",
+              "org_id", "membership_id", "created_at"),
+    )
+
+
 class LucyPendingAction(Base, UUIDPKMixin, CreatedAtMixin):
     """A write-tool proposal awaiting human confirmation (append-only, law 3)."""
 

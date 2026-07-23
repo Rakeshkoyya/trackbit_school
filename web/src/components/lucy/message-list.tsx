@@ -7,6 +7,8 @@
 import { Check, Loader2, Sparkles, TriangleAlert } from "lucide-react";
 
 import { ConfirmCard } from "@/components/lucy/confirm-card";
+import { QuestionCard } from "@/components/lucy/question-card";
+import { ViewCard } from "@/components/lucy/view-card";
 import { WidgetFrame } from "@/components/lucy/widget-frame";
 import { MarkdownWidget } from "@/components/lucy/widgets/simple";
 import type { LucyMessage } from "@/lib/lucy-types";
@@ -49,10 +51,13 @@ export function AssistantText({ content }: { content: string }) {
   );
 }
 
-export function MessageList({ messages, inlineWidgets }: {
+export function MessageList({ messages, inlineWidgets, onAnswer }: {
   messages: LucyMessage[];
   inlineWidgets: boolean;
+  /** Answer handler for a question on the LAST message; earlier questions render read-only. */
+  onAnswer?: (text: string) => void;
 }) {
+  const last = messages[messages.length - 1];
   return (
     <div className="space-y-4">
       {messages.map((m) =>
@@ -68,6 +73,11 @@ export function MessageList({ messages, inlineWidgets }: {
                     refreshedAt={w.refreshed_at} />
                 ))
               : null}
+            {m.question ? (
+              <QuestionCard question={m.question}
+                onAnswer={m.id === last?.id ? onAnswer : undefined} />
+            ) : null}
+            {m.view_id ? <ViewCard viewId={m.view_id} /> : null}
             {m.actions.map((a) => (
               <ConfirmCard key={a.id} id={a.id} tool={a.tool} summary={a.summary}
                 paramsPreview={Object.entries(a.params).map(([k, v]) => ({
@@ -83,9 +93,10 @@ export function MessageList({ messages, inlineWidgets }: {
   );
 }
 
-export function LiveTurnView({ turn, inlineWidgets }: {
+export function LiveTurnView({ turn, inlineWidgets, onAnswer }: {
   turn: LiveTurn;
   inlineWidgets: boolean;
+  onAnswer?: (text: string) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -107,6 +118,13 @@ export function LiveTurnView({ turn, inlineWidgets }: {
             paramsPreview={a.params_preview} status={a.status} />
         ))}
         <AssistantText content={turn.text} />
+        {turn.question ? (
+          <QuestionCard question={turn.question} onAnswer={onAnswer} />
+        ) : null}
+        {turn.view ? (
+          <ViewCard viewId={turn.view.id} title={turn.view.title}
+            summary={turn.view.summary} />
+        ) : null}
         {turn.statusLabel ? (
           <p className="flex items-center gap-2 pl-8 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" /> {turn.statusLabel}

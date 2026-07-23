@@ -57,6 +57,31 @@ class MessageOut(BaseModel):
     created_at: datetime
     widgets: list[WidgetOut] = Field(default_factory=list)
     actions: list[PendingActionOut] = Field(default_factory=list)
+    # A clarifying question this assistant turn ended on (GA §4).
+    question: dict[str, Any] | None = None
+    # The composed view this turn saved, if any (GA §5).
+    view_id: str | None = None
+
+
+class LucyViewSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    summary: str | None = None
+    widget_count: int
+    created_at: datetime
+
+
+class LucyViewOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    summary: str | None = None
+    signature: str = ""
+    # [{heading, narrative?, widget_ids: [...]}]
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    # Self-contained widget envelopes (data + config + source bindings).
+    widgets: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    refreshed_at: datetime | None = None
 
 
 class ConversationOut(BaseModel):
