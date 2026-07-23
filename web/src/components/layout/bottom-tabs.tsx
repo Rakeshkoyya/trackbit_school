@@ -5,15 +5,15 @@ import { usePathname } from "next/navigation";
 
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
-import { navForRole } from "./nav-items";
+import { bottomNavForRole } from "./nav-items";
 
 /** Mobile bottom tab bar — hidden on lg+ where the sidebar takes over. */
 export function BottomTabs() {
   const pathname = usePathname();
   const { me } = useAuth();
-  // Cap the bottom bar at 5 so it never overflows on a phone. Settings isn't in
-  // the nav at all — it lives in the account menu (avatar popover).
-  const items = navForRole(me?.org_role, me?.is_super_admin).slice(0, 5);
+  // Four thumb-reachable primaries; everything else lives in the top hamburger
+  // (MobileMenu) and the account menu (avatar popover).
+  const items = bottomNavForRole(me?.org_role);
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">

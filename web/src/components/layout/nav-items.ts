@@ -34,11 +34,11 @@ const setup: NavItem = { label: "Setup", href: "/setup", icon: Settings2, tour: 
 const lucy: NavItem = { label: "Lucy", href: "/lucy", icon: Sparkles };
 const platform: NavItem = { label: "Schools", href: "/platform", icon: Building2 };
 
-// Role-aware primary nav (single source of truth for sidebar + bottom tabs).
+// Role-aware primary nav — the full ordered list, used by the DESKTOP sidebar.
 // SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
-// Hard rule (§2): teachers never see Fees/Setup. NOTE: bottom tabs cap at 5,
-// so Tasks falls off MOBILE tabs for both roles with Lucy inserted; it stays
-// in the desktop sidebar. Reorder here if that's the wrong trade.
+// Hard rule (§2): teachers never see Fees/Setup.
+// On MOBILE this list is split in two: bottomNavForRole (the 4-item bottom bar)
+// and menuNavForRole (everything else, in the top hamburger menu).
 export function navForRole(
   role: OrgRole | string | undefined,
   isSuperAdmin = false,
@@ -56,6 +56,34 @@ export function navForRole(
     default:
       return [...extra, tasks];
   }
+}
+
+// The mobile bottom tab bar: exactly four thumb-reachable primaries (founder
+// decision 2026-07-24). Same shape for both roles — only the first slot differs
+// (admin plans the school, a teacher runs their day). Super-admin's Schools item
+// is NOT here; it rides in the hamburger so the bar stays at four.
+export function bottomNavForRole(role: OrgRole | string | undefined): NavItem[] {
+  switch (role) {
+    case "admin":
+      return [plan, tasks, students, lucy];
+    case "teacher":
+      return [myDay, tasks, students, lucy];
+    case "parent":
+      return [];
+    default:
+      return [tasks];
+  }
+}
+
+// The mobile hamburger menu: every nav item NOT already in the bottom bar,
+// keeping the sidebar's order (admin → Dashboard/Fees/Setup, teacher →
+// Sessions/Plan, plus Schools for the platform operator).
+export function menuNavForRole(
+  role: OrgRole | string | undefined,
+  isSuperAdmin = false,
+): NavItem[] {
+  const inBottom = new Set(bottomNavForRole(role).map((i) => i.href));
+  return navForRole(role, isSuperAdmin).filter((i) => !inBottom.has(i.href));
 }
 
 // Role-aware landing after login (SPRD2 §3): admin → Dashboard (leads with the
