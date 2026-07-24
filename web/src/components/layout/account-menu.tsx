@@ -11,7 +11,6 @@ import {
   Phone,
   Plus,
   Settings,
-  Sparkles,
   User as UserIcon,
   UserCog,
   type LucideIcon,
@@ -179,24 +178,11 @@ export function AccountMenu() {
             <div className="flex items-center gap-2">
               <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{org.name}</span>
-              <Badge tone={org.plan === "pro" ? "success" : "outline"}>
-                {org.plan === "pro" ? "Pro" : "Free"}
-              </Badge>
             </div>
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Clock className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{org.timezone}</span>
             </div>
-            {isAdmin && org.plan === "free" && (
-              <Link
-                href="/setup/settings"
-                onClick={() => setOpen(false)}
-                className="mt-3 flex items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-xs font-medium text-accent-foreground transition hover:opacity-90"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Upgrade to Pro
-              </Link>
-            )}
 
             {/* Switch organization — only when the user belongs to more than one */}
             {otherOrgs.length > 0 && (
