@@ -102,25 +102,31 @@
         flex-direction: column;
       }
 
+      /* The cover backdrop: a visible "day board" — the school's periods ruled
+         across the page, some cells filled green/amber, fading down toward the
+         title so the type stays clean. This is the product's motif, made the
+         literal wallpaper of the document. */
       .cover-grid {
         position: absolute;
         inset: 0;
         display: grid;
         grid-template-columns: repeat(9, 1fr);
-        grid-auto-rows: 1fr;
-        opacity: 0.5;
-        -webkit-mask-image: radial-gradient(120% 80% at 80% 15%, #000 0%, transparent 62%);
-        mask-image: radial-gradient(120% 80% at 80% 15%, #000 0%, transparent 62%);
+        grid-template-rows: repeat(11, 1fr);
+        opacity: 0.9;
+        -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 40%, rgba(0, 0, 0, 0.14) 72%, transparent 100%);
+        mask-image: linear-gradient(180deg, #000 0%, #000 40%, rgba(0, 0, 0, 0.14) 72%, transparent 100%);
       }
       .cover-grid i {
-        border-right: 1px solid rgba(255, 255, 255, 0.05);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
       .cover-grid i.g {
-        background: rgba(47, 144, 104, 0.28);
+        background: rgba(47, 144, 104, 0.42);
+        box-shadow: inset 0 0 0 1px rgba(47, 144, 104, 0.28);
       }
       .cover-grid i.a {
-        background: rgba(207, 155, 63, 0.28);
+        background: rgba(207, 155, 63, 0.46);
+        box-shadow: inset 0 0 0 1px rgba(207, 155, 63, 0.3);
       }
 
       .cover-top {
@@ -204,6 +210,36 @@
       }
       .avoid-break {
         page-break-inside: avoid;
+      }
+      /* Sections flow one after another (dense pages) and are separated by a
+         hairline rule rather than a forced page break. */
+      .sec {
+        margin-top: 24pt;
+        padding-top: 22pt;
+        border-top: 1px solid var(--rule-2);
+      }
+      /* Keep an opening (eyebrow → title → lead) with the content that follows,
+         so a heading never strands at the foot of a page. */
+      .eyebrow,
+      .section-title,
+      .feature-tag,
+      .feature h3 {
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+      .lead {
+        break-inside: avoid;
+      }
+      /* Blocks that must never be split across a page. */
+      .ai-panel,
+      .closing,
+      .price-box,
+      .loop,
+      .stats,
+      .quote,
+      .modmap .m {
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .eyebrow {
@@ -320,7 +356,6 @@
         border-radius: 4px;
         overflow: hidden;
         margin-top: 14pt;
-        page-break-inside: avoid;
       }
       .modmap .m {
         border-right: 1px solid var(--rule);
@@ -596,9 +631,20 @@
         background: var(--board);
         color: #ecebe3;
         border-radius: 6px;
-        padding: 26pt 24pt;
-        margin-top: 18pt;
+        padding: 40pt 30pt;
+        margin-top: 22pt;
         text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+      .closing::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--green-bright), var(--gold-soft));
       }
       .closing h2 {
         color: #f7f6ef;
@@ -706,7 +752,7 @@
 
     <!-- ══════════════════════════ PROBLEM ════════════════════════ -->
     <section class="page-break">
-      <p class="eyebrow"><span class="kicker-num">01</span> The problem</p>
+      <p class="eyebrow" style="margin-top: 0"><span class="kicker-num">01</span> The problem</p>
       <h2 class="section-title big">Schools don't fail on strategy. They fail on the days.</h2>
       <p class="lead">
         An organisation fails when it stops seeing itself. When the day's data isn't recorded, the
@@ -750,8 +796,10 @@
         What a school records, it can improve. What it never records, it cannot even see.
       </p>
 
-      <!-- ══════════════ THE IDEA ══════════════ -->
-      <div class="page-break"></div>
+    </section>
+
+    <!-- ══════════════════════════ THE CORE IDEA ══════════════════ -->
+    <section class="sec">
       <p class="eyebrow"><span class="kicker-num">02</span> The core idea</p>
       <h2 class="section-title big">Record each class in about five minutes.</h2>
       <p class="lead">
@@ -797,7 +845,7 @@
         </div>
       </div>
 
-      <div class="avoid-break" style="margin-top: 18pt">
+      <div style="margin-top: 18pt">
       <p class="eyebrow">The platform at a glance</p>
       <div class="modmap">
         <div class="m"><span class="pill">Core</span><h4>Academic Planner</h4><p>Year plan to the period, held to the classroom log.</p></div>
@@ -817,7 +865,7 @@
     </section>
 
     <!-- ══════════════════════════ FEATURES ═══════════════════════ -->
-    <section class="page-break">
+    <section class="sec">
       <p class="eyebrow"><span class="kicker-num">03–11</span> The modules, in depth</p>
       <h2 class="section-title big">Every module, in detail.</h2>
       <p class="lead">
@@ -1054,7 +1102,7 @@
     </section>
 
     <!-- ══════════════════════════ AI LAYER ═══════════════════════ -->
-    <section class="page-break">
+    <section class="sec">
       <p class="eyebrow"><span class="kicker-num">12</span> The intelligence layer</p>
       <h2 class="section-title big">More than a chatbot — an AI that builds new views and modules for you.</h2>
       <p class="lead">
@@ -1063,6 +1111,15 @@
         can compose the interface itself. This is the part of the product with no equivalent in the
         market — and the reason a school that adopts TrackBit keeps discovering new value long after
         go-live.
+      </p>
+      <p>
+        Two ideas make this real. First, <strong>an assistant that acts through your data, not
+        beside it</strong> — it can read the plan, the attendance and the growth of any child, and
+        answer or act within the exact permissions the person asking already holds. Second, a
+        <strong>generative interface</strong>: instead of a fixed set of screens someone hard-coded,
+        TrackBit assembles the right view — a table, a chart, a report card — from live data, on
+        demand. Together, they turn the product from something a school configures once into
+        something that keeps producing new answers, and new views, as the school asks for them.
       </p>
 
       <div class="ai-panel">
@@ -1119,8 +1176,8 @@
       </p>
     </section>
 
-    <!-- ══════════════════════════ CONNECTS + TRUST ═══════════════ -->
-    <section class="page-break">
+    <!-- ══════════════════════════ CONNECTS ═══════════════════════ -->
+    <section class="sec">
       <p class="eyebrow"><span class="kicker-num">13</span> How it all connects</p>
       <h2 class="section-title">Why schools actually keep using it.</h2>
       <p class="lead">
@@ -1153,7 +1210,10 @@
         </p>
       </div>
 
-      <div class="page-break"></div>
+    </section>
+
+    <!-- ══════════════════════════ TRUST ══════════════════════════ -->
+    <section class="sec">
       <p class="eyebrow"><span class="kicker-num">14</span> Trust &amp; architecture</p>
       <h2 class="section-title">Built to keep your data accurate, secure and private.</h2>
       <div class="trust">
@@ -1192,8 +1252,8 @@
       </div>
     </section>
 
-    <!-- ══════════════════════════ COMMERCIAL + VISION ════════════ -->
-    <section class="page-break">
+    <!-- ══════════════════════════ COMMERCIAL ═════════════════════ -->
+    <section class="sec">
       <p class="eyebrow"><span class="kicker-num">15</span> Commercial model</p>
       <h2 class="section-title">A simple model: one price, per student.</h2>
       <p class="lead">
@@ -1235,7 +1295,18 @@
         support that make TrackBit stick don't pencil out.
       </p>
 
-      <div class="page-break"></div>
+      <p style="margin-top: 8pt; color: var(--ink-2)">
+        <strong>Getting started</strong> takes days, not months. You hand over the files you already
+        keep — syllabus, roster, staff list, timetable — and we import, validate and configure the
+        whole school, generate and approve the plans with you, then train your staff and hand over
+        working credentials. There is no long implementation project for the school to staff or
+        survive, and no per-seat maths to negotiate later: the price is the roll, and the roll is all.
+      </p>
+
+    </section>
+
+    <!-- ══════════════════════════ VISION ═════════════════════════ -->
+    <section class="page-break">
       <p class="eyebrow"><span class="kicker-num">16</span> Where this goes</p>
       <h2 class="section-title big">Where the product is going.</h2>
       <p class="lead">
@@ -1252,6 +1323,12 @@
         underneath, and an AI layer that can reshape the product itself. That combination is what turns
         software a school merely buys into the system a school runs on.
       </p>
+      <p>
+        Each of those is hard to build alone; together they compound. Every school that joins and every
+        day of capture makes the plan-vs-actual sharper, the growth history deeper and the AI more
+        grounded — so the product a school runs in year three is meaningfully more valuable than the
+        one it started with, and the distance from anything a competitor can assemble only widens.
+      </p>
 
       <div class="closing">
         <h2 class="display">See it on your own school.</h2>
@@ -1259,6 +1336,10 @@
           The most convincing demo isn't a sample school — it's yours. We load a slice of your real
           classes, subjects and calendar, and show you the day board, the parent portal and the report
           that writes itself.
+        </p>
+        <p style="color: rgba(236, 235, 227, 0.7); max-width: 34em; margin: 8pt auto 0; font-size: 10pt">
+          We handle the setup end to end — your syllabus, roster, staff and timetable imported and
+          validated — so the school you see in the demo is the one we hand over, working.
         </p>
         <p class="cta">Book a demo → trackbit.in</p>
       </div>
