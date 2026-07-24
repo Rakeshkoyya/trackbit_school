@@ -1,0 +1,1258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TrackBit School — Product Overview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ─────────────────────────────────────────────────────────────
+         TrackBit School — Product Overview
+         Print document. Warm-paper editorial pages, dark board-green
+         cover + AI feature panel. Rendered to PDF via headless Chrome.
+         ───────────────────────────────────────────────────────────── */
+
+      :root {
+        --board: #0d1a15;
+        --board-2: #13251e;
+        --ink: #16231d;
+        --ink-2: #3c4a43;
+        --muted: #6c7a72;
+        --paper: #faf9f5;
+        --paper-2: #f2f0e9;
+        --rule: #e4e1d8;
+        --rule-2: #d3cfc4;
+        --green: #1f6f52;
+        --green-bright: #2f9068;
+        --gold: #b7791f;
+        --gold-soft: #cf9b3f;
+        --red: #b4472f;
+      }
+
+      @page {
+        size: A4;
+        margin: 19mm 17mm 17mm;
+      }
+      @page cover {
+        margin: 0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      body {
+        color: var(--ink);
+        font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 10.2pt;
+        line-height: 1.6;
+        margin: 0;
+        background: var(--paper);
+      }
+
+      h1,
+      h2,
+      h3,
+      .display {
+        font-family: "Fraunces", Georgia, "Times New Roman", serif;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      p {
+        margin: 0 0 9pt;
+        text-wrap: pretty;
+      }
+
+      strong {
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      em {
+        font-style: italic;
+      }
+
+      .mono {
+        font-family: "Inter", monospace;
+        font-feature-settings: "tnum" 1;
+      }
+
+      /* ── Cover ─────────────────────────────────────────────────── */
+      .cover {
+        page: cover;
+        position: relative;
+        width: 210mm;
+        height: 297mm;
+        background: var(--board);
+        color: #ecebe3;
+        overflow: hidden;
+        padding: 30mm 24mm;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .cover-grid {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: repeat(9, 1fr);
+        grid-auto-rows: 1fr;
+        opacity: 0.5;
+        -webkit-mask-image: radial-gradient(120% 80% at 80% 15%, #000 0%, transparent 62%);
+        mask-image: radial-gradient(120% 80% at 80% 15%, #000 0%, transparent 62%);
+      }
+      .cover-grid i {
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      .cover-grid i.g {
+        background: rgba(47, 144, 104, 0.28);
+      }
+      .cover-grid i.a {
+        background: rgba(207, 155, 63, 0.28);
+      }
+
+      .cover-top {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        z-index: 2;
+      }
+      .cover-mark {
+        font-family: "Fraunces", serif;
+        font-size: 15pt;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .cover-mark span {
+        color: var(--green-bright);
+        font-family: "Inter", sans-serif;
+        font-size: 8pt;
+        font-weight: 500;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        margin-left: 6pt;
+      }
+      .cover-tag {
+        color: rgba(236, 235, 227, 0.6);
+        font-size: 8pt;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+
+      .cover-mid {
+        position: relative;
+        z-index: 2;
+        margin-top: auto;
+      }
+      .cover-eyebrow {
+        color: var(--gold-soft);
+        font-size: 9pt;
+        font-weight: 500;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        margin-bottom: 14pt;
+      }
+      .cover h1 {
+        font-size: 41pt;
+        line-height: 1.02;
+        font-weight: 600;
+        margin: 0;
+        color: #f7f6ef;
+        max-width: 15em;
+      }
+      .cover h1 em {
+        color: var(--green-bright);
+        font-style: normal;
+      }
+      .cover-sub {
+        color: rgba(236, 235, 227, 0.82);
+        font-size: 12pt;
+        line-height: 1.55;
+        margin-top: 18pt;
+        max-width: 30em;
+      }
+
+      .cover-foot {
+        position: relative;
+        z-index: 2;
+        margin-top: 34mm;
+        padding-top: 12pt;
+        border-top: 1px solid rgba(255, 255, 255, 0.14);
+        display: flex;
+        justify-content: space-between;
+        color: rgba(236, 235, 227, 0.62);
+        font-size: 8.5pt;
+        letter-spacing: 0.04em;
+      }
+
+      /* ── Section scaffolding ───────────────────────────────────── */
+      .page-break {
+        page-break-before: always;
+      }
+      .avoid-break {
+        page-break-inside: avoid;
+      }
+
+      .eyebrow {
+        color: var(--green);
+        font-size: 8pt;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 8pt;
+        margin-bottom: 9pt;
+      }
+      .eyebrow::before {
+        content: "";
+        width: 16pt;
+        height: 2px;
+        background: var(--gold);
+      }
+
+      .kicker-num {
+        font-family: "Fraunces", serif;
+        color: var(--gold);
+        font-size: 10pt;
+      }
+
+      .section-title {
+        font-size: 23pt;
+        line-height: 1.08;
+        margin: 0 0 10pt;
+        max-width: 20em;
+      }
+      .section-title.big {
+        font-size: 27pt;
+      }
+
+      .lead {
+        color: var(--ink-2);
+        font-size: 11.5pt;
+        line-height: 1.6;
+        max-width: 40em;
+      }
+
+      .rule {
+        border: none;
+        border-top: 1px solid var(--rule);
+        margin: 16pt 0;
+      }
+
+      /* ── Feature blocks ────────────────────────────────────────── */
+      .feature {
+        page-break-inside: avoid;
+        padding: 15pt 0 14pt;
+        border-bottom: 1px solid var(--rule);
+        display: grid;
+        grid-template-columns: 3.4mm 1fr;
+        gap: 0 10pt;
+      }
+      .feature-bar {
+        background: var(--green);
+        border-radius: 2px;
+        grid-row: 1 / 99;
+      }
+      .feature-tag {
+        color: var(--muted);
+        font-size: 7.5pt;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        margin-bottom: 5pt;
+      }
+      .feature h3 {
+        font-size: 15.5pt;
+        line-height: 1.14;
+        margin: 0 0 7pt;
+        color: var(--ink);
+        max-width: 24em;
+      }
+      .feature p {
+        color: var(--ink-2);
+        margin-bottom: 7pt;
+      }
+      .feature p:last-child {
+        margin-bottom: 0;
+      }
+      .feature .replaces {
+        color: var(--muted);
+        font-size: 9pt;
+      }
+      .feature .replaces b {
+        color: var(--green);
+        font-weight: 600;
+      }
+      .chips {
+        margin-top: 8pt;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5pt;
+      }
+      .chip {
+        border: 1px solid var(--rule-2);
+        border-radius: 20px;
+        padding: 2.5pt 8pt;
+        font-size: 8pt;
+        color: var(--ink-2);
+        background: var(--paper-2);
+      }
+
+      /* ── Module map ────────────────────────────────────────────── */
+      .modmap {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 14pt;
+        page-break-inside: avoid;
+      }
+      .modmap .m {
+        border-right: 1px solid var(--rule);
+        border-bottom: 1px solid var(--rule);
+        padding: 11pt 12pt;
+        background: #fff;
+      }
+      .modmap .m h4 {
+        font-family: "Fraunces", serif;
+        font-size: 11.5pt;
+        font-weight: 600;
+        margin: 0 0 3pt;
+      }
+      .modmap .m p {
+        color: var(--muted);
+        font-size: 8.6pt;
+        line-height: 1.45;
+        margin: 0;
+      }
+      .modmap .m .pill {
+        font-size: 7pt;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--green);
+      }
+
+      /* ── Callout / stat row ────────────────────────────────────── */
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10pt;
+        margin: 16pt 0 6pt;
+      }
+      .stat {
+        border-left: 2px solid var(--gold);
+        padding-left: 9pt;
+      }
+      .stat b {
+        font-family: "Fraunces", serif;
+        font-size: 19pt;
+        font-weight: 600;
+        display: block;
+        line-height: 1;
+      }
+      .stat span {
+        color: var(--muted);
+        font-size: 8.4pt;
+        display: block;
+        margin-top: 4pt;
+        line-height: 1.35;
+      }
+
+      .quote {
+        font-family: "Fraunces", serif;
+        font-size: 15pt;
+        line-height: 1.34;
+        color: var(--green);
+        border-left: 3px solid var(--gold);
+        padding: 2pt 0 2pt 14pt;
+        margin: 16pt 0;
+        max-width: 32em;
+      }
+
+      /* ── The loop diagram ──────────────────────────────────────── */
+      .loop {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8pt;
+        margin-top: 14pt;
+      }
+      .loop .step {
+        border: 1px solid var(--rule);
+        border-top: 2px solid var(--green);
+        border-radius: 3px;
+        padding: 10pt 11pt 12pt;
+        background: #fff;
+      }
+      .loop .step .n {
+        color: var(--gold);
+        font-family: "Fraunces", serif;
+        font-size: 9pt;
+      }
+      .loop .step h4 {
+        font-size: 10.5pt;
+        margin: 4pt 0 4pt;
+        font-family: "Fraunces", serif;
+        font-weight: 600;
+      }
+      .loop .step p {
+        color: var(--muted);
+        font-size: 8.4pt;
+        line-height: 1.42;
+        margin: 0;
+      }
+
+      /* ── AI panel (dark) ───────────────────────────────────────── */
+      .ai-panel {
+        background: var(--board);
+        color: #ecebe3;
+        border-radius: 6px;
+        padding: 20pt 20pt 18pt;
+        margin-top: 14pt;
+      }
+      .ai-panel .eyebrow {
+        color: var(--gold-soft);
+      }
+      .ai-panel .eyebrow::before {
+        background: var(--gold-soft);
+      }
+      .ai-panel h3 {
+        font-size: 16pt;
+        color: #f7f6ef;
+        margin: 0 0 6pt;
+      }
+      .ai-panel p {
+        color: rgba(236, 235, 227, 0.82);
+      }
+      .ai-sub {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12pt;
+        margin-top: 14pt;
+      }
+      .ai-card {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 4px;
+        padding: 12pt 13pt;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .ai-card .tag {
+        color: var(--green-bright);
+        font-size: 7.5pt;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      .ai-card h4 {
+        font-family: "Fraunces", serif;
+        font-size: 12pt;
+        font-weight: 600;
+        color: #f7f6ef;
+        margin: 5pt 0 5pt;
+      }
+      .ai-card p {
+        color: rgba(236, 235, 227, 0.76);
+        font-size: 9pt;
+        line-height: 1.5;
+        margin: 0;
+      }
+      .ai-flow {
+        margin-top: 14pt;
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+        padding-top: 12pt;
+        font-size: 9pt;
+        color: rgba(236, 235, 227, 0.7);
+      }
+      .ai-flow .mono {
+        color: var(--gold-soft);
+      }
+
+      /* ── TOC ───────────────────────────────────────────────────── */
+      .toc {
+        margin-top: 16pt;
+        column-count: 2;
+        column-gap: 22pt;
+      }
+      .toc .row {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--rule);
+        padding: 6pt 0;
+        break-inside: avoid;
+      }
+      .toc .row span:first-child {
+        color: var(--ink);
+      }
+      .toc .row .t {
+        color: var(--gold);
+        font-family: "Fraunces", serif;
+        margin-right: 8pt;
+      }
+      .toc .row .pg {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Trust list ────────────────────────────────────────────── */
+      .trust {
+        margin-top: 12pt;
+      }
+      .trust .t {
+        page-break-inside: avoid;
+        padding: 10pt 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      .trust .t h4 {
+        font-family: "Fraunces", serif;
+        font-size: 12pt;
+        font-weight: 600;
+        margin: 0 0 4pt;
+      }
+      .trust .t p {
+        color: var(--ink-2);
+        font-size: 9.4pt;
+        margin: 0;
+      }
+
+      .two-col {
+        column-count: 2;
+        column-gap: 20pt;
+      }
+
+      .price-box {
+        border: 1px solid var(--rule-2);
+        border-radius: 5px;
+        overflow: hidden;
+        margin-top: 14pt;
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+      }
+      .price-box .left {
+        padding: 18pt 18pt 20pt;
+        border-right: 1px solid var(--rule);
+        background: #fff;
+      }
+      .price-box .right {
+        padding: 18pt;
+        background: var(--paper-2);
+      }
+      .price-rate {
+        font-family: "Fraunces", serif;
+        font-size: 30pt;
+        font-weight: 600;
+        line-height: 1;
+      }
+      .price-rate span {
+        font-size: 11pt;
+        color: var(--muted);
+        font-family: "Inter", sans-serif;
+      }
+      .price-min {
+        display: inline-block;
+        margin-top: 12pt;
+        border: 1px solid var(--rule-2);
+        border-radius: 4px;
+        padding: 4pt 8pt;
+        font-size: 8pt;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--gold);
+      }
+      .incl {
+        list-style: none;
+        margin: 8pt 0 0;
+        padding: 0;
+      }
+      .incl li {
+        font-size: 9.2pt;
+        color: var(--ink-2);
+        padding: 3.5pt 0 3.5pt 15pt;
+        position: relative;
+      }
+      .incl li::before {
+        content: "✓";
+        position: absolute;
+        left: 0;
+        color: var(--green);
+        font-weight: 700;
+      }
+
+      .closing {
+        background: var(--board);
+        color: #ecebe3;
+        border-radius: 6px;
+        padding: 26pt 24pt;
+        margin-top: 18pt;
+        text-align: center;
+      }
+      .closing h2 {
+        color: #f7f6ef;
+        font-size: 22pt;
+        margin: 0 0 8pt;
+      }
+      .closing p {
+        color: rgba(236, 235, 227, 0.8);
+        max-width: 34em;
+        margin: 0 auto 4pt;
+      }
+      .closing .cta {
+        margin-top: 12pt;
+        color: var(--gold-soft);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      .footer-note {
+        color: var(--muted);
+        font-size: 8pt;
+        text-align: center;
+        margin-top: 14pt;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ══════════════════════════ COVER ══════════════════════════ -->
+    <section class="cover">
+      <div class="cover-grid" aria-hidden="true">
+        <!-- 9 x 7 period grid motif -->
+        <i></i><i class="g"></i><i></i><i class="g"></i><i></i><i></i><i class="g"></i><i></i><i></i>
+        <i class="g"></i><i></i><i></i><i class="a"></i><i class="g"></i><i></i><i></i><i class="g"></i><i></i>
+        <i></i><i class="g"></i><i></i><i></i><i></i><i class="g"></i><i></i><i></i><i class="g"></i>
+        <i class="g"></i><i></i><i class="g"></i><i></i><i></i><i></i><i class="g"></i><i></i><i></i>
+        <i></i><i></i><i class="g"></i><i></i><i class="g"></i><i></i><i></i><i></i><i class="g"></i>
+        <i class="g"></i><i></i><i></i><i class="g"></i><i></i><i></i><i class="g"></i><i></i><i></i>
+        <i></i><i class="g"></i><i></i><i></i><i class="g"></i><i></i><i></i><i class="g"></i><i></i>
+      </div>
+
+      <div class="cover-top">
+        <div class="cover-mark">TrackBit <span>School</span></div>
+        <div class="cover-tag">Product Overview · Confidential</div>
+      </div>
+
+      <div class="cover-mid">
+        <p class="cover-eyebrow">The school's daily operating system</p>
+        <h1>
+          The software that runs the school day — and <em>writes it down for you.</em>
+        </h1>
+        <p class="cover-sub">
+          An AI-native operating system for schools: it plans the whole academic year down to the
+          period, captures every class in a single tap, turns it into per-student growth, and reports
+          the day back to you — while adapting to how your school actually works.
+        </p>
+      </div>
+
+      <div class="cover-foot">
+        <span>TrackBit School</span>
+        <span>Product &amp; Vision Overview · 2026</span>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════ TOC + SUMMARY ══════════════════ -->
+    <section class="page-break">
+      <p class="eyebrow">Executive summary</p>
+      <h1 class="section-title big">A school runs on its days. We make every day visible.</h1>
+      <p class="lead">
+        Most school software digitises paperwork. TrackBit runs the operating loop of the school
+        itself — the plan, the timetable, the classroom, the child, the parent, and the money —
+        from a single source of truth that the staff never have to stop and feed. The data enters
+        itself, as a byproduct of teaching. That is why it is still in use in March, when the
+        binders and the half-filled apps have been abandoned.
+      </p>
+
+      <div class="stats">
+        <div class="stat"><b>1</b><span>system for the plan, the classroom, the child, parents &amp; fees</span></div>
+        <div class="stat"><b>≤5</b><span>taps for a teacher to put a whole period on the record</span></div>
+        <div class="stat"><b>0</b><span>reports anyone writes — the daily report writes itself</span></div>
+        <div class="stat"><b>AI</b><span>that composes new views, and grows into new modules</span></div>
+      </div>
+
+      <hr class="rule" />
+
+      <p class="eyebrow">What's inside</p>
+      <div class="toc">
+        <div class="row"><span><span class="t">01</span>Why schools run blind</span><span class="pg">03</span></div>
+        <div class="row"><span><span class="t">02</span>The idea: capture by exception</span><span class="pg">03</span></div>
+        <div class="row"><span><span class="t">03</span>The academic planner &amp; tracker</span><span class="pg">04</span></div>
+        <div class="row"><span><span class="t">04</span>Timetable, mapped to teachers</span><span class="pg">04</span></div>
+        <div class="row"><span><span class="t">05</span>Classroom logs &amp; attendance</span><span class="pg">05</span></div>
+        <div class="row"><span><span class="t">06</span>Homework, that reaches home</span><span class="pg">05</span></div>
+        <div class="row"><span><span class="t">07</span>The parent portal</span><span class="pg">06</span></div>
+        <div class="row"><span><span class="t">08</span>Exams &amp; student growth</span><span class="pg">06</span></div>
+        <div class="row"><span><span class="t">09</span>The daily report</span><span class="pg">07</span></div>
+        <div class="row"><span><span class="t">10</span>Tasks &amp; the director's board</span><span class="pg">07</span></div>
+        <div class="row"><span><span class="t">11</span>Fees &amp; the hostel</span><span class="pg">08</span></div>
+        <div class="row"><span><span class="t">12</span>The AI layer</span><span class="pg">09</span></div>
+        <div class="row"><span><span class="t">13</span>How it all connects</span><span class="pg">10</span></div>
+        <div class="row"><span><span class="t">14</span>Trust &amp; architecture</span><span class="pg">11</span></div>
+        <div class="row"><span><span class="t">15</span>Commercial model</span><span class="pg">11</span></div>
+        <div class="row"><span><span class="t">16</span>Where this goes</span><span class="pg">12</span></div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════ PROBLEM ════════════════════════ -->
+    <section class="page-break">
+      <p class="eyebrow"><span class="kicker-num">01</span> The problem</p>
+      <h2 class="section-title big">Schools don't fail on strategy. They fail on the days.</h2>
+      <p class="lead">
+        A school is a promise made 200 times a day, one period at a time. Whether that promise is
+        kept — the class taught, the syllabus paced, the weak student caught, the parent informed —
+        is almost impossible for a principal to actually see. The result is a school run on faith and
+        hindsight.
+      </p>
+
+      <div style="margin-top: 14pt" class="two-col">
+        <p>
+          <strong>The director is flying blind.</strong> What they know about today is a monthly
+          summary, written after the fact and often reverse-engineered to look fine. Were all eight
+          periods held? Is the syllabus actually on pace? They find out a class is eight chapters
+          behind a week before the exam — when nothing can be done.
+        </p>
+        <p>
+          <strong>The teacher has no minute to spare.</strong> The same attendance and homework get
+          written into a register, a diary, and a WhatsApp group. Any system that asks them to mark a
+          40-student class one by one is dead on arrival, so the data is never captured cleanly, and
+          nothing downstream can be trusted.
+        </p>
+        <p>
+          <strong>The parent is the last to know.</strong> A call to the office, and still no clear
+          answer about their child's day — what was taught, what homework was set, what was missed
+          while the child was absent.
+        </p>
+        <p>
+          <strong>And the tools they bought died by March.</strong> Every one demanded data entry
+          nobody had time for. The information lives scattered across Excel and WhatsApp, none of it
+          connected, none of it queryable, no single source of truth.
+        </p>
+      </div>
+
+      <p class="quote">
+        The gap is never the plan. It is the distance between the plan and what actually happened —
+        and no one can see across it in time to act.
+      </p>
+
+      <!-- ══════════════ THE IDEA ══════════════ -->
+      <div class="page-break"></div>
+      <p class="eyebrow"><span class="kicker-num">02</span> The core idea</p>
+      <h2 class="section-title big">Capture by exception: confirm the norm, log only what changed.</h2>
+      <p class="lead">
+        Every hard problem above comes down to one thing — getting clean, daily ground truth without
+        adding work. TrackBit's answer is a single mechanism that runs through the whole product:
+        the teacher confirms the normal case in one tap, and records only the deviations.
+      </p>
+
+      <p style="margin-top: 12pt">
+        Attendance is <strong>"all present," minus the few you tap.</strong> The daily plan is
+        <strong>"we did the lesson," minus what didn't get done.</strong> A period goes on the record
+        in four taps, under thirty seconds. Because the teacher gets value the instant they give data
+        — homework logged is homework the parent already sees — the loop sustains itself. From that
+        one honest tap, everything else is <strong>computed, not entered</strong>: per-student growth,
+        syllabus pace, the parent's view, the director's dashboard, and the report that writes itself.
+      </p>
+
+      <div class="loop">
+        <div class="step">
+          <div class="n">01</div>
+          <h4>Compile the year</h4>
+          <p>Syllabus, staff and roster become a plan for every class-subject, down to the period.</p>
+        </div>
+        <div class="step">
+          <div class="n">02</div>
+          <h4>Confirm by exception</h4>
+          <p>Teachers tap the norm and log only deviations — who was away, what didn't get done.</p>
+        </div>
+        <div class="step">
+          <div class="n">03</div>
+          <h4>Join into truth</h4>
+          <p>Timetable × attendance × topics × homework × scores, computed per student.</p>
+        </div>
+        <div class="step">
+          <div class="n">04</div>
+          <h4>Report &amp; act</h4>
+          <p>The 8 AM report surfaces risks; each gap becomes a task in one tap.</p>
+        </div>
+      </div>
+
+      <div class="avoid-break" style="margin-top: 18pt">
+      <p class="eyebrow">The platform at a glance</p>
+      <div class="modmap">
+        <div class="m"><span class="pill">Core</span><h4>Academic Planner</h4><p>Year plan to the period, held to the classroom log.</p></div>
+        <div class="m"><span class="pill">Core</span><h4>Timetable</h4><p>Teacher schedules, clash-checked and live.</p></div>
+        <div class="m"><span class="pill">Core</span><h4>Classroom &amp; Attendance</h4><p>Per-period capture in a single tap.</p></div>
+        <div class="m"><span class="pill">Core</span><h4>Homework</h4><p>Set once; the parent sees it instantly.</p></div>
+        <div class="m"><span class="pill">Core</span><h4>Parent Portal</h4><p>A login into the child's real day.</p></div>
+        <div class="m"><span class="pill">Core</span><h4>Exams &amp; Growth</h4><p>Scores in, growth tracked subject by subject.</p></div>
+        <div class="m"><span class="pill">Core</span><h4>Daily Report</h4><p>The day, written for the director by 8 AM.</p></div>
+        <div class="m"><span class="pill">Layer</span><h4>Tasks &amp; Boards</h4><p>The school's other work, tracked and claimable.</p></div>
+        <div class="m"><span class="pill">Layer</span><h4>Fees</h4><p>Structures, receipts and a trustworthy ledger.</p></div>
+        <div class="m"><span class="pill">Layer</span><h4>Hostel &amp; Sessions</h4><p>Evening prep and activities, same rails.</p></div>
+        <div class="m"><span class="pill">Intelligence</span><h4>Lucy — agentic AI</h4><p>Ask the school anything, in plain language.</p></div>
+        <div class="m"><span class="pill">Intelligence</span><h4>Generative UI</h4><p>Describe a view; the system builds it.</p></div>
+      </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════ FEATURES ═══════════════════════ -->
+    <section class="page-break">
+      <p class="eyebrow"><span class="kicker-num">03–11</span> The modules, in depth</p>
+      <h2 class="section-title big">One loop, ten ways it pays off.</h2>
+      <p class="lead">
+        Each module below stands on its own, but every one reads from and writes to the same daily
+        truth — so nothing is ever entered twice, and every screen agrees with every other.
+      </p>
+
+      <div style="margin-top: 12pt">
+        <!-- 03 Planner -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">03 · Academic planner &amp; tracker</div>
+            <h3>The whole year, planned down to the period — and held to it.</h3>
+            <p>
+              You give TrackBit the syllabus and the school calendar; it compiles a period-by-period
+              plan for every class-subject, aware of terms, holidays and real teaching days. Chapters
+              are sized against the actual periods available, so an over-ambitious portion is flagged
+              before the year starts, not after.
+            </p>
+            <p>
+              Then it holds the school to that plan. The approved plan is the <strong>baseline</strong>;
+              the classroom log is the <strong>actual</strong>. A live red / amber / green forecast
+              shows exactly which class-subjects are on pace and which are slipping — and an exam-fit
+              check answers the question that matters: <em>can this portion still be finished before
+              the test?</em>
+            </p>
+            <div class="chips">
+              <span class="chip">Term-scoped chapters</span>
+              <span class="chip">Real teaching-day math</span>
+              <span class="chip">RAG pace forecast</span>
+              <span class="chip">Exam-fit check</span>
+              <span class="chip">Mid-year adoption</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 04 Timetable -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">04 · Timetable</div>
+            <h3>Every teacher's week, mapped, clash-checked, and live.</h3>
+            <p>
+              The timetable maps periods to classes and teachers, with a deterministic clash detector
+              that refuses to double-book a teacher. Import it from a photo or a spreadsheet and the
+              system reads it in; from that grid, each teacher's day assembles itself into the list of
+              periods they'll actually teach.
+            </p>
+            <p>
+              It is effective-dated and append-only, so a mid-term change to the schedule never
+              rewrites history — last month's records still reflect the timetable that was truly in
+              force then.
+            </p>
+            <div class="chips">
+              <span class="chip">Photo / spreadsheet import</span>
+              <span class="chip">Teacher clash detection</span>
+              <span class="chip">Effective-dated changes</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 05 Classroom + attendance -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">05 · Classroom logs &amp; attendance</div>
+            <h3>What happened in every classroom, captured in a single tap.</h3>
+            <p>
+              This is where capture by exception earns its keep. A teacher opens the period, taps
+              "all present" and marks the few absentees, picks the topic from the syllabus list, and
+              sets homework — the whole period, on the record, in seconds. An optional deep log lets
+              the teacher flag only the students who stood out, never the whole class.
+            </p>
+            <p>
+              The first attendance of the day quietly triggers what the school needs it to — the
+              record a parent will later see, the absence a class teacher should follow up. Nobody
+              fills a register twice.
+            </p>
+            <div class="chips">
+              <span class="chip">One-tap "all present"</span>
+              <span class="chip">Topic from the plan</span>
+              <span class="chip">Exception-only deep log</span>
+              <span class="chip">"Not held" reasons</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 06 Homework -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">06 · Homework</div>
+            <h3>Homework that reaches the parent the moment it's set.</h3>
+            <p>
+              Homework is logged as part of closing the period — class-wide, or for specific students
+              when the work is personal. Because it lands in the same system the parent can see, the
+              teacher gets value the instant they record it: the parent is informed without a single
+              extra message being written.
+            </p>
+            <p class="replaces">
+              <b>Replaces:</b> the homework diary, the class WhatsApp group, and the "my child forgot
+              to write it down" phone call.
+            </p>
+          </div>
+        </div>
+
+        <!-- 07 Parent portal -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">07 · Parent portal</div>
+            <h3>Parents stop calling the office. They log in and see the day.</h3>
+            <p>
+              Every parent gets a login to their child's actual day: the topic taught in each period,
+              the homework set, and — when their child was absent — exactly which topics they missed,
+              so the gap can be closed at home. It is the class record, in the open, and it turns the
+              school's daily capture into the parent's transparency at no extra effort.
+            </p>
+            <p>
+              What parents see is the record of the class and their child's part in it. The private
+              intervention tiers that staff use to target help are <strong>never</strong> shown to a
+              parent — transparency where it builds trust, discretion where it protects the child.
+            </p>
+            <div class="chips">
+              <span class="chip">Per-period topics</span>
+              <span class="chip">Homework set</span>
+              <span class="chip">Missed-while-absent</span>
+              <span class="chip">Performance over time</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 08 Exams + growth -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">08 · Exams &amp; student growth</div>
+            <h3>Every child's growth, subject by subject, on one screen.</h3>
+            <p>
+              Enter exam results — by typing, or by dropping a photo of the marks sheet, which the
+              system reads and pre-fills for review. Those scores flow into a growth view for every
+              child: how much of each subject has actually been taught, the topics they missed while
+              absent, their test trend over time, a skill profile, and the areas where they need help.
+            </p>
+            <p>
+              Behind the scenes, staff can group students into private A/B/C support tiers and spin up
+              targeted interventions that become trackable tasks — the mechanism that turns "this
+              child is slipping" into something the school actually does.
+            </p>
+            <div class="chips">
+              <span class="chip">Photo marks-sheet capture</span>
+              <span class="chip">Per-subject growth</span>
+              <span class="chip">Skill profile &amp; trend</span>
+              <span class="chip">Private support tiers</span>
+              <span class="chip">Interventions → tasks</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 09 Daily report -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">09 · The daily report</div>
+            <h3>Nobody writes the report. It writes itself by 8 AM.</h3>
+            <p>
+              Overnight, TrackBit reads the whole day — attendance, topics covered, homework, syllabus
+              pace, sessions and fees — and composes the report a principal would otherwise spend an
+              hour assembling: the risks that need attention, the loose ends and ambiguities, and the
+              wins worth celebrating. It is on the director's phone before the first bell.
+            </p>
+            <p class="replaces">
+              <b>Replaces:</b> the Monday review deck, the WhatsApp round-up, and the hours spent
+              chasing staff for numbers.
+            </p>
+          </div>
+        </div>
+
+        <!-- 10 Tasks -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">10 · Tasks &amp; the director's board</div>
+            <h3>The school's other work — on boards anyone can pick up.</h3>
+            <p>
+              Sitting on top of the academic core is a full task layer for everything else a school
+              runs on: maintenance, housekeeping, events, admin. Work can be assigned to a person or
+              left claimable on a public board; recurring routines materialise themselves. Crucially,
+              every alert on the director's dashboard becomes a task in one tap — so a red syllabus
+              forecast or a repeat absentee doesn't just get noticed, it gets owned.
+            </p>
+            <div class="chips">
+              <span class="chip">Assign or claim</span>
+              <span class="chip">Recurring routines</span>
+              <span class="chip">Alert → task in one tap</span>
+              <span class="chip">Full audit trail</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 11 Fees + hostel -->
+        <div class="feature">
+          <div class="feature-bar"></div>
+          <div>
+            <div class="feature-tag">11 · Fees &amp; the hostel</div>
+            <h3>Fees you can trust — and a day that doesn't end at the last bell.</h3>
+            <p>
+              The fee module handles structures, instalment plans, discounts and receipts on an
+              append-only ledger — every payment, undo and adjustment is a new entry, never a silent
+              edit, so the books can always be trusted. Fees are director-only; teachers never see a
+              rupee.
+            </p>
+            <p>
+              For residential schools, the hostel runs on the same rails as the school day: evening
+              prep, study blocks and activities, with rosters that compute themselves from class and
+              boarder status. The child's day is tracked from the first bell to lights-out, in one
+              continuous record.
+            </p>
+            <div class="chips">
+              <span class="chip">Instalments &amp; discounts</span>
+              <span class="chip">Append-only ledger</span>
+              <span class="chip">Director-only</span>
+              <span class="chip">Evening prep &amp; activities</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════ AI LAYER ═══════════════════════ -->
+    <section class="page-break">
+      <p class="eyebrow"><span class="kicker-num">12</span> The intelligence layer</p>
+      <h2 class="section-title big">Not a chatbot bolted on. A system that rebuilds itself around you.</h2>
+      <p class="lead">
+        Most "AI in edtech" is a chat window stapled to the side of an old product. TrackBit's AI is
+        the opposite: it reaches into the live school through the same permissions a human has, and it
+        can compose the interface itself. This is the part of the product with no equivalent in the
+        market — and the reason a school that adopts TrackBit keeps discovering new value long after
+        go-live.
+      </p>
+
+      <div class="ai-panel">
+        <p class="eyebrow">The adaptive school OS</p>
+        <h3>Ask it. And watch it build.</h3>
+        <p>
+          Underneath sits a registry of the school's real capabilities — every service the product
+          exposes, described in a machine-readable way. The AI plans over those capabilities to
+          answer a question or take an action, and then <strong>renders the answer as live
+          interface</strong>: a table, a chart, a roster, a report card — chosen and assembled on the
+          spot from real data it is not allowed to invent.
+        </p>
+
+        <div class="ai-sub">
+          <div class="ai-card">
+            <span class="tag">Shipped · agentic assistant</span>
+            <h4>Lucy — ask your school anything.</h4>
+            <p>
+              "Which classes are behind on Science before the half-yearly?" Lucy reads the live plan
+              and answers with a real, data-backed view — through the asker's own permissions, so a
+              teacher sees their classes and a director sees the school. Anything that changes data
+              waits for a human's confirmation.
+            </p>
+          </div>
+          <div class="ai-card">
+            <span class="tag">Generative UI</span>
+            <h4>Describe a view; it appears.</h4>
+            <p>
+              The interface is not a fixed set of screens. The AI materialises the right view from
+              the data on demand — the numbers are always server-computed and never typed by the
+              model. The system shows you what you asked to see, built in the moment.
+            </p>
+          </div>
+        </div>
+
+        <div class="ai-flow">
+          <span class="mono">describe → plan over capabilities → act (with confirm) → generate the interface</span>
+          &nbsp; The same registry that powers this today is the seed of tomorrow: as the capability
+          set grows, so does what can be described into being — from a new view, toward a new module.
+        </div>
+      </div>
+
+      <p class="quote" style="margin-top: 16pt">
+        A school that describes what it wants to track, and watches the module take shape. That is the
+        direction we are building — a school operating system that reshapes itself to how each school
+        actually works.
+      </p>
+
+      <p>
+        Everywhere else in the product, the same doctrine holds: <strong>AI proposes, a human
+        confirms, and deterministic rules decide.</strong> It drafts the year plan, splits a chapter
+        into teachable topics, reads a timetable photo, and writes the daily report — but every output
+        lands in a review surface a person signs off before anything is saved. The intelligence makes
+        the work effortless without ever putting the school on autopilot.
+      </p>
+    </section>
+
+    <!-- ══════════════════════════ CONNECTS + TRUST ═══════════════ -->
+    <section class="page-break">
+      <p class="eyebrow"><span class="kicker-num">13</span> How it all connects</p>
+      <h2 class="section-title">Why it survives past March, when other tools are abandoned.</h2>
+      <p class="lead">
+        The reason isn't a feature — it's the shape of the whole system. Value comes before data
+        entry, and data entry is never a separate job.
+      </p>
+      <div class="two-col" style="margin-top: 12pt">
+        <p>
+          <strong>Teachers give the least, and get the most.</strong> The only thing asked of a
+          teacher is a few taps per period — and even that pays them back immediately, because logging
+          homework informs the parent and closing a period clears their list. There is no data-entry
+          role to hire, no clerk transcribing registers, no month-end scramble.
+        </p>
+        <p>
+          <strong>Everyone downstream reads one truth.</strong> The parent's portal, the director's
+          dashboard, the growth tracker and the daily report are all <em>views</em> of the same
+          captured day. Nothing is stored twice, so nothing can disagree. Fix a fact once and every
+          screen updates.
+        </p>
+        <p>
+          <strong>It meets the school where it is.</strong> A school can adopt TrackBit mid-year, size
+          chapters as each term begins, and run two campuses or a hostel — the system bends to that
+          instead of demanding the year start over. Onboarding is done <em>for</em> the school, from
+          the files it already has.
+        </p>
+        <p>
+          <strong>And it compounds.</strong> Every day of capture makes the growth history richer, the
+          forecasts sharper, and the AI's answers more grounded. The product a school uses in year two
+          is measurably more valuable than the one they started with — without a single upgrade to buy.
+        </p>
+      </div>
+
+      <div class="page-break"></div>
+      <p class="eyebrow"><span class="kicker-num">14</span> Trust &amp; architecture</p>
+      <h2 class="section-title">Built so the data can be trusted — and the private stays private.</h2>
+      <div class="trust">
+        <div class="t">
+          <h4>Tenant isolation, enforced at the database.</h4>
+          <p>
+            Every school's data is scoped by a verified identity on every request and fenced by
+            row-level security in the database itself — so a query can never reach across schools,
+            even by mistake. Multi-school operation is a first-class design, not a bolt-on.
+          </p>
+        </div>
+        <div class="t">
+          <h4>Append-only history — undo, never overwrite.</h4>
+          <p>
+            Fees, plan approvals, band changes and score verifications are recorded as new entries,
+            not silent edits. An undo is a compensating entry. The books and the record can always be
+            audited, and nothing quietly disappears.
+          </p>
+        </div>
+        <div class="t">
+          <h4>Bands are private by design.</h4>
+          <p>
+            The A/B/C support tiers exist only to target help. They are staff-only and, as a hard
+            product rule, never appear on any parent-facing surface. Discretion is enforced in the
+            architecture, not left to policy.
+          </p>
+        </div>
+        <div class="t">
+          <h4>AI that can't fabricate.</h4>
+          <p>
+            The assistant renders only server-computed data, and any action it proposes is a
+            confirmable pending step, not a silent write. The model chooses how to present the truth;
+            it is structurally prevented from inventing it.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════ COMMERCIAL + VISION ════════════ -->
+    <section class="page-break">
+      <p class="eyebrow"><span class="kicker-num">15</span> Commercial model</p>
+      <h2 class="section-title">A simple model: one price, per student.</h2>
+      <p class="lead">
+        No editions, no add-ons, no free tier to configure and abandon. The school pays, and TrackBit
+        builds their school inside the product from the files they already have — and hands it over
+        working.
+      </p>
+
+      <div class="price-box">
+        <div class="left">
+          <div class="price-rate">₹100 <span>per student · per month</span></div>
+          <div class="price-min">Minimum 500 students per school</div>
+          <p style="margin-top: 12pt; color: var(--muted); font-size: 9pt">
+            Billed on the active roll. A 800-student school runs at ₹80,000 / month — a fraction of a
+            single administrator's cost, for the school's entire operating system.
+          </p>
+        </div>
+        <div class="right">
+          <p style="font-size: 8pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--green); font-weight: 600; margin-bottom: 4pt">
+            Every plan includes
+          </p>
+          <ul class="incl">
+            <li>Every module — no tiers</li>
+            <li>Full setup done by us, from your files</li>
+            <li>Syllabus, roster &amp; staff import</li>
+            <li>Timetable built and validated</li>
+            <li>Plans generated and approved with you</li>
+            <li>Staff training and handover</li>
+            <li>Unlimited teacher &amp; admin accounts</li>
+            <li>A parent login for every family</li>
+          </ul>
+        </div>
+      </div>
+
+      <p style="margin-top: 12pt; color: var(--ink-2)">
+        <strong>Who it's for:</strong> established schools of 500 students and up — day schools,
+        residential schools and multi-campus groups — that are ready to run on real daily data
+        instead of month-end paperwork. The floor is deliberate: below it, the hands-on setup and
+        support that make TrackBit stick don't pencil out.
+      </p>
+
+      <div class="page-break"></div>
+      <p class="eyebrow"><span class="kicker-num">16</span> Where this goes</p>
+      <h2 class="section-title big">The school operating system that keeps growing.</h2>
+      <p class="lead">
+        TrackBit today already runs the daily loop of the school — plan, classroom, child, parent,
+        money — from one source of truth. The trajectory is to make that operating system
+        <em>adaptive</em>: a platform where a school describes a new thing it wants to track and the
+        system composes it, where the AI moves from answering questions to assembling whole modules,
+        and where every additional school and every additional day makes the intelligence sharper for
+        everyone.
+      </p>
+      <p>
+        The moat is not any one feature — competitors can copy a screen. It is the combination that is
+        hard to assemble: a capture mechanism teachers actually sustain, a single connected truth
+        underneath, and an AI layer that can reshape the product itself. That combination is what turns
+        software a school merely buys into the system a school runs on.
+      </p>
+
+      <div class="closing">
+        <h2 class="display">See it on your own school.</h2>
+        <p>
+          The most convincing demo isn't a sample school — it's yours. We load a slice of your real
+          classes, subjects and calendar, and show you the day board, the parent portal and the report
+          that writes itself.
+        </p>
+        <p class="cta">Book a demo → trackbit.in</p>
+      </div>
+
+      <p class="footer-note">
+        TrackBit School — Product &amp; Vision Overview · Confidential · 2026. Prepared for partners
+        and investors evaluating the platform.
+      </p>
+    </section>
+  </body>
+</html>
