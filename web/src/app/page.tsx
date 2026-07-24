@@ -5,7 +5,14 @@ import { Bricolage_Grotesque } from "next/font/google";
 import { RedirectIfAuthed } from "@/components/auth/redirect-if-authed";
 import { DayBoard } from "@/components/marketing/day-board";
 import { DemoForm } from "@/components/marketing/demo-form";
+import { DirectorDashboard } from "@/components/marketing/director-dashboard";
+import { GenerativeBuild } from "@/components/marketing/generative-build";
+import { GrowthTracker } from "@/components/marketing/growth-tracker";
+import { LucyPeek } from "@/components/marketing/lucy-peek";
+import { ParentPortal } from "@/components/marketing/parent-portal";
+import { PeriodCard } from "@/components/marketing/period-card";
 import { PricingCalculator } from "@/components/marketing/pricing-calculator";
+import { ReportWriter } from "@/components/marketing/report-writer";
 
 import "./marketing.css";
 
@@ -18,81 +25,33 @@ const display = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "TrackBit School — the school's daily operating system",
+  title: "TrackBit School — see every classroom, every day",
   description:
-    "AI-native software for schools of 500+ students. Plan the academic year down to the period, capture every class in one tap, track each student's growth subject by subject, and get the daily report written for you. ₹100 per student per month.",
+    "You run a school of hundreds of students and dozens of teachers — and can't see what actually happened in class today. TrackBit puts every period on the record in one tap, tracks each student's growth subject by subject, writes the daily report itself, and lets parents log in to their child's day. ₹100 per student per month.",
 };
 
 const facts = [
   { n: "8", l: "periods a day, each one on the record — not a monthly summary" },
   { n: "≤5", l: "taps for a teacher to close a period, attendance included" },
   { n: "0", l: "reports anyone has to write. The 8 AM report writes itself" },
-  { n: "1", l: "system for planning, classrooms, hostel, tasks and fees" },
+  { n: "1", l: "system for planning, classrooms, growth, parents and fees" },
 ];
 
-const modules = [
+const personas = [
   {
-    tag: "Pillar 01",
-    title: "Student growth",
-    body: "Every student, subject by subject: what was taught, what they were present for, what they scored, and where they are slipping.",
-    points: [
-      "Chapter-level view, drill down to a single topic",
-      "Topics missed while absent, listed by name",
-      "Test scores, skill profile and growth areas",
-      "Private A/B/C tiers for staff — never a label a parent sees",
-    ],
+    who: "The director",
+    pain: "You can't see what's really happening. The monthly summary is written after the fact — and everyone knows it.",
+    fix: "A live view of every classroom, and a report waiting at 8 AM.",
   },
   {
-    tag: "Pillar 02",
-    title: "Academic planner",
-    body: "The year's syllabus is compiled into a period-by-period plan, then held to it. The plan is the baseline; the classroom log is the actual.",
-    points: [
-      "Term-scoped chapters sized to real teaching days",
-      "Red / amber / green pace forecast per class-subject",
-      "Approved plans lock — re-forecast never rewrites them",
-      "Exam-fit check: is the portion finishable before the test?",
-    ],
+    who: "The teacher",
+    pain: "You have no time for software. The same attendance and homework, written into a register, a diary and a WhatsApp group.",
+    fix: "One tap closes a period. Recording it is the whole job.",
   },
   {
-    tag: "Pillar 03",
-    title: "Teacher tracking",
-    body: "Not surveillance — visibility. You can see which periods were held, what was covered, and where a class has quietly fallen behind.",
-    points: [
-      "Timetable with clash detection, imported from your file",
-      "Per-period attendance, topic covered and homework set",
-      "Optional deep log: flag only the students who deviate",
-      "Unmarked periods chase the teacher, not you",
-    ],
-  },
-  {
-    tag: "Module",
-    title: "Tasks & boards",
-    body: "The school's non-academic work — maintenance, housekeeping, events — on boards anyone can pick up.",
-    points: [
-      "Assign it, or leave it claimable",
-      "Recurring routines materialise themselves",
-      "Every dashboard alert becomes a task in one tap",
-    ],
-  },
-  {
-    tag: "Module",
-    title: "Fees",
-    body: "Structures, instalments, discounts and receipts, on a ledger that is appended to and never edited.",
-    points: [
-      "Per-class fee structures and instalment plans",
-      "Payment, undo and discount as compensating entries",
-      "Director-only: teachers never see a rupee",
-    ],
-  },
-  {
-    tag: "Module",
-    title: "Hostel & sessions",
-    body: "Evening prep, study blocks and activities run on the same rails as the school day, for the students who never go home.",
-    points: [
-      "Rosters compute themselves from class + hosteller category",
-      "Study, homework and activity blocks, each with its own capture",
-      "Photos and video attach to the session, never to a child",
-    ],
+    who: "The parent",
+    pain: "You're the last to know. A call to the office, and still no clear answer about your child's day.",
+    fix: "Log in and see the day yourself — what was taught, and what your child missed.",
   },
 ];
 
@@ -119,6 +78,30 @@ const loop = [
     body: "Risks, ambiguities and wins, written overnight — plus one-tap tasks for anything that needs a person.",
   },
 ];
+
+type ShowcaseProps = {
+  id?: string;
+  eyebrow: string;
+  title: React.ReactNode;
+  sub: string;
+  media: React.ReactNode;
+  flip?: boolean;
+};
+
+function Showcase({ id, eyebrow, title, sub, media, flip }: ShowcaseProps) {
+  return (
+    <section className="mk-section mk-shell" id={id}>
+      <div className="mk-show" data-flip={flip ? "true" : "false"}>
+        <div className="mk-show-copy">
+          <p className="mk-eyebrow">{eyebrow}</p>
+          <h2 className="mk-h2 mk-display">{title}</h2>
+          <p className="mk-sub">{sub}</p>
+        </div>
+        <div className="mk-show-media">{media}</div>
+      </div>
+    </section>
+  );
+}
 
 export default function LandingPage() {
   return (
@@ -155,21 +138,25 @@ export default function LandingPage() {
       <section className="mk-hero">
         <div className="mk-shell mk-hero-grid">
           <div>
-            <p className="mk-eyebrow">AI-native school operating system</p>
+            <p className="mk-eyebrow">The school&apos;s daily operating system</p>
+            <p className="mk-hero-kicker">
+              You have 40 teachers and 800 students. Right now, no one can tell you what actually
+              happened in class today.
+            </p>
             <h1 className="mk-h1 mk-display">
               Every period of every day, <em>on the record.</em>
             </h1>
             <p className="mk-lead">
-              TrackBit School plans your academic year down to the period, captures each class in a
-              tap, and turns it into per-student growth subject by subject. Then it writes the
-              day&apos;s report itself — and keeps growing into how your school actually works.
+              TrackBit plans your year down to the period, captures each class in one tap, and turns
+              it into per-student growth subject by subject. Then it writes the day&apos;s report
+              itself — and asks your teachers for no data entry, so it&apos;s still running in March.
             </p>
             <div className="mk-cta-row">
               <a className="mk-btn mk-btn-primary" href="#demo">
                 Book a demo
               </a>
-              <a className="mk-btn mk-btn-ghost" href="#pricing">
-                See pricing
+              <a className="mk-btn mk-btn-ghost" href="#product">
+                See how it works
               </a>
             </div>
             <p className="mk-hero-note mk-mono">
@@ -195,44 +182,82 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── What it tracks ──────────────────────────────────────────────── */}
+      {/* ── Personas ────────────────────────────────────────────────────── */}
       <section className="mk-section mk-shell" id="product">
         <div className="mk-section-head">
-          <p className="mk-eyebrow">What it tracks</p>
-          <h2 className="mk-h2 mk-display">
-            Three things a head of school can never see clearly — and the running of the place.
-          </h2>
+          <p className="mk-eyebrow">The problem</p>
+          <h2 className="mk-h2 mk-display">Three people. Three problems. One system.</h2>
           <p className="mk-sub">
-            Student growth, the academic plan and the teaching itself are the pillars. Tasks, fees
-            and hostel sit on the same data, so nothing is ever entered twice.
+            A school runs on things nobody can quite see: whether the class was taught, whether the
+            teacher had a minute to log it, whether the parent ever found out. TrackBit is built for
+            all three at once.
           </p>
         </div>
 
-        <div className="mk-modules">
-          {modules.map((m) => (
-            <article key={m.title} className="mk-module">
-              <p className="mk-module-tag mk-mono">{m.tag}</p>
-              <h3>{m.title}</h3>
-              <p>{m.body}</p>
-              <ul>
-                {m.points.map((p) => (
-                  <li key={p}>{p}</li>
-                ))}
-              </ul>
+        <div className="mk-persona-grid">
+          {personas.map((p) => (
+            <article key={p.who} className="mk-persona">
+              <p className="mk-persona-who mk-display">{p.who}</p>
+              <p className="mk-persona-pain">{p.pain}</p>
+              <p className="mk-persona-fix">
+                <span className="mk-persona-arrow mk-mono">→</span> {p.fix}
+              </p>
             </article>
           ))}
         </div>
       </section>
 
+      {/* ── Director's dashboards ───────────────────────────────────────── */}
+      <Showcase
+        eyebrow="For the director"
+        title="The morning you stop chasing people."
+        sub="Open the dashboard and the whole school is in front of you: the syllabus pace of every class-subject, the numbers that matter, and the short list of things that actually need you. Every alert becomes a task in one tap."
+        media={<DirectorDashboard />}
+      />
+
+      {/* ── Capture by exception ────────────────────────────────────────── */}
+      <Showcase
+        flip
+        eyebrow="For the teacher"
+        title="One tap. That is the entire job."
+        sub="The norm is one tap — class present, topic covered. Teachers record only the exceptions: who was away, what didn't get done. A full period on the record in four taps, under half a minute. That is why they keep using it past March."
+        media={<PeriodCard />}
+      />
+
+      {/* ── Growth tracker ──────────────────────────────────────────────── */}
+      <Showcase
+        eyebrow="Every student"
+        title="Growth you can actually follow — subject by subject."
+        sub="For any child: how much of each subject has really been taught, the topics they missed while absent, their test trend, and where they need help. Built from the day's captures, so it is never out of date."
+        media={<GrowthTracker />}
+      />
+
+      {/* ── Report writes itself ────────────────────────────────────────── */}
+      <Showcase
+        flip
+        eyebrow="The 8 AM report"
+        title="Nobody writes it. It writes itself."
+        sub="Overnight, TrackBit reads the day — attendance, topics, homework, pace, fees — and composes the report: the risks, the loose ends, the wins. It is on your phone before the first bell, every day."
+        media={<ReportWriter />}
+      />
+
+      {/* ── Parent portal ───────────────────────────────────────────────── */}
+      <Showcase
+        eyebrow="For parents"
+        title="Parents stop calling the office. They just log in."
+        sub="Every parent gets a login to their child's day: the topic taught in each period, the homework set, and — when their child was absent — exactly what they missed. The class record, in the open. The private A/B/C tiers staff use for intervention are never shown to a parent."
+        media={<ParentPortal />}
+      />
+
       {/* ── The loop ────────────────────────────────────────────────────── */}
       <section className="mk-section mk-shell">
         <div className="mk-section-head">
           <p className="mk-eyebrow">The daily loop</p>
-          <h2 className="mk-h2 mk-display">Nobody writes a report. It falls out of the work.</h2>
+          <h2 className="mk-h2 mk-display">Every number is a byproduct of the work.</h2>
           <p className="mk-sub">
-            Every number in TrackBit is a byproduct of a teacher doing their job, captured in the
-            moment with a tap. There is no separate data-entry job — a system that needs one gets
-            abandoned by March.
+            Nothing on this page is a separate data-entry job. Each figure falls out of a teacher
+            doing their job, captured in the moment with a tap — which is the only reason a school
+            keeps using it.
           </p>
         </div>
 
@@ -247,62 +272,32 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── AI ──────────────────────────────────────────────────────────── */}
+      {/* ── AI layer ────────────────────────────────────────────────────── */}
       <section className="mk-section mk-shell">
         <div className="mk-section-head">
           <p className="mk-eyebrow">The AI layer</p>
-          <h2 className="mk-h2 mk-display">It evolves with your school, not against it.</h2>
+          <h2 className="mk-h2 mk-display">A platform that evolves with your school.</h2>
           <p className="mk-sub">
-            AI here is plumbing, not a gimmick. It reads the timetable photo you send, splits a
-            chapter into teachable topics, drafts the daily report, and answers questions about your
-            own school in plain language. A person confirms everything before it is saved.
+            AI here is plumbing, not a gimmick — it reads your timetable photo, splits a chapter into
+            topics, drafts the daily report, and answers questions in plain language. A person
+            confirms anything that changes data. And it is heading somewhere: a school system that
+            reshapes itself to how you actually work.
           </p>
         </div>
 
-        <div className="mk-ai">
-          <div className="mk-ai-copy">
-            <p className="mk-eyebrow">Ask Lucy</p>
-            <h3>Your school, queried in a sentence.</h3>
-            <p>
-              Staff ask in plain English and get an answer built from live data, never a guess. Lucy
-              reads through the same permissions you have, so a teacher sees their classes and a
-              director sees the school. Anything that changes data waits for your confirmation.
-            </p>
-            <p>
-              And it starts where your school already is. Adopting mid-term, sizing chapters as they
-              come, running a hostel alongside the school — the system bends to that instead of
-              asking you to start the year again.
+        <div className="mk-ai-two">
+          <div className="mk-ai-item">
+            <GenerativeBuild />
+            <p className="mk-ai-cap">
+              <b>The direction we&apos;re building.</b> Describe a tracker in plain words and watch
+              the module take shape — a school OS that grows new views on demand.
             </p>
           </div>
-
-          <div className="mk-ai-demo">
-            <p className="mk-ask">
-              &ldquo;Which classes are behind on Science before the half-yearly?&rdquo;
-            </p>
-            <p className="mk-answer">Three of eight, measured against the approved plan:</p>
-            <div className="mk-answer-rows mk-mono">
-              <div className="mk-answer-row">
-                <span>8B · Science</span>
-                <span>
-                  <b>6 periods</b> behind · 4 topics left
-                </span>
-              </div>
-              <div className="mk-answer-row">
-                <span>7A · Science</span>
-                <span>
-                  <b>4 periods</b> behind · 3 topics left
-                </span>
-              </div>
-              <div className="mk-answer-row">
-                <span>9C · Science</span>
-                <span>
-                  <b>2 periods</b> behind · 1 topic left
-                </span>
-              </div>
-            </div>
-            <p className="mk-answer">
-              The other five finish the portion with days to spare. Want this as a task for the
-              Science coordinator?
+          <div className="mk-ai-item">
+            <LucyPeek />
+            <p className="mk-ai-cap">
+              <b>Shipped today: ask Lucy.</b> Staff query the school in plain English and get an
+              answer from live data, through their own permissions — never a guess.
             </p>
           </div>
         </div>
@@ -314,8 +309,8 @@ export default function LandingPage() {
           <p className="mk-eyebrow">Pricing</p>
           <h2 className="mk-h2 mk-display">One price, per student. That is the whole model.</h2>
           <p className="mk-sub">
-            There is no free tier and no trial you have to configure yourself. You pay, we build
-            your school inside TrackBit from the files you already have, and hand it over working.
+            There is no free tier and no trial you have to configure yourself. You pay, we build your
+            school inside TrackBit from the files you already have, and hand it over working.
           </p>
         </div>
 
@@ -336,7 +331,7 @@ export default function LandingPage() {
               <li>Plans generated and approved with you</li>
               <li>Staff training and handover</li>
               <li>Unlimited teacher and admin accounts</li>
-              <li>Guardian notifications on WhatsApp</li>
+              <li>Parent portal — a login for every parent</li>
             </ul>
           </div>
 
