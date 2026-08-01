@@ -449,6 +449,17 @@ class FeeService:
     ) -> list[OverdueStudent]:
         today = date.today()
         rows = self._year_rows(m.org_id, year_id)
+        # V1-0e/S-162: one query for every class label — this used to run
+        # `db.get(SchoolClass, …)` per student, so 200 overdue students was 200
+        # round trips for one list.
+        class_ids = {sf.student.class_id for sf in rows
+                     if sf.student and sf.student.class_id}
+        labels = {
+            cid: name + (f"-{sec}" if sec else "")
+            for cid, name, sec in self.db.execute(
+                select(SchoolClass.id, SchoolClass.name, SchoolClass.section)
+                .where(SchoolClass.id.in_(class_ids))).all()
+        } if class_ids else {}
         out: list[OverdueStudent] = []
         for sf in rows:
             overdue_total = q(0)
@@ -463,7 +474,8 @@ class FeeService:
                 out.append(OverdueStudent(
                     student_fee_id=sf.id,
                     student_name=sf.student.full_name if sf.student else "",
-                    class_label=self._class_label(sf.student.class_id) if sf.student else None,
+                    class_label=(labels.get(sf.student.class_id)
+                                 if sf.student else None),
                     overdue_amount=overdue_total, earliest_due_date=earliest,
                 ))
         out.sort(key=lambda o: (o.earliest_due_date or date.max))

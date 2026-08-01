@@ -62,19 +62,10 @@ class ParentPortalService:
         self._assert_child(p, student_id)
         t = StudentTimelineService(self.db).timeline(_AdminView(p.org), student_id, on_date)
 
-        marked = [x for x in t.periods if x.attendance != "unmarked"]
-        absents = sum(1 for x in marked if x.attendance == "absent")
-        lates = sum(1 for x in marked if x.attendance == "late")
-        if not t.periods:
-            status = "no_school"
-        elif not marked:
-            status = "not_marked"
-        elif absents == len(marked):
-            status = "absent"
-        elif absents > 0:
-            status = "partial"
-        else:
-            status = "present"
+        # V1-0d: the day status is computed ONCE, in the timeline (`classify_day`)
+        # — this projection renders it. The rule used to be re-derived here, which
+        # is exactly how a parent and the admin board could come to disagree.
+        status = t.day_status
 
         taught: list[ParentTaughtItem] = []
         seen: set[tuple[str, str]] = set()
@@ -97,8 +88,8 @@ class ParentPortalService:
         ]
         yesterday, pending = self._homework(p, student_id, t.date)
         return ParentTodayOut(
-            date=t.date, status=status, marked_periods=len(marked),
-            absent_periods=absents, late_periods=lates,
+            date=t.date, status=status, marked_periods=t.marked_periods,
+            absent_periods=t.absent_periods, late_periods=t.late_periods,
             taught=taught, homework=homework, sessions=sessions,
             yesterday=yesterday, pending=pending)
 

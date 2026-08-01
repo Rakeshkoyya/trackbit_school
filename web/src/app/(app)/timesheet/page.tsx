@@ -151,6 +151,7 @@ function WorkSheet({ target, onClose }: { target: CellTarget | null; onClose: ()
 
 function cellClass(kind: TimesheetSlot["kind"]): string {
   if (kind === "class") return "bg-[color:var(--success,#234a37)]/12 text-foreground cursor-default";
+  if (kind === "cover") return "bg-primary/10 text-foreground cursor-default";
   if (kind === "work") return "bg-muted text-foreground hover:bg-muted/70";
   return "bg-background text-muted-foreground/50 hover:bg-muted/40";
 }
@@ -158,16 +159,21 @@ function cellClass(kind: TimesheetSlot["kind"]): string {
 function Cell({ day, slot, onPick }: {
   day: TimesheetDay; slot: TimesheetSlot; onPick: (t: CellTarget) => void;
 }) {
-  const locked = slot.kind === "class";
+  // Q-37: a period she covered for a colleague is her record too — read-only,
+  // like a teaching period. Before this, covering three periods showed three
+  // free cells on her own grid.
+  const locked = slot.kind === "class" || slot.kind === "cover";
   return (
     <button type="button" disabled={locked}
       onClick={() => onPick({ date: day.date, period_no: slot.period_no, slot })}
       title={locked ? `${slot.class_label} · ${slot.subject_name}` : slot.note ?? undefined}
       className={`h-full w-full rounded-md border border-border px-1.5 py-2 text-left text-[11px] leading-tight transition-colors ${cellClass(slot.kind)}`}>
-      {slot.kind === "class" ? (
+      {slot.kind === "class" || slot.kind === "cover" ? (
         <>
           <span className="block truncate font-medium">{slot.subject_name}</span>
-          <span className="block truncate opacity-70">{slot.class_label}</span>
+          <span className="block truncate opacity-70">
+            {slot.kind === "cover" ? `⟳ ${slot.class_label} · cover` : slot.class_label}
+          </span>
         </>
       ) : slot.kind === "work" ? (
         <>

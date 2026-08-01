@@ -45,6 +45,7 @@ from app.schemas.staff import (
     TimesheetWeek,
 )
 from app.services.school_clock import day_periods, today_in
+from app.services.substitution import covers_between
 
 
 def _label(name: str, section: str | None) -> str:
@@ -115,11 +116,23 @@ class TimesheetService:
         return {(r.date, r.period_no): r for r in rows}
 
     # ── assembly ─────────────────────────────────────────────────────────────
-    def _build_day(self, on: date, periods, working: set[int], teaching, entries) -> TimesheetDay:
+    def _build_day(self, on: date, periods, working: set[int], teaching, entries,
+                   covers=None, away_reason: str | None = None) -> TimesheetDay:
+        # S-72: a person who is away has no free periods. Every cell reads
+        # 'away' and nothing counts — the old shape showed an absent teacher as
+        # eight free periods on the screen used to find cover.
+        if away_reason is not None:
+            return TimesheetDay(
+                date=on, weekday=on.weekday(), is_working_day=on.weekday() in working,
+                slots=[TimesheetSlot(period_no=p.period_no, start=p.start, end=p.end,
+                                     kind="away", note=away_reason) for p in periods],
+                teaching_count=0, work_count=0, free_count=0, cover_count=0)
+        covers = covers or {}
         slots: list[TimesheetSlot] = []
-        teach = work = free = 0
+        teach = work = free = cover = 0
         for p in periods:
             taught = teaching.get((on.weekday(), p.period_no))
+            covering = covers.get((on, p.period_no))
             entry = entries.get((on, p.period_no))
             if taught:
                 # The grid wins. An entry that somehow exists under a teaching
@@ -128,6 +141,13 @@ class TimesheetService:
                 slots.append(TimesheetSlot(
                     period_no=p.period_no, start=p.start, end=p.end, kind="class",
                     class_label=taught[0], subject_name=taught[1]))
+            elif covering:
+                # Q-37: a live substitution outranks a recorded entry — the cover
+                # is the actual, and it is read-only here like a teaching period.
+                cover += 1
+                slots.append(TimesheetSlot(
+                    period_no=p.period_no, start=p.start, end=p.end, kind="cover",
+                    class_label=covering[0], subject_name=covering[1]))
             elif entry:
                 work += 1
                 slots.append(TimesheetSlot(
@@ -140,7 +160,8 @@ class TimesheetService:
                     period_no=p.period_no, start=p.start, end=p.end, kind="free"))
         return TimesheetDay(
             date=on, weekday=on.weekday(), is_working_day=on.weekday() in working,
-            slots=slots, teaching_count=teach, work_count=work, free_count=free)
+            slots=slots, teaching_count=teach, work_count=work, free_count=free,
+            cover_count=cover)
 
     def day(self, m: CurrentMember, member_id: uuid.UUID | None = None,
             on: date | None = None) -> TimesheetDay:
@@ -153,7 +174,8 @@ class TimesheetService:
         return self._build_day(
             on, periods, working,
             self._teaching(m.org_id, mid, on, on),
-            self._entries(m.org_id, mid, on, on))
+            self._entries(m.org_id, mid, on, on),
+            covers=covers_between(self.db, m.org_id, on, on, mid).get(mid, {}))
 
     def week(self, m: CurrentMember, member_id: uuid.UUID | None = None,
              week_start: date | None = None) -> TimesheetWeek:
@@ -168,15 +190,18 @@ class TimesheetService:
 
         teaching = self._teaching(m.org_id, mid, monday, sunday)
         entries = self._entries(m.org_id, mid, monday, sunday)
+        covers = covers_between(self.db, m.org_id, monday, sunday, mid).get(mid, {})
         days = [
-            self._build_day(monday + timedelta(days=i), periods, working, teaching, entries)
+            self._build_day(monday + timedelta(days=i), periods, working, teaching, entries,
+                            covers=covers)
             for i in range(7) if (monday + timedelta(days=i)).weekday() in working
         ]
         return TimesheetWeek(
             member_id=mid, member_name=self._member_name(mid), week_start=monday, days=days,
             teaching_periods=sum(d.teaching_count for d in days),
             work_periods=sum(d.work_count for d in days),
-            free_periods=sum(d.free_count for d in days))
+            free_periods=sum(d.free_count for d in days),
+            covered_periods=sum(d.cover_count for d in days))
 
     # ── writes ───────────────────────────────────────────────────────────────
     def set_entry(self, m: CurrentMember, body: TimesheetEntryIn) -> TimesheetDay:
@@ -261,12 +286,29 @@ class TimesheetService:
         for e in entry_rows:
             entries_by.setdefault(e.member_id, {})[(e.date, e.period_no)] = e
 
+        # S-72: this grid used to read the timetable and the timesheet and
+        # NOTHING else, so an absent teacher showed eight free periods and a
+        # teacher covering three showed free in all three — on the screen the
+        # admin opens to find cover. Absence/leave come from the same roster the
+        # live board reads, covers from the same read My Day unions in (ux §9).
+        from app.services.staff_attendance import StaffAttendanceService  # noqa: PLC0415
+        presence = StaffAttendanceService(self.db).roster(m, on)
+        away: dict[uuid.UUID, str] = {
+            r.member_id: (r.leave_reason or r.note
+                          or ("on leave" if r.on_leave else "marked away"))
+            for r in presence.roster if not r.present
+        }
+        covers_all = covers_between(self.db, m.org_id, on, on)
+
         out: list[TimesheetWeek] = []
         for mid, name in staff:
             day = self._build_day(on, periods, working,
-                                  by_teacher.get(mid, {}), entries_by.get(mid, {}))
+                                  by_teacher.get(mid, {}), entries_by.get(mid, {}),
+                                  covers=covers_all.get(mid, {}),
+                                  away_reason=away.get(mid))
             out.append(TimesheetWeek(
                 member_id=mid, member_name=name, week_start=on, days=[day],
                 teaching_periods=day.teaching_count, work_periods=day.work_count,
-                free_periods=day.free_count))
+                free_periods=day.free_count, covered_periods=day.cover_count,
+                away_reason=away.get(mid)))
         return out

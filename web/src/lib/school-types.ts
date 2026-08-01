@@ -523,6 +523,11 @@ export interface StudentTimeline {
   date: string;
   periods: TimelinePeriod[];
   sessions: TimelineSession[];
+  /** THE day status (V1-0d) — computed once server-side; render, never re-derive. */
+  day_status: "present" | "partial" | "absent" | "not_marked" | "no_school";
+  marked_periods: number;
+  absent_periods: number;
+  late_periods: number;
 }
 
 // â”€â”€ setup wizard + plan generation (V2-P5, SPRD2 Â§5.1/Â§5.2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1360,7 +1365,9 @@ export interface GrowthChapter {
   unit_id: string;
   title: string;
   topics_total: number;
+  /** Fully covered only — an in-progress topic is its own count (V1-0d). */
   topics_taught: number;
+  topics_in_progress: number;
   topics_missed: number;
   topics: GrowthTopic[];
 }
@@ -1446,8 +1453,10 @@ export interface StaffAttendance {
   absent_count: number;
 }
 
-/** 'class' = the timetable owns it (locked) · 'work' = recorded · 'free' = open. */
-export type TimesheetSlotKind = "class" | "work" | "free";
+/** 'class' = the timetable owns it (locked) · 'cover' = a live substitution
+ *  (locked, Q-37) · 'work' = recorded · 'free' = open · 'away' = absent or on
+ *  approved leave that day (S-72 — never rendered as free). */
+export type TimesheetSlotKind = "class" | "cover" | "work" | "free" | "away";
 
 export interface TimesheetSlot {
   period_no: number;
@@ -1469,6 +1478,7 @@ export interface TimesheetDay {
   teaching_count: number;
   work_count: number;
   free_count: number;
+  cover_count: number;
 }
 
 export interface TimesheetWeek {
@@ -1479,6 +1489,9 @@ export interface TimesheetWeek {
   teaching_periods: number;
   work_periods: number;
   free_periods: number;
+  covered_periods: number;
+  /** org-day rows only: why this person is away today (S-72). */
+  away_reason: string | null;
 }
 
 export interface WorkType {

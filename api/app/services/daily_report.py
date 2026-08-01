@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.context import CurrentMember
 from app.models import (
     AcademicYear,
-    AttendanceException,
     CheckResult,
     ClassPeriod,
     ClassSubject,
@@ -45,6 +44,7 @@ from app.models import (
 from app.schemas.reports_daily import DailyReportOut, ReportHighlights, ReportSection
 from app.services.ai import report_summary, report_write
 from app.services.ai.report import deterministic_summary
+from app.services.attendance import day_absence_maps, is_day_absent
 from app.services.planner import PlannerService
 from app.services.sessions import SessionService
 
@@ -267,18 +267,30 @@ class DailyReportService:
             sections.append(("Fees", [f"₹{collected:,.0f} collected today"]))
 
         # ── repeat absentees (≥3 of last 5 days) ──
+        # V1-0d: reads the SAME day-absence maps as the streaks board (ux §9).
+        # The old query counted any day with any absent exception, so a child
+        # who came in late twice could be reported as a repeat absentee.
         win_start = d - timedelta(days=ABSENTEE_WINDOW_DAYS - 1)
-        repeat = self.db.execute(
-            select(Student.full_name, func.count(func.distinct(ClassPeriod.date)).label("days"))
-            .join(AttendanceException, AttendanceException.student_id == Student.id)
-            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
-            .where(Student.org_id == org_id, AttendanceException.status == "absent",
-                   ClassPeriod.date >= win_start, ClassPeriod.date <= d)
-            .group_by(Student.id, Student.full_name)
-            .having(func.count(func.distinct(ClassPeriod.date)) >= ABSENTEE_THRESHOLD)
-        ).all()
-        repeat_absentees = [f"{name} absent {days} of last {ABSENTEE_WINDOW_DAYS} days"
-                            for name, days in repeat]
+        marked_by_class, absents_by_student = day_absence_maps(
+            self.db, org_id, win_start, d)
+        repeat_absentees: list[str] = []
+        if absents_by_student:
+            info = {
+                sid: (name, cid) for sid, name, cid in self.db.execute(
+                    select(Student.id, Student.full_name, Student.class_id)
+                    .where(Student.org_id == org_id, Student.status == "active",
+                           Student.id.in_(absents_by_student.keys()))).all()
+            }
+            for sid, days in absents_by_student.items():
+                name, cid = info.get(sid, (None, None))
+                if name is None or cid is None:
+                    continue
+                n = sum(1 for day, n_absent in days.items()
+                        if is_day_absent(marked_by_class.get((cid, day), 0), n_absent))
+                if n >= ABSENTEE_THRESHOLD:
+                    repeat_absentees.append(
+                        f"{name} absent {n} of last {ABSENTEE_WINDOW_DAYS} days")
+            repeat_absentees.sort()
 
         # ── highlights ──
         risks = [f"{x}" for x in red] + repeat_absentees

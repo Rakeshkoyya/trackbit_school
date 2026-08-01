@@ -11,11 +11,12 @@ import { useParentPortal } from "../parent-context";
 function coverage(s: ParentReportSubject) {
   const total = s.chapters.reduce((n, c) => n + c.topics_total, 0);
   const taught = s.chapters.reduce((n, c) => n + c.topics_taught, 0);
-  return { total, taught };
+  const inProgress = s.chapters.reduce((n, c) => n + c.topics_in_progress, 0);
+  return { total, taught, inProgress };
 }
 
 function SubjectCard({ s }: { s: ParentReportSubject }) {
-  const { total, taught } = coverage(s);
+  const { total, taught, inProgress } = coverage(s);
   const latest = s.scores[s.scores.length - 1];
   return (
     <section className="rounded-xl border border-border bg-card p-4">
@@ -32,12 +33,14 @@ function SubjectCard({ s }: { s: ParentReportSubject }) {
             <span>Syllabus covered</span>
             <span className="tabular-nums">
               {taught}/{total} topics
+              {inProgress > 0 ? ` · ${inProgress} in progress` : ""}
             </span>
           </div>
           <MeterBar
             parts={[
               { value: taught, color: "var(--chart-green)", label: "Covered" },
-              { value: Math.max(0, total - taught), color: "var(--muted)", label: "Remaining" },
+              { value: inProgress, color: "var(--color-muted-foreground)", label: "In progress" },
+              { value: Math.max(0, total - taught - inProgress), color: "var(--muted)", label: "Remaining" },
             ]}
           />
         </div>

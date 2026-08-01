@@ -180,6 +180,17 @@ def test_streak_needs_every_marked_period_and_skips_uncaptured_days(client, clea
     assert ids[asha["id"]]["streak"] == 3
     assert bilal["id"] not in ids, "absent in some but not all marked periods is partial"
 
+    # V1-0d cross-surface agreement (ux §9): the timeline — which the parent
+    # portal and the report card render — must say the same thing about the same
+    # day as the streak board just did. One rule, two payloads, zero drift.
+    def day_status(student_id, d):
+        return client.get(f"/api/v1/students/{student_id}/timeline", headers=h,
+                          params={"on_date": d.isoformat()}).json()["day_status"]
+
+    assert day_status(asha["id"], days[0]) == "absent"      # every marked period
+    assert day_status(bilal["id"], days[0]) == "partial"    # one of two
+    assert day_status(asha["id"], days[2]) == "not_marked"  # nothing captured
+
 
 # ── the action rail ──────────────────────────────────────────────────────────
 def test_guardian_reminder_fires_once_a_day(client, cleanup):
@@ -257,6 +268,20 @@ def test_substitute_must_be_free_and_the_period_reaches_their_day(client, cleanu
         "class_id": ctx["class"]["id"], "period_no": 1})
     assert card.status_code == 200, card.text
 
+    # Q-37: the cover is on the substitute's OWN week grid — before this it
+    # read as a free cell there, the mirror image of S-72 on the admin's side.
+    week = client.get("/api/v1/staff/timesheet/week", headers=th2).json()
+    day = next(d for d in week["days"] if d["date"] == today.isoformat())
+    cell = next(s for s in day["slots"] if s["period_no"] == 1)
+    assert cell["kind"] == "cover"
+    assert week["covered_periods"] == 1
+
+    # S-72: the admin's day grid shows the same fact from the same read.
+    grid = client.get("/api/v1/staff/timesheet/today", headers=h).json()
+    row = next(r for r in grid if r["member_id"] == ctx["teacher2_mid"])
+    assert next(s for s in row["days"][0]["slots"]
+                if s["period_no"] == 1)["kind"] == "cover"
+
     # A second cover for the same period cancels the first rather than
     # double-booking the class.
     client.post("/api/v1/insights/actions/substitute_assigned", headers=h, json={
@@ -273,6 +298,32 @@ def test_substitute_must_be_free_and_the_period_reaches_their_day(client, cleanu
     finally:
         db.close()
     assert len(live) == 1, "only one live cover per period"
+
+
+def test_cover_cannot_land_on_someone_on_approved_leave(client, cleanup):
+    """S-82: a future date has no staff-absence row, so before this clause an
+    admin arranging Friday's cover from a leave approval (D-27) could hand it
+    to a teacher who is herself on approved leave that Friday."""
+    ctx = _setup(client, cleanup)
+    h, th2 = ctx["h"], ctx["th2"]
+    # Next Monday — a working day in every default calendar, safely future.
+    on = date.today() + timedelta(days=(7 - date.today().weekday()) or 7)
+    _slot(client, h, ctx, on.weekday(), 1)
+
+    req = client.post("/api/v1/staff/leave", headers=th2, json={
+        "start_date": on.isoformat(), "end_date": on.isoformat(),
+        "reason": "Family function"}).json()
+    client.post(f"/api/v1/staff/leave/{req['id']}/decision", headers=h,
+                json={"action": "approved"})
+
+    bad = client.post("/api/v1/insights/actions/substitute_assigned", headers=h, json={
+        "substitution": {
+            "date": on.isoformat(), "class_id": ctx["class"]["id"], "period_no": 1,
+            "class_subject_id": ctx["cs"]["id"],
+            "substitute_member_id": ctx["teacher2_mid"],
+            "absent_member_id": ctx["teacher_mid"]}})
+    assert bad.status_code == 409
+    assert "approved leave" in bad.json()["error"]["message"]
 
 
 def test_a_busy_substitute_is_refused_with_the_reason(client, cleanup):
@@ -431,3 +482,54 @@ def test_overview_keeps_unplanned_a_state_not_a_colour(client, cleanup):
     assert metrics["unplanned"]["value"] == "1"
     assert metrics["unplanned"]["tone"] == "neutral"   # a state, never a colour
     assert metrics["pace"]["value"] == "—"             # nothing rated, so no pace
+
+
+# ── V1-0e: the rail dedupes on the open task (D-47) ──────────────────────────
+def test_followup_dedupes_on_the_open_task_not_the_day(client, cleanup):
+    """Three presses for the same child must extend ONE open follow-up, never
+    file identical rows — the old rule was per calendar day, so three days of
+    absence created three tasks in one teacher's list."""
+    ctx = _setup(client, cleanup)
+    h, student = ctx["h"], ctx["students"][0]
+
+    first = client.post("/api/v1/insights/actions/followup_assigned", headers=h,
+                        json={"student_id": student["id"]}).json()
+    assert first["already_done"] is False
+    assert first["task_id"]
+
+    second = client.post("/api/v1/insights/actions/followup_assigned", headers=h,
+                         json={"student_id": student["id"]}).json()
+    assert second["already_done"] is True
+    assert second["task_id"] == first["task_id"], "one open task, nudged — not a twin"
+    assert "due date moved" in second["message"]
+
+
+# ── V1-0e: a substitute can check homework (S-93) ────────────────────────────
+def test_substitute_can_check_homework_for_a_class_they_covered(client, cleanup):
+    """`homework_checks.checked_by_member_id` exists precisely so someone other
+    than the setter can be on record as the checker."""
+    ctx = _setup(client, cleanup)
+    h, th, th2 = ctx["h"], ctx["th"], ctx["th2"]
+    today = date.today()
+    _slot(client, h, ctx, today.weekday(), 1)
+
+    hw = client.post("/api/v1/classroom/homework", headers=th, json={
+        "class_subject_id": ctx["cs"]["id"], "text": "Ex 1",
+        "date": today.isoformat()}).json()
+
+    # A colleague with no connection to the class is still refused…
+    denied = client.post(f"/api/v1/classroom/homework/{hw['id']}/check", headers=th2,
+                         json={"results": []})
+    assert denied.status_code == 403
+
+    # …until they cover a period for that class.
+    client.post("/api/v1/insights/actions/substitute_assigned", headers=h, json={
+        "substitution": {
+            "date": today.isoformat(), "class_id": ctx["class"]["id"], "period_no": 1,
+            "class_subject_id": ctx["cs"]["id"],
+            "substitute_member_id": ctx["teacher2_mid"],
+            "absent_member_id": ctx["teacher_mid"]}})
+    ok = client.post(f"/api/v1/classroom/homework/{hw['id']}/check", headers=th2,
+                     json={"results": []})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["checked"] is True

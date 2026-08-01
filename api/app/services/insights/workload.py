@@ -38,7 +38,6 @@ from app.models import (
     ClassSubject,
     LeaveRequest,
     Membership,
-    PeriodSubstitution,
     SchoolClass,
     Subject,
     TaskInstance,
@@ -62,6 +61,7 @@ from app.services.insights.attendance import AttendanceInsights
 from app.services.leave import LeaveService
 from app.services.school_clock import day_periods, phase, today_in
 from app.services.staff_attendance import StaffAttendanceService
+from app.services.substitution import covers_between
 
 # Over/under-load is a share of the org mean, not an absolute count: a school
 # with 5 periods a day and one with 9 cannot share a threshold.
@@ -112,29 +112,11 @@ class WorkloadInsights:
 
     def _subs_day(self, org_id: uuid.UUID, on: date
                   ) -> dict[uuid.UUID, dict[int, tuple[str, str | None]]]:
-        rows = list(self.db.scalars(
-            select(PeriodSubstitution).where(
-                PeriodSubstitution.org_id == org_id, PeriodSubstitution.date == on,
-                PeriodSubstitution.cancelled_at.is_(None))))
-        if not rows:
-            return {}
-        labels = {
-            cid: _label(name, section) for cid, name, section in self.db.execute(
-                select(SchoolClass.id, SchoolClass.name, SchoolClass.section)
-                .where(SchoolClass.id.in_([r.class_id for r in rows]))).all()
+        # One computation (ux §9): the same read the timesheet unions in (Q-37).
+        return {
+            mid: {pno: pair for (_d, pno), pair in cells.items()}
+            for mid, cells in covers_between(self.db, org_id, on, on).items()
         }
-        subjects = {
-            cs_id: name for cs_id, name in self.db.execute(
-                select(ClassSubject.id, Subject.name)
-                .join(Subject, Subject.id == ClassSubject.subject_id)
-                .where(ClassSubject.id.in_([r.class_subject_id for r in rows
-                                            if r.class_subject_id]))).all()
-        }
-        out: dict[uuid.UUID, dict[int, tuple[str, str | None]]] = defaultdict(dict)
-        for r in rows:
-            out[r.substitute_member_id][r.period_no] = (
-                labels.get(r.class_id, "?"), subjects.get(r.class_subject_id))
-        return out
 
     def _timesheet_day(self, org_id: uuid.UUID, on: date
                        ) -> dict[uuid.UUID, dict[int, TimesheetEntry]]:

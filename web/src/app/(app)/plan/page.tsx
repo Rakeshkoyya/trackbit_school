@@ -58,6 +58,10 @@ function PlanYearInner() {
 
   const [kind, setKind] = useState<PaintKind>("holiday");
   const [title, setTitle] = useState("Holiday");
+  // D-58 defect fix: painting a Celebration used to silently remove a teaching day,
+  // because affects_teaching defaulted true server-side and the UI never sent it.
+  // The open/closed choice is now explicit; celebrations/events default to OPEN.
+  const [schoolOpen, setSchoolOpen] = useState(false);
 
   const { data: summary } = useQuery({
     queryKey: ["calendar", yearId],
@@ -86,6 +90,7 @@ function PlanYearInner() {
           title: title.trim() || KINDS.find((k) => k.kind === kind)!.label,
           start_date: r.start,
           end_date: r.end,
+          affects_teaching: !schoolOpen,
         },
       ]),
     onSuccess: () => {
@@ -145,6 +150,7 @@ function PlanYearInner() {
                       onClick={() => {
                         setKind(k.kind);
                         setTitle(k.label);
+                        setSchoolOpen(k.kind === "celebration" || k.kind === "event");
                       }}
                       className={cn(
                         "rounded-full border px-3 py-1.5 text-xs transition-colors",
@@ -157,6 +163,34 @@ function PlanYearInner() {
                     </button>
                   ))}
                 </div>
+              </div>
+              <div>
+                <Label>Is the school open on these days?</Label>
+                <div className="mt-1.5 flex gap-1.5">
+                  {([
+                    { open: false, label: "School closed" },
+                    { open: true, label: "School open" },
+                  ] as const).map((o) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      onClick={() => setSchoolOpen(o.open)}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-xs transition-colors",
+                        schoolOpen === o.open
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-card hover:bg-muted",
+                      )}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {schoolOpen
+                    ? "Marked on the calendar only — no teaching days are lost."
+                    : "These days leave every plan's teaching capacity."}
+                </p>
               </div>
               <div>
                 <Label htmlFor="etitle">Call it</Label>
@@ -195,6 +229,7 @@ function PlanYearInner() {
                         {e.blocks_periods?.length
                           ? ` · periods ${e.blocks_periods.join(", ")}`
                           : ""}
+                        {e.affects_teaching ? "" : " · school open"}
                       </span>
                     </span>
                     {canEdit ? (

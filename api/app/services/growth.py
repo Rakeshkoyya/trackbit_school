@@ -183,8 +183,10 @@ class GrowthService:
             row = topic_row(topic)
             ch.topics.append(row)
             ch.topics_total += 1
-            if row.status != "pending":
+            if row.status == "done":
                 ch.topics_taught += 1
+            elif row.status == "in_progress":
+                ch.topics_in_progress += 1
             if row.student_attendance == "absent":
                 ch.topics_missed += 1
 
@@ -209,10 +211,15 @@ class GrowthService:
         } if hw_ids else {}
         hw_done: dict[uuid.UUID, int] = defaultdict(int)
         hw_not_done: dict[uuid.UUID, int] = defaultdict(int)
+        hw_partial: dict[uuid.UUID, int] = defaultdict(int)
         hw_unchecked: dict[uuid.UUID, int] = defaultdict(int)
         for cs_id, _sid, hw_id in hw_rows:
             if hw_id not in hw_checked:
                 hw_unchecked[cs_id] += 1
+            elif hw_mine.get(hw_id) == "partial":
+                # V1-0d: partly done is not "not done" — folding them wrote a
+                # wrong fact onto the report card (Q-40).
+                hw_partial[cs_id] += 1
             elif hw_id in hw_mine:
                 hw_not_done[cs_id] += 1
             else:
@@ -270,6 +277,7 @@ class GrowthService:
                 homework_personal=hw_personal.get(cs.id, 0),
                 homework_done=hw_done.get(cs.id, 0),
                 homework_not_done=hw_not_done.get(cs.id, 0),
+                homework_partial=hw_partial.get(cs.id, 0),
                 homework_not_checked=hw_unchecked.get(cs.id, 0),
                 checks_flagged=checks_flagged.get(cs.id, 0),
                 observations=obs_by_cs.get(cs.id, []),

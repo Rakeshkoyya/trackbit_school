@@ -45,6 +45,7 @@ from app.schemas.timeline import (
     TimelinePeriod,
     TimelineSession,
 )
+from app.services.attendance import classify_day
 
 
 def _label(name: str, section: str | None) -> str:
@@ -69,9 +70,14 @@ class StudentTimelineService:
         if student.class_id is not None:
             periods = self._periods(m.org_id, student, d)
         sessions = self._sessions(m.org_id, student_id, d)
+        marked = [p for p in periods if p.attendance != "unmarked"]
+        absents = sum(1 for p in marked if p.attendance == "absent")
         return StudentTimelineOut(
             student_id=student.id, full_name=student.full_name, class_label=class_label,
-            date=d, periods=periods, sessions=sessions)
+            date=d, periods=periods, sessions=sessions,
+            day_status=classify_day(len(periods), len(marked), absents),
+            marked_periods=len(marked), absent_periods=absents,
+            late_periods=sum(1 for p in marked if p.attendance == "late"))
 
     def _periods(self, org_id: uuid.UUID, student: Student, d: date) -> list[TimelinePeriod]:
         slots = list(self.db.scalars(

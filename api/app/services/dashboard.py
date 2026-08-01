@@ -14,6 +14,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.coverage import completion_pct
 from app.core.exceptions import NotFoundError
 from app.models import (
     AcademicYear,
@@ -22,6 +23,7 @@ from app.models import (
     ClassSubject,
     HomeworkAssignment,
     HomeworkCheck,
+    HomeworkResult,
     SchoolClass,
     Student,
     TimetableSlot,
@@ -83,16 +85,35 @@ class DashboardService:
             .group_by(SchoolClass.id, SchoolClass.name, SchoolClass.section)
             .order_by(SchoolClass.name, SchoolClass.section)
         ).all()
+        # V1-0d/Q-40: `done_count` caches count FULL dones only, so the partial
+        # counts come from one grouped query and the % uses the shared
+        # `completion_pct` — the same arithmetic the homework tab renders (ux §9).
+        partials = {
+            cid: int(n) for cid, n in self.db.execute(
+                select(SchoolClass.id, func.count(HomeworkResult.id))
+                .join(ClassSubject, ClassSubject.class_id == SchoolClass.id)
+                .join(HomeworkAssignment,
+                      (HomeworkAssignment.class_subject_id == ClassSubject.id)
+                      & (HomeworkAssignment.date >= since))
+                .join(HomeworkResult,
+                      (HomeworkResult.assignment_id == HomeworkAssignment.id)
+                      & (HomeworkResult.status == "partial"))
+                .where(SchoolClass.org_id == m.org_id,
+                       SchoolClass.academic_year_id == year_id)
+                .group_by(SchoolClass.id)).all()
+        }
         classes: list[HomeworkClassHealth] = []
-        tot_done = tot_total = 0
-        for _cid, name, section, assignments, done, total in rows:
+        tot_done = tot_total = tot_partial = 0
+        for cid, name, section, assignments, done, total in rows:
             label = name + (f"-{section}" if section else "")
-            completion = round(done / total, 2) if total else None
+            n_partial = partials.get(cid, 0)
+            completion = completion_pct(int(done), n_partial, int(total))
             tot_done += int(done)
             tot_total += int(total)
+            tot_partial += n_partial
             classes.append(HomeworkClassHealth(class_label=label, assignments=int(assignments),
                                                completion=completion))
-        overall = round(tot_done / tot_total, 2) if tot_total else None
+        overall = completion_pct(tot_done, tot_partial, tot_total)
         return HomeworkHealth(window_days=HOMEWORK_WINDOW_DAYS, overall_completion=overall,
                               classes=classes)
 

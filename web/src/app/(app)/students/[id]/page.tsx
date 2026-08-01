@@ -51,12 +51,14 @@ function ChapterRow({ ch }: { ch: GrowthChapter }) {
           <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             {ch.topics_missed > 0 ? <Badge tone="warning">missed {ch.topics_missed}</Badge> : null}
             {ch.topics_taught}/{ch.topics_total} topics
+            {ch.topics_in_progress > 0 ? ` · ${ch.topics_in_progress} in progress` : ""}
           </span>
         </div>
         <MeterBar parts={[
           { value: taught, color: STATUS_COLOR.green, label: "taught, present" },
           { value: ch.topics_missed, color: STATUS_COLOR.amber, label: "taught while absent" },
-          { value: Math.max(0, ch.topics_total - ch.topics_taught), color: "var(--color-muted)", label: "not taught yet" },
+          { value: ch.topics_in_progress, color: STATUS_COLOR.neutral, label: "in progress" },
+          { value: Math.max(0, ch.topics_total - ch.topics_taught - ch.topics_in_progress), color: "var(--color-muted)", label: "not taught yet" },
         ]} />
       </button>
       {open ? (
@@ -88,6 +90,7 @@ function SubjectCard({ s }: { s: GrowthSubject }) {
   const latest = s.scores[s.scores.length - 1];
   const latestPct = latest && latest.max_score ? Math.round((latest.score / latest.max_score) * 100) : null;
   const taught = s.chapters.reduce((n, c) => n + c.topics_taught, 0);
+  const inProgress = s.chapters.reduce((n, c) => n + c.topics_in_progress, 0);
   const total = s.chapters.reduce((n, c) => n + c.topics_total, 0);
   const missed = s.chapters.reduce((n, c) => n + c.topics_missed, 0);
 
@@ -99,6 +102,7 @@ function SubjectCard({ s }: { s: GrowthSubject }) {
           <p className="text-xs text-muted-foreground">
             {s.teacher_name ?? "No teacher assigned"}
             {total ? ` · ${taught} of ${total} topics covered` : ""}
+            {inProgress > 0 ? ` · ${inProgress} in progress` : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">

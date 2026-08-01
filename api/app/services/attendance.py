@@ -42,6 +42,72 @@ from app.services.periods import (
     today_for,
 )
 
+# ── THE day-status rule (V1-0d, ux §9) ───────────────────────────────────────
+# "Was this child absent today?" is rendered on six surfaces (admin board,
+# class-teacher grid, parent Today, daily report, report card, Lucy) and was
+# computed three different ways. These two pure functions are now the only
+# definition; every consumer renders them, none re-derives.
+
+def classify_day(scheduled: int, marked: int, absent: int) -> str:
+    """One student's day: present | partial | absent | not_marked | no_school.
+
+    * absent  = absent in EVERY marked period of the day;
+    * partial = absent in some but not all (came late, left early);
+    * not_marked = periods were scheduled and nobody marked any — a gap in the
+      record, never a judgement (ux §5);
+    * no_school = nothing scheduled at all.
+    """
+    if scheduled == 0:
+        return "no_school"
+    if marked == 0:
+        return "not_marked"
+    if absent >= marked:
+        return "absent"
+    if absent > 0:
+        return "partial"
+    return "present"
+
+
+def is_day_absent(marked: int, absent: int) -> bool:
+    """The streak/red-list face of the same rule: day-absent only when absent in
+    every marked period. A day with nothing marked is never day-absent — the
+    school's gap in capture is not evidence about the child."""
+    return bool(marked) and absent >= marked
+
+
+def day_absence_maps(db: Session, org_id: uuid.UUID, since: date, until: date,
+                     ) -> tuple[dict[tuple[uuid.UUID, date], int],
+                                dict[uuid.UUID, dict[date, int]]]:
+    """The batched facts behind `is_day_absent`, for a whole org and window:
+    (class_id, date) → marked periods · student_id → {date: absent periods}.
+
+    Two grouped queries however many students. The absence streaks board and the
+    daily report's repeat-absentee rule both read THIS — before V1-0 the report
+    used a looser rule (any absent exception = an absent day), so a child who
+    came in late could be reported as a repeat absentee.
+    """
+    marked = {
+        (cid, d): int(n) for cid, d, n in db.execute(
+            select(ClassPeriod.class_id, ClassPeriod.date, func.count(ClassPeriod.id))
+            .where(ClassPeriod.org_id == org_id, ClassPeriod.date >= since,
+                   ClassPeriod.date <= until,
+                   ClassPeriod.attendance_marked_at.is_not(None))
+            .group_by(ClassPeriod.class_id, ClassPeriod.date)).all()
+    }
+    absents: dict[uuid.UUID, dict[date, int]] = {}
+    for sid, d, n in db.execute(
+        select(AttendanceException.student_id, ClassPeriod.date,
+               func.count(AttendanceException.id))
+        .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+        .where(AttendanceException.org_id == org_id,
+               AttendanceException.status == "absent",
+               ClassPeriod.date >= since, ClassPeriod.date <= until,
+               ClassPeriod.attendance_marked_at.is_not(None))
+        .group_by(AttendanceException.student_id, ClassPeriod.date)
+    ).all():
+        absents.setdefault(sid, {})[d] = int(n)
+    return marked, absents
+
 
 def _label(klass: SchoolClass) -> str:
     return klass.name + (f"-{klass.section}" if klass.section else "")

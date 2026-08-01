@@ -150,7 +150,11 @@ class ClassroomService:
         pending: list[HomeworkPending] = []
         cs_ids = [cs.id for cs, _, _ in rows]
         if cs_ids:
-            yest = today - timedelta(days=1)
+            # D-85 / V1-0e: EVERYTHING unchecked, oldest first — the old
+            # `date == yesterday` filter made Friday's homework vanish on Monday,
+            # and the admin's "overdue, unchecked" column then blamed teachers
+            # for work this queue had never offered them. 60-day floor bounds
+            # the payload; the full backlog lives on the homework screen (V1-5).
             hw_rows = self.db.execute(
                 select(HomeworkAssignment, Subject.name, SchoolClass)
                 .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
@@ -158,15 +162,22 @@ class ClassroomService:
                 .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
                 .where(HomeworkAssignment.org_id == m.org_id,
                        HomeworkAssignment.class_subject_id.in_(cs_ids),
-                       HomeworkAssignment.date == yest)
+                       HomeworkAssignment.date < today,
+                       HomeworkAssignment.date >= today - timedelta(days=60))
+                .order_by(HomeworkAssignment.date)
             ).all()
+            checked_ids = set(self.db.scalars(
+                select(HomeworkCheck.assignment_id).where(
+                    HomeworkCheck.assignment_id.in_([hw.id for hw, _, _ in hw_rows])))
+            ) if hw_rows else set()
             for hw, sname, klass in hw_rows:
-                if not self.db.scalar(
-                    select(HomeworkCheck.id).where(HomeworkCheck.assignment_id == hw.id).limit(1)
-                ):
-                    pending.append(HomeworkPending(
-                        assignment_id=hw.id, class_label=_label(klass),
-                        subject_name=sname, text=hw.text))
+                if hw.id in checked_ids:
+                    continue
+                pending.append(HomeworkPending(
+                    assignment_id=hw.id, class_label=_label(klass),
+                    subject_name=sname, text=hw.text))
+                if len(pending) >= 20:
+                    break
 
         # Today's periods straight from the timetable (V2-P1 §5.4), each resolved on
         # its OWN period row (V2-P6) — two Maths periods on one day are independent
@@ -640,6 +651,25 @@ class ClassroomService:
             raise NotFoundError("Homework")
         return hw
 
+    def _can_touch_homework(self, m: CurrentMember, cs, hw) -> None:
+        """S-93: a substitute who covered this class since the homework was set
+        may open and check it — `homework_checks.checked_by_member_id` exists
+        precisely to record that it was someone else."""
+        try:
+            self._can_capture(m, cs)
+            return
+        except ForbiddenError:
+            from app.models import PeriodSubstitution  # noqa: PLC0415
+            covered = self.db.scalar(
+                select(PeriodSubstitution.id).where(
+                    PeriodSubstitution.org_id == m.org_id,
+                    PeriodSubstitution.class_id == cs.class_id,
+                    PeriodSubstitution.substitute_member_id == m.membership.id,
+                    PeriodSubstitution.cancelled_at.is_(None),
+                    PeriodSubstitution.date >= hw.date).limit(1))
+            if covered is None:
+                raise
+
     def _homework_roster(self, org_id: uuid.UUID, hw: HomeworkAssignment,
                          class_id: uuid.UUID) -> list[Student]:
         """Who this homework is for. A per-student assignment has a roster of one
@@ -652,7 +682,7 @@ class ClassroomService:
     def homework_sheet(self, m: CurrentMember, assignment_id: uuid.UUID) -> HomeworkSheetOut:
         hw = self._homework(m, assignment_id)
         cs = self._cs(m.org_id, hw.class_subject_id)
-        self._can_capture(m, cs)
+        self._can_touch_homework(m, cs, hw)
         klass = self.db.get(SchoolClass, cs.class_id)
         subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
         check = self.db.scalar(
@@ -693,7 +723,7 @@ class ClassroomService:
         """
         hw = self._homework(m, assignment_id)
         cs = self._cs(m.org_id, hw.class_subject_id)
-        self._can_capture(m, cs)
+        self._can_touch_homework(m, cs, hw)
 
         check = self.db.scalar(
             select(HomeworkCheck).where(HomeworkCheck.assignment_id == assignment_id))

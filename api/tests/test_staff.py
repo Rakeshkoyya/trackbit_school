@@ -350,3 +350,25 @@ def test_leave_dates_backwards_is_rejected(client, cleanup):
         "start_date": far.isoformat(), "end_date": far.isoformat(),
         "reason": "Booked well ahead"})
     assert ok.status_code == 200
+
+
+# ── the org day grid tells the truth about who is here (S-72, V1-0c) ─────────
+def test_org_day_shows_away_not_free(client, cleanup):
+    """An absent teacher must not read as a column of free periods on the
+    screen the admin opens to find cover. Before this fix the grid read the
+    timetable and the timesheet and nothing else."""
+    h, _th, _year, _amid, teacher_mid = _setup(client, cleanup)
+    on = "2026-07-15"
+    client.post("/api/v1/staff/attendance", headers=h,
+                json={"date": on, "absent_member_ids": [teacher_mid],
+                      "notes": {teacher_mid: "Sick"}})
+
+    rows = client.get(f"/api/v1/staff/timesheet/today?on_date={on}", headers=h).json()
+    row = next(r for r in rows if r["member_id"] == teacher_mid)
+    assert row["away_reason"] == "Sick"
+    assert row["free_periods"] == 0
+    assert all(s["kind"] == "away" for s in row["days"][0]["slots"])
+
+    # The director, who is in, still reads as genuinely free.
+    other = next(r for r in rows if r["member_id"] != teacher_mid)
+    assert other["away_reason"] is None and other["free_periods"] > 0

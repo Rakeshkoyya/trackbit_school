@@ -22,6 +22,7 @@ function Chapter({ c }: { c: ParentChapter }) {
         <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="tabular-nums">
             {c.topics_taught}/{c.topics_total}
+            {c.topics_in_progress > 0 ? ` · ${c.topics_in_progress} in progress` : ""}
           </span>
           {c.topics_missed > 0 ? (
             <Badge tone="warning">{c.topics_missed} missed</Badge>

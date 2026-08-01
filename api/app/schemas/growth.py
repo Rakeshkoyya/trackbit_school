@@ -37,7 +37,11 @@ class GrowthChapter(BaseModel):
     unit_id: uuid.UUID
     title: str
     topics_total: int
+    # V1-0d: `topics_taught` = FULLY covered only; a topic still in progress is
+    # its own count. Folding them together was the parent-side half of S-51 —
+    # coverage read one way on the admin board and another on this report.
     topics_taught: int
+    topics_in_progress: int = 0
     # Topics taught in a period this student was absent from — the chapter-level
     # red flag that makes the drill-down worth opening.
     topics_missed: int
@@ -72,6 +76,9 @@ class GrowthSubject(BaseModel):
     # counted against the child.
     homework_done: int = 0
     homework_not_done: int = 0
+    # V1-0d: 'partly' is its own count — it used to be folded into not_done,
+    # which wrote a wrong fact onto the report card (Q-40).
+    homework_partial: int = 0
     homework_not_checked: int = 0
     checks_flagged: int = 0  # daily-check "didn't do it" exceptions
     observations: list[GrowthObservation] = []

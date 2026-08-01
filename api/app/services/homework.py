@@ -26,6 +26,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.coverage import completion_pct
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
     AcademicYear,
@@ -47,6 +48,7 @@ from app.schemas.homework import (
     StudentHomeworkRow,
     TeacherCheckingRow,
 )
+from app.services.attendance import day_absence_maps, is_day_absent
 from app.services.school_clock import today_in
 
 WINDOW_DAYS = 14
@@ -185,13 +187,31 @@ class HomeworkService:
         per_student: dict[uuid.UUID, dict] = {}
         totals = [0, 0, 0, 0, 0, 0]
 
+        # S-85/D-34 (V1-0e guard): a child who was day-absent when the homework
+        # was set never reads as a miss — not in any figure, not in the streak,
+        # never on the red list that fires guardian reminders. The full carried/
+        # waived lifecycle is V1-5; until then absent-when-set simply leaves the
+        # denominator, exactly like not_checked. Day-absence comes from THE
+        # shared rule (services/attendance.py), not a local one.
+        marked_by_class, absents_by_student = day_absence_maps(
+            self.db, m.org_id, since, until)
+
+        def _absent_when_set(class_id: uuid.UUID, on: date, sid: uuid.UUID) -> bool:
+            return is_day_absent(marked_by_class.get((class_id, on), 0),
+                                 absents_by_student.get(sid, {}).get(on, 0))
+
         for a in assignments:
             hw = a["hw"]
             checked = hw.id in checks
             targets = self._targets(a, roster)
-            n_done = n_not = n_part = 0
+            n_done = n_not = n_part = n_expected = 0
             for sid, name, roll in targets:
                 status = self._status(a, sid, checks, results)
+                if (status in ("not_done", "partial")
+                        and _absent_when_set(a["class_id"], hw.date, sid)):
+                    continue
+                if checked:
+                    n_expected += 1
                 rec = per_student.setdefault(sid, {
                     "name": name, "roll": roll, "class_label": a["class_label"],
                     "assigned": 0, "done": 0, "not_done": 0, "partial": 0,
@@ -212,7 +232,7 @@ class HomeworkService:
                     n_part += 1
                     rec["subjects"].add(a["subject"])
 
-            expected = len(targets) if checked else 0
+            expected = n_expected
             for bucket, key in ((by_class, a["class_label"]), (by_subject, a["subject"])):
                 acc = bucket[key]
                 acc[0] += 1
@@ -247,7 +267,8 @@ class HomeworkService:
                 (HomeworkScopeRow(
                     key=key, assigned=v[0], checked=v[1], students_expected=v[2],
                     done=v[3], not_done=v[4], partial=v[5],
-                    completion=_pct(v[3], v[2]), check_rate=_pct(v[1], v[0]))
+                    # V1-0d/Q-40: partly done counts PARTIAL_WEIGHT, not zero.
+                    completion=completion_pct(v[3], v[5], v[2]), check_rate=_pct(v[1], v[0]))
                  for key, v in bucket.items()),
                 key=lambda r: (r.completion if r.completion is not None else 2, r.key))
 
@@ -267,7 +288,7 @@ class HomeworkService:
                 student_id=sid, full_name=rec["name"], class_label=rec["class_label"],
                 roll_no=rec["roll"], assigned=rec["assigned"], done=rec["done"],
                 not_done=rec["not_done"], partial=rec["partial"],
-                completion=_pct(rec["done"], graded),
+                completion=completion_pct(rec["done"], rec["partial"], graded),
                 streak=self._streak(rec["dated"]),
                 subjects=sorted(rec["subjects"]), teachers=sorted(rec["teachers"])))
 
@@ -296,7 +317,7 @@ class HomeworkService:
         return HomeworkOverview(
             window_days=window_days, from_date=since, to_date=until,
             assigned=totals[0], checked=totals[1], check_rate=_pct(totals[1], totals[0]),
-            overall_completion=_pct(totals[3], totals[2]),
+            overall_completion=completion_pct(totals[3], totals[5], totals[2]),
             by_class=scope_rows(by_class), by_subject=scope_rows(by_subject),
             teachers=teacher_rows, needs_attention=needs, perfect=perfect,
             most_improved=improved[:10])

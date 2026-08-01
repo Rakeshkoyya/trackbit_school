@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError
+from app.core.work_types import label_for
 from app.models import (
     AcademicYear,
     AttendanceException,
@@ -49,6 +50,7 @@ from app.models import (
     Student,
     Subject,
     TaskInstance,
+    TimesheetEntry,
     TimetableSlot,
     User,
 )
@@ -66,6 +68,7 @@ from app.schemas.insights import (
     StreakBoard,
     SubstituteCandidate,
 )
+from app.services.attendance import day_absence_maps, is_day_absent
 from app.services.calendar import event_rows, expand_blocked_dates
 from app.services.dashboard import DashboardService
 from app.services.insights.actions import ActionService
@@ -261,36 +264,12 @@ class AttendanceInsights:
         if year is None:
             return board
 
-        # Marked periods per class-day — the denominator for "absent in EVERY
-        # marked period". One row per (class, date).
-        marked = {
-            (cid, d): int(n) for cid, d, n in self.db.execute(
-                select(ClassPeriod.class_id, ClassPeriod.date, func.count(ClassPeriod.id))
-                .where(ClassPeriod.org_id == m.org_id, ClassPeriod.date >= since,
-                       ClassPeriod.date <= today,
-                       ClassPeriod.attendance_marked_at.is_not(None))
-                .group_by(ClassPeriod.class_id, ClassPeriod.date)).all()
-        }
-        if not marked:
+        # V1-0d: the marked-per-class-day and absent-per-student-day facts come
+        # from the shared day-absence read (ux §9) — the daily report's
+        # repeat-absentee rule reads the SAME maps, so the two can never fork.
+        marked, by_student = day_absence_maps(self.db, m.org_id, since, today)
+        if not marked or not by_student:
             return board
-
-        # Absences per student-day, in one grouped query over the same window.
-        absent_rows = self.db.execute(
-            select(AttendanceException.student_id, ClassPeriod.date,
-                   func.count(AttendanceException.id))
-            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
-            .where(AttendanceException.org_id == m.org_id,
-                   AttendanceException.status == "absent",
-                   ClassPeriod.date >= since, ClassPeriod.date <= today,
-                   ClassPeriod.attendance_marked_at.is_not(None))
-            .group_by(AttendanceException.student_id, ClassPeriod.date)
-        ).all()
-        if not absent_rows:
-            return board
-
-        by_student: dict[uuid.UUID, dict[date, int]] = defaultdict(dict)
-        for sid, d, n in absent_rows:
-            by_student[sid][d] = int(n)
 
         # Which class each of those students sits in — the streak is walked over
         # THEIR class's marked days, because a period marked in 6B says nothing
@@ -324,7 +303,7 @@ class AttendanceInsights:
             for d in class_days.get(cid, []):
                 n_absent = days.get(d, 0)
                 n_marked = marked.get((cid, d), 0)
-                if n_marked and n_absent >= n_marked:
+                if is_day_absent(n_marked, n_absent):
                     streak += 1
                     continue
                 # Present for at least one marked period — the run ends here.
@@ -503,6 +482,15 @@ class AttendanceInsights:
                 PeriodSubstitution.cancelled_at.is_(None))):
             busy[s.substitute_member_id].add(s.period_no)
         away = {a.member_id for a in self.staff_presence(m, on).absentees}
+        # S-74: what each candidate recorded for the period. Shown on the row and
+        # nudged below a truly-free colleague — never an exclusion, because the
+        # admin may judge the cover more urgent than the notebook pile.
+        recorded: dict[tuple[uuid.UUID, int], str] = {
+            (e.member_id, e.period_no): label_for(e.work_type)
+            for e in self.db.scalars(
+                select(TimesheetEntry).where(TimesheetEntry.org_id == m.org_id,
+                                             TimesheetEntry.date == on))
+        }
 
         out: dict[tuple[int, uuid.UUID], list[SubstituteCandidate]] = {}
         for pno in period_nos:
@@ -514,17 +502,23 @@ class AttendanceInsights:
                         continue
                     same_subject = subject_id in teaches_subject.get(mid, set())
                     same_class = class_id in teaches_class.get(mid, set())
+                    doing = recorded.get((mid, pno))
                     if same_subject:
                         tier, reason = 0, "teaches this subject elsewhere"
                     elif same_class:
                         tier, reason = 1, "teaches this class"
                     else:
                         tier, reason = 2, f"free · {load.get(mid, 0)} periods today"
-                    ranked.append((tier * 100 + load.get(mid, 0), SubstituteCandidate(
-                        member_id=mid, name=name, reason=reason, rank=0,
-                        teaches_subject_elsewhere=same_subject,
-                        teaches_this_class=same_class,
-                        teaching_periods_today=load.get(mid, 0))))
+                    if doing:
+                        reason += f" · doing: {doing}"
+                    ranked.append((
+                        tier * 100 + load.get(mid, 0) + (10 if doing else 0),
+                        SubstituteCandidate(
+                            member_id=mid, name=name, reason=reason, rank=0,
+                            teaches_subject_elsewhere=same_subject,
+                            teaches_this_class=same_class,
+                            teaching_periods_today=load.get(mid, 0),
+                            work_label=doing)))
                 ranked.sort(key=lambda t: (t[0], t[1].name))
                 picked = []
                 for i, (_score, c) in enumerate(ranked[:6], start=1):

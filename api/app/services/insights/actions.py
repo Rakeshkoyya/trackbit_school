@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.timeutil import org_due_at
 from app.models import (
     Board,
     BoardMember,
@@ -217,19 +218,49 @@ class ActionService:
             raise ValidationError("A follow-up needs a title.")
 
         today = self._today(m)
-        already = self.done_today(m.org_id, subject_type, today, m.org.timezone)
-        if subject_id is not None and ("followup_assigned", subject_id) in already:
-            return ActionOut(
-                kind="followup_assigned", ok=True, already_done=True,
-                subject_type=subject_type, subject_id=subject_id,
-                message="A follow-up was already assigned for this today.")
+        if body.due_at is not None:
+            due_at, all_day = body.due_at, False
+        else:
+            # D-48/S-112: default = org-local end of the NEXT day, all-day. The old
+            # midnight-UTC default made a Monday follow-up overdue at 05:30 Tuesday.
+            due_at, all_day = org_due_at(m.org.timezone, today + timedelta(days=1), None)
+
+        # D-47: dedupe on the OPEN task, not the calendar day. Three days of
+        # absence must extend one follow-up, never file three identical rows in
+        # one teacher's list. (The per-day window stays for guardian_reminded,
+        # where it is right — a message is an event, a task is a state.)
+        if subject_id is not None:
+            prior_details = list(self.db.scalars(
+                select(FollowupAction.detail)
+                .where(FollowupAction.org_id == m.org_id,
+                       FollowupAction.kind == "followup_assigned",
+                       FollowupAction.subject_type == subject_type,
+                       FollowupAction.subject_id == subject_id)
+                .order_by(FollowupAction.created_at.desc()).limit(10)))
+            prior_task_ids = [uuid.UUID(dd["task_id"]) for dd in prior_details
+                              if dd and dd.get("task_id")]
+            open_task = self.db.scalar(
+                select(TaskInstance).where(
+                    TaskInstance.org_id == m.org_id,
+                    TaskInstance.id.in_(prior_task_ids),
+                    TaskInstance.status == "open").limit(1)) if prior_task_ids else None
+            if open_task is not None:
+                TaskService(self.db).edit(m, open_task.id, TaskUpdateRequest(
+                    due_at=due_at, all_day=all_day))
+                self._append(m, "followup_assigned", subject_type, subject_id,
+                             target_member_id=target_member_id,
+                             detail={"task_id": str(open_task.id),
+                                     "title": open_task.title, "nudged": True})
+                return ActionOut(
+                    kind="followup_assigned", ok=True, already_done=True,
+                    subject_type=subject_type, subject_id=subject_id,
+                    task_id=open_task.id,
+                    message="Already assigned and still open — due date moved.")
 
         board = ensure_followups_board(self.db, m)
         task = TaskService(self.db).create(m, TaskCreateRequest(
             board_id=board.id, title=title[:255], description=body.note,
-            assignee_id=assignee_user_id,
-            due_at=body.due_at or datetime.combine(
-                today + timedelta(days=1), datetime.min.time(), tzinfo=UTC)))
+            assignee_id=assignee_user_id, due_at=due_at, all_day=all_day))
         self._append(m, "followup_assigned", subject_type, subject_id,
                      target_member_id=target_member_id,
                      detail={"task_id": str(task.id), "title": title, "board": board.name})

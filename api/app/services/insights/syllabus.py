@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.coverage import taught_weight
 from app.models import (
     AcademicYear,
     ClassSubject,
@@ -60,9 +61,6 @@ from app.services.school_clock import today_in
 
 MIN_CLASS_SUBJECTS = 3
 MIN_LOGGED_PERIODS = 10
-# A partially covered topic counts as half a topic taught. Blunt, but it is the
-# only weight `lesson_logs.coverage` can honestly carry.
-PARTIAL_WEIGHT = 0.5
 
 
 def _label(name: str, section: str | None) -> str:
@@ -160,7 +158,7 @@ class SyllabusInsights:
             if best.get(key) != "full":
                 best[key] = coverage
         for (cs_id, _topic_id), coverage in best.items():
-            taught[cs_id] += 1.0 if coverage == "full" else PARTIAL_WEIGHT
+            taught[cs_id] += taught_weight(coverage)
 
         logged = {
             cs_id: int(n) for cs_id, n in self.db.execute(

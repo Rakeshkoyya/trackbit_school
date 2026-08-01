@@ -23,17 +23,22 @@ import type { TimesheetSlot } from "@/lib/school-types";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-/** Cell styling carries the meaning: taught periods read solid, recorded work
- *  reads quiet, and free reads empty — so a gap is visible at a glance. */
+/** Cell styling carries the meaning: taught periods read solid, cover reads
+ *  accent (they're in a colleague's class — S-72), recorded work reads quiet,
+ *  away reads struck out, and free reads empty — a gap visible at a glance. */
 function cellClass(kind: TimesheetSlot["kind"]): string {
   if (kind === "class") return "bg-[color:var(--success,#234a37)]/12 text-foreground";
+  if (kind === "cover") return "bg-primary/10 text-foreground";
   if (kind === "work") return "bg-muted text-muted-foreground";
+  if (kind === "away") return "bg-muted/50 text-muted-foreground/50";
   return "bg-background text-muted-foreground/40";
 }
 
 function cellText(slot: TimesheetSlot): string {
   if (slot.kind === "class") return slot.subject_name ?? "Class";
+  if (slot.kind === "cover") return `⟳ ${slot.subject_name ?? slot.class_label ?? "Cover"}`;
   if (slot.kind === "work") return slot.work_label ?? "Work";
+  if (slot.kind === "away") return "Away";
   return "—";
 }
 
@@ -45,8 +50,9 @@ function StaffTodayInner() {
   });
 
   const periods = data[0]?.days[0]?.slots.map((s) => s.period_no) ?? [];
-  const teachingNow = data.filter((r) => r.teaching_periods > 0).length;
+  const teachingNow = data.filter((r) => r.teaching_periods + r.covered_periods > 0).length;
   const totalFree = data.reduce((sum, r) => sum + r.free_periods, 0);
+  const awayCount = data.filter((r) => r.away_reason).length;
 
   return (
     <div className="pb-8">
@@ -63,7 +69,7 @@ function StaffTodayInner() {
         <>
           <div className="mb-4 grid grid-cols-3 gap-3">
             {[
-              { label: "Staff", value: data.length, icon: Users },
+              { label: "Staff", value: awayCount ? `${data.length - awayCount} in · ${awayCount} away` : data.length, icon: Users },
               { label: "Teaching today", value: teachingNow, icon: BookOpen },
               { label: "Free periods", value: totalFree, icon: Clock },
             ].map((t) => (
@@ -114,9 +120,13 @@ function StaffTodayInner() {
                         </td>
                       ))}
                       <td className="px-3 py-2 text-right">
-                        <Badge tone={row.free_periods === slots.length ? "neutral" : "outline"}>
-                          {row.teaching_periods + row.work_periods}/{slots.length}
-                        </Badge>
+                        {row.away_reason ? (
+                          <Badge tone="neutral">Away · {row.away_reason}</Badge>
+                        ) : (
+                          <Badge tone={row.free_periods === slots.length ? "neutral" : "outline"}>
+                            {row.teaching_periods + row.covered_periods + row.work_periods}/{slots.length}
+                          </Badge>
+                        )}
                       </td>
                     </tr>
                   );

@@ -33,6 +33,7 @@ from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models import (
     ClassSubject,
+    LeaveRequest,
     Membership,
     PeriodSubstitution,
     SchoolClass,
@@ -48,6 +49,45 @@ from app.services import notifications
 
 def _label(name: str, section: str | None) -> str:
     return name + (f"-{section}" if section else "")
+
+
+def covers_between(db: Session, org_id: uuid.UUID, start: date, end: date,
+                   member_id: uuid.UUID | None = None,
+                   ) -> dict[uuid.UUID, dict[tuple[date, int], tuple[str, str | None]]]:
+    """Live cover assignments in [start, end]: substitute → (date, period_no) →
+    (class_label, subject_name).
+
+    THE one read for "which periods is X covering" (ux §9). The teacher's own
+    week (Q-37), the admin's day grid (S-72) and the live board all render this
+    rather than re-deriving it — before this existed, a teacher covering three
+    periods showed three free cells on two different screens.
+    """
+    q = select(PeriodSubstitution).where(
+        PeriodSubstitution.org_id == org_id,
+        PeriodSubstitution.date >= start, PeriodSubstitution.date <= end,
+        PeriodSubstitution.cancelled_at.is_(None))
+    if member_id is not None:
+        q = q.where(PeriodSubstitution.substitute_member_id == member_id)
+    rows = list(db.scalars(q))
+    if not rows:
+        return {}
+    labels = {
+        cid: _label(name, section) for cid, name, section in db.execute(
+            select(SchoolClass.id, SchoolClass.name, SchoolClass.section)
+            .where(SchoolClass.id.in_({r.class_id for r in rows}))).all()
+    }
+    subjects = {
+        cs_id: name for cs_id, name in db.execute(
+            select(ClassSubject.id, Subject.name)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .where(ClassSubject.id.in_({r.class_subject_id for r in rows
+                                        if r.class_subject_id}))).all()
+    }
+    out: dict[uuid.UUID, dict[tuple[date, int], tuple[str, str | None]]] = {}
+    for r in rows:
+        out.setdefault(r.substitute_member_id, {})[(r.date, r.period_no)] = (
+            labels.get(r.class_id, "?"), subjects.get(r.class_subject_id))
+    return out
 
 
 class SubstitutionService:
@@ -147,6 +187,16 @@ class SubstitutionService:
                    StaffAbsence.member_id == member_id).limit(1))
         if away is not None:
             return "marked away today"
+        # S-82: a future date has no staff-absence row, so without this clause an
+        # admin arranging Friday's cover from a leave approval (D-27) could assign
+        # it to someone who is herself on approved leave that Friday.
+        on_leave = self.db.scalar(
+            select(LeaveRequest.id).where(
+                LeaveRequest.org_id == org_id, LeaveRequest.member_id == member_id,
+                LeaveRequest.status == "approved",
+                LeaveRequest.start_date <= on, LeaveRequest.end_date >= on).limit(1))
+        if on_leave is not None:
+            return "on approved leave that day"
         return None
 
     # ── writes ───────────────────────────────────────────────────────────────

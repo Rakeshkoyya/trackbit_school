@@ -130,6 +130,9 @@ class SubstituteCandidate(BaseModel):
     teaches_subject_elsewhere: bool = False
     teaches_this_class: bool = False
     teaching_periods_today: int = 0
+    # S-74: what they recorded for that period, if anything — shown, never a
+    # block. "Free" and "free but marking Class 10 scripts" are different offers.
+    work_label: str | None = None
 
 
 class ImpactPeriod(BaseModel):

@@ -92,7 +92,9 @@ export interface ParentChapter {
   unit_id: string;
   title: string;
   topics_total: number;
+  /** Fully covered only — an in-progress topic is its own count (V1-0d). */
   topics_taught: number;
+  topics_in_progress: number;
   topics_missed: number;
   topics: ParentTopic[];
 }

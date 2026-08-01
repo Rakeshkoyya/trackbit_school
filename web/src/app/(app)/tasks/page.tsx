@@ -46,8 +46,6 @@ export default function TasksTodayPage() {
     enabled: tab !== "mine",
   });
 
-  const myId = me?.user.id;
-
   function refreshTables() {
     qc.invalidateQueries({ queryKey: ["my-tasks"] });
     qc.invalidateQueries({ queryKey: ["board-table"] });
@@ -153,8 +151,11 @@ export default function TasksTodayPage() {
 
   // Rows + table config for the active tab.
   const onBoardTab = tab !== "mine";
+  // D-48/S-111: no client-side re-filter — the server's visibility answer is the
+  // answer (task_scope='assigned' boards already scope rows per caller). The old
+  // "mine or unassigned" filter here hid every assigned follow-up from the admin.
   const rows: BoardRow[] = onBoardTab
-    ? (boardTable.data?.rows ?? []).filter((r) => !r.assignee || r.assignee.id === myId)
+    ? (boardTable.data?.rows ?? [])
     : (myTasks.data?.rows ?? []);
   // My tasks = one flat, ungrouped list across all boards, ordered by urgency so
   // the next thing to do is on top. Board tabs keep their category grouping.

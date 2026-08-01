@@ -50,3 +50,9 @@ class StudentTimelineOut(BaseModel):
     date: date
     periods: list[TimelinePeriod]
     sessions: list[TimelineSession]
+    # THE day status (V1-0d, ux §9) — computed once here by `classify_day`;
+    # the parent portal, the report card and the admin board all render it.
+    day_status: str = "no_school"
+    marked_periods: int = 0
+    absent_periods: int = 0
+    late_periods: int = 0

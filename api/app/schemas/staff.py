@@ -52,8 +52,10 @@ class TimesheetSlot(BaseModel):
     period_no: int
     start: str
     end: str
-    # 'class' = the timetable owns this period (locked) · 'work' = the teacher
-    # recorded something · 'free' = nothing yet.
+    # 'class' = the timetable owns this period (locked) · 'cover' = a live
+    # substitution puts them in a colleague's class (locked, Q-37) · 'work' =
+    # the teacher recorded something · 'free' = nothing yet · 'away' = absent
+    # or on approved leave that day (S-72 — never rendered as free).
     kind: str
     class_label: str | None = None
     subject_name: str | None = None
@@ -70,6 +72,7 @@ class TimesheetDay(BaseModel):
     teaching_count: int
     work_count: int
     free_count: int
+    cover_count: int = 0
 
 
 class TimesheetWeek(BaseModel):
@@ -81,6 +84,9 @@ class TimesheetWeek(BaseModel):
     teaching_periods: int
     work_periods: int
     free_periods: int
+    covered_periods: int = 0
+    # org_day rows only: why this person is away today (S-72). None = in.
+    away_reason: str | None = None
 
 
 class TimesheetEntryIn(BaseModel):
