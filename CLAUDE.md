@@ -21,6 +21,40 @@ The spec lives in `docs/` (also mirrored at the repo root):
 **Conflict order: SPRD2 > architecture doc > SPRD v1**; an explicit later founder decision wins
 over all.
 
+## Brainstorm sessions — `docs/brainstorm/`
+
+**Trigger: when the founder says "let's brainstorm on \<module\>"** (or "brainstorm session", or
+names a module and asks to think about it rather than build it), **read
+`docs/brainstorm/HOW-WE-BRAINSTORM.md` and follow that protocol.** It is the ritual; this section
+is only the pointer.
+
+Running since 2026-07-30, one module at a time, **UI/UX first** — a person, at a moment, with a
+question; never tables and endpoints. **No code is written during a brainstorm session** — no
+migrations, no packets, no branches. The output is documentation the founder reads later to
+visualise the product screen-wise and role-wise.
+
+The non-negotiables of a session:
+
+1. **Ground it in the real code first.** Read the module before designing it; write down what
+   exists today marked *(verified)* with file references. Half of what gets "designed" already
+   exists and the other half is broken in a way nobody knew.
+2. **Push, don't transcribe.** Offer ideas that weren't asked for, name what will be wrong with
+   an idea before it's built, say when something is already built and merely unreachable, and
+   flag every fence/law/principle an idea crosses.
+3. **Write to all three layers** — `modules/<m>.md` (the thinking), `screens/<role>.md` (the
+   visualization, block by block in order), and `decisions.md` / `open-questions.md`.
+4. **Tag everything**: `D-nn` decided (founder) · `S-nn` suggestion (Claude, unaccepted) ·
+   `Q-nn` open question. Numbers are global, never reused; rejected ideas are marked, never
+   deleted.
+5. **Close by naming the blockers** for the next session, ordered by what they unblock.
+
+`docs/brainstorm/ux-principles.md` is the checklist every screen is designed against (lead with
+a sentence not a number · name the people · every figure carries its denominator · not-captured
+is never red · two actions not nine · one computation many renderings · …). Apply it.
+
+Nothing in `docs/brainstorm/` outranks anything. A decision graduates into SPRD2 (or its own
+plan doc) when it is ready to build.
+
 ## Build status (what exists now)
 
 **P0 (foundation) is complete**, verified against real Postgres (backend suite **143 passing**,
@@ -355,6 +389,139 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   `test_parent_portal.py` (5). Web: `/parent` area (own mobile-first shell, no staff nav) —
   OTP login, Today/Progress/Report/Profile tabs, sibling switcher; `OrgRole` gains `"parent"`,
   staff shell is `allow={["admin","teacher"]}`. Fees view = PC phase 2 (founder call).
+- **SF-1 (staff attendance · timesheet · leave, 2026-07-29)** — migration **`c7d8e9f0a1b2`**
+  (revises `d5e6f7a8b9c0`; **applied to DO prod 2026-07-29**). The three things the school could not record. Prerequisite for
+  the admin-dashboard v3 build (`docs/trackbit-admin-dashboard-v3-plan.md`), which supersedes that
+  plan's PR-1 (self check-in) and PR-4 (deriving teacher work from tasks).
+  - **Staff attendance is admin-marked and exception-shaped** (P1v2), the classroom's own shape:
+    `staff_attendance_days` (one row per org×date — the difference between "nobody was absent" and
+    "nobody marked it") + `staff_absences` (absentees only; present is derived). **Present/absent
+    only — no late tier for staff** (founder call). `mark` is a full replace, so the admin reopens
+    a day and corrects it with no undo path. Approved leave pre-unticks that person and says why.
+  - **Timesheet** (`timesheet_entries`, one row per member×date×period_no) = what a teacher did
+    with a period they were **not** teaching. Teaching periods are never copied here — the grid
+    owns them, and duplicating would fork the truth. `core/work_types.py` is the picker (8 buckets,
+    **no CHECK constraint**: a school's own word is kept, never dropped). This is what makes "who
+    is free right now" answerable from capture instead of inference.
+  - **Leave** — `leave_requests` + append-only `leave_request_events` (law 3, the
+    `plan_approvals`/`demo_request_notes` shape); `status` is a derived cache of the newest event.
+    `organizations.leaves_per_year`/`leaves_per_month` (defaults 8/1) configured in Setup →
+    Settings. Days count **working days** (year `working_weekdays` minus holidays), never raw span.
+    **Over-policy applications are flagged, not blocked** — `warnings` rides on the request and the
+    admin decides; a validator that refuses an emergency is one staff route around by phone.
+  - `services/school_clock.py` — pure: `period_no` = 1-based index among `period_times` entries
+    with `kind == 'period'`, so a lunch break shifts no period number. One function, tested.
+  - 11 endpoints under `/staff` (attendance admin-only · timesheet `require_academic` with
+    `_resolve_member` letting an admin read anyone · leave apply/cancel by member, decide by admin).
+    Dashboard alert feed gains `type='staff'` rows (staff away today · leave waiting) that link to
+    the screen instead of becoming a task. `test_staff.py` (12).
+  - Web: admin **Staff** area (`/staff` attendance · `/staff/leave` approvals with the history
+    timeline · `/staff/today` the period grid of who's teaching/working/free); teacher **My time**
+    area (`/timesheet` week grid — classes locked, free cells tappable · `/timesheet/leave` balance
+    + apply + own history). Nav gains Staff (admin) and My time (teacher).
+- **HW-1 (per-student homework, 2026-07-29)** — migration **`d8e9f0a1b2c3`** (head, revises
+  `c7d8e9f0a1b2`; **applied to DO prod 2026-07-29 — Aiven test DB still at `d5e6f7a8b9c0`,
+  see the note under Database below**). Completion was a COUNT (`homework_checks.done_count`), which cannot name a
+  student — so "who keeps not doing it", "which teacher never checks" and a parent's "did my child
+  do yesterday's homework" were all unanswerable. Now:
+  - `homework_results` = exception rows (`not_done` | `partial`), one per student who did NOT do
+    it, keyed (assignment, student). Capture-by-exception (P1v2): every student's status is
+    derivable (roster minus these = done) without the teacher touching 40 names for 3 facts.
+  - **A `homework_checks` row means the teacher went through it; its ABSENCE means `not_checked`,
+    which is never "everyone did it".** That distinction is the module — without it a teacher who
+    checks nothing reads as a class with perfect completion. `not_checked` is counted separately,
+    excluded from any completion figure, and never rendered as a student's miss (parent surfaces
+    included). Same shape as `class_periods.attendance_marked_at` and `staff_attendance_days`.
+  - `homework_checks` gains `checked_by_member_id` + **UNIQUE(assignment_id)** (previously 1:1 only
+    by service convention — a double-submit could double-count a class in the dashboard totals).
+    `done_count`/`total_count` are KEPT as **derived caches** recomputed on every check, so
+    `DashboardService._homework_health` and the existing chart are untouched.
+  - `ClassroomService.homework_sheet` (roster pre-loaded with the last verdicts) +
+    `check_homework` (full replace, stamps checked_at/by). Per-student homework has a roster of
+    one. `services/homework.py::HomeworkService` = the read side: school→class→subject roll-ups,
+    **teacher checking discipline** (`unchecked_overdue` counts only past-deadline homework, so
+    homework set an hour ago is not a failure), repeat non-doers with the responsible teacher,
+    perfect-week and most-improved. Five queries for the whole overview, no per-class loop.
+  - Reads updated end-to-end: timeline homework carries this student's status; growth gains
+    done/not-done/not-checked per subject; the daily report says who missed it and how much is
+    unchecked; the dashboard raises an unchecked-homework alert. **Parent portal** gains
+    `yesterday` (the last homework day + its verdict) and `pending` (set, not finished) through
+    the same allowlist projection. `/homework/overview` + `/homework/student/{id}` (teachers only
+    their own students). `test_homework.py` (7). My Day's check row is now "Everyone did it ✓" +
+    a tap-to-flag sheet.
+- **DASH3 (admin operating board, 2026-07-29)** — migration **`e0f1a2b3c4d5`** (head, revises
+  `d8e9f0a1b2c3`; **applied to DO prod**). `/dashboard` becomes a 7-tab route area — the briefing
+  stays first and unchanged, and each tab answers one question the admin arrives with. The plan
+  (`docs/trackbit-admin-dashboard-v3-plan.md`) is at **revision 2**: it was written before SF-1 and
+  HW-1 shipped, so three of its seven prerequisites were already built (two of them *differently*)
+  and its §11 "leave is out of scope" was obsolete. Rev 2 reconciles it with the code — read §0.1
+  before touching this module.
+  - **Only two new tables.** `period_substitutions` (PR-2) — who covers an absent teacher's period;
+    the P2 shape again, **the substitution is the plan and `class_periods.teacher_member_id` stays
+    the actual**. Unique on the LIVE rows only (partial index `WHERE cancelled_at IS NULL`), so a
+    cancelled cover never blocks a re-cover. `followup_actions` (PR-5) — append-only (law 3), one
+    row per action-rail press, which is what stops the same parent being reminded three times in a
+    morning: each red row reads today's history for its subject in **one query for the whole list**
+    and renders "already reminded". Rev 1's `staff_attendance` and `homework_results` are SF-1/HW-1
+    and are NOT recreated.
+  - **Read-side of cover:** `ClassroomService.my_day` unions today's substitutions (tagged
+    `substituting`/`covering_for`), and `assert_can_take_class` takes `(on_date, period_no)` so a
+    substitute can actually OPEN the period card — a period you can see but not open is worse than
+    one you never saw. Notified via a new push-only `substitute` notif type (the migration widens
+    `ck_notifications_notif_type_valid`, which a CHECK constraint otherwise rejects).
+  - **PR-6 `PlannerService.forecast_org(m, year_id)`** — `DashboardService._rag_rows` looped
+    `forecast` per class (~4 remote round-trips each, ~80 for a 20-class school, for ONE card).
+    Now one batched pass; the existing overview got faster as a side effect.
+  - `services/insights/`: `attendance.py` (14-day pulse reused from `DashboardService.attendance_pulse`
+    so the two can't disagree · **period capture heatmap** class×period with four states —
+    `free`/`pending`/`marked`/`not_held`, the one thing that separates "attendance is bad" from
+    "attendance was never taken" · absence streaks: absent in EVERY marked period of consecutive
+    school days, days the class marked nothing are **skipped not counted present** · blast radius
+    with ranked substitutes) · `syllabus.py` (scope school|class|subject|teacher × checkpoint
+    year|term|exam; **teacher is a re-pivot of class-subject rows, not a child of subject**;
+    `unplanned`/`unallocated`/`unestimated` stay words, never a colour; ranks guarded at ≥3
+    class-subjects and ≥10 logged periods, framed *needs support / ahead of plan*) ·
+    `workload.py` (live board off `school_clock`, degrades to before/after/break/holiday/unset;
+    free-teacher work from `timesheet_entries` — **capture, not the plan's task-category
+    inference**; leave queue with SF-1's policy warnings; org-wide teacher week vs a mean computed
+    over people who teach at all) · `homework.py` (thin — delegates to `HomeworkService`, adds only
+    the daily series) · `tasks.py` (task health + daily duties denominated by periods **actually
+    due**, cover moves the duty to the substitute) · `exams.py` (roll-ups; participation beside
+    every average; bucketing done in Postgres) · `actions.py` (the rail + the Follow-ups board) ·
+    `cards.py` (overview summary cards).
+  - 13 endpoints under `/insights` (all `require_admin`), `services/substitution.py`,
+    `models/insights.py`, `schemas/insights.py`. 8 Lucy read tools (`tools_insights.py`, registry
+    now 43). Two daily-report ambiguity rules the capture finally allows: *staff away with periods
+    uncovered* and *homework not-done streaks by name*. Seed gains the **Follow-ups** board
+    (`task_scope='assigned'` — a private per-teacher board would collide with law 5).
+  - Web: `dashboard/layout.tsx` + 6 tab pages, `components/insights/*`, `lib/insights-{api,types}.ts`.
+    All charts through `components/charts` — no second charting path.
+  - `test_insights.py` (11). **Fixed three pre-existing bugs the suite had never been able to
+    catch** (see the Database note — the test DB was unmigratable, so these suites had never run):
+    `leave.py` returned a stale event list after approve/cancel (`selectinload`ed collection not
+    expired), `leave.py::_working_days` passed ORM rows to the pure `expand_blocked_dates`
+    (**every leave application 500s in any school with a calendar event**), and
+    `test_timeline.py` still asserted HW-1's homework rows were bare strings.
+- **DASH3-OV (overview redesign, 2026-07-29)** — no migration, no new table. The overview was six
+  one-number tiles over a five-chart grid: a tile could say "78%" but not *what* or *who*, so the
+  admin opened a tab every morning to find out, and the charts repeated what the tabs already drew.
+  It is now **one block per module** — a plain-sentence headline, the 2–3 figures it rests on
+  (sparkline inside a metric, never a second figure), and **named** rows under them ("Anil away —
+  Sick · 9 of 9 periods uncovered") — plus a derived **action rail** of what is waiting, each item
+  linking to the screen that clears it. `services/insights/cards.py` → **`overview.py`**
+  (`OverviewService`, `/insights/cards` → **`GET /insights/overview`**); `ModuleCard(s)` replaced by
+  `OverviewSection`/`OverviewMetric`/`OverviewNote`/`QuickAction`/`OverviewBoard`. Every figure is
+  still taken from a roll-up a module already computes, so the summary can never disagree with the
+  tab it links to; the module boards are read once per load (the pieces of the attendance board
+  directly, so the streak walk is not run twice). Rules kept: not-captured never renders red or as
+  a zero, `unplanned`/`unestimated` stay neutral **states**, an average carries no invented grading
+  threshold, and a "weakest subject" needs two subjects (else it shows the latest exam). Fees keeps
+  its own block (client-side, off `DashboardService` — teachers never receive fee figures at all).
+  Alerts that the rail already carries are dropped from the feed, so the division is **rail = go do
+  it, alerts = file it as a task**. Web: `components/insights/overview.tsx` (`ActionRail`,
+  `SectionCard`, `CustomSection`, `MetricCell`) replaces `module-card.tsx`; the `ShapeGrid`/
+  `PulseRow` chart grid is gone — those charts live on the tabs that own them. `test_insights.py`
+  (13, +2).
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
@@ -414,45 +581,72 @@ Frontend, from `web/` (Node 20+): `npm run dev` (needs API up), `npm run build`,
 end green on `npx tsc --noEmit` + `eslint` + `next build`. The **full backend suite (currently 130) is
 the regression gate** — it must stay green after every change.
 
-### Database — managed Postgres on Aiven (no Docker)
+### Database — LOCAL Postgres for dev (no Docker)
 
-**Docker does not work on this machine. Never use it.** There is no local Postgres container,
-and `api/docker-compose.yml` is dead — ignore it. The Dockerfiles exist only for Dokploy to
-build remotely; they are never built or run here.
+**Docker does not work on this machine. Never use it.** There is no Postgres container, and
+`api/docker-compose.yml` is dead — ignore it. The Dockerfiles exist only for Dokploy to build
+remotely; they are never built or run here.
 
-The database is an Aiven Postgres, database name **`trackbit_school`**. Both URLs live in
-`api/.env` (gitignored — never commit, never paste into `.env.example` or a commit message):
+**`api/.env` is switchable between LOCAL and PROD, and it says which mode it is in** — the active
+mode is marked by a `# ─── ACTIVE: …` banner, and the inactive URLs are parked next to it as
+`# LOCAL_*_BACKUP=` / `# PROD_*_BACKUP=` comments. Those comments are the only copy of the prod
+credentials outside Dokploy: **never delete them**, never commit `.env`, never paste it into
+`.env.example` or a commit message.
 
-- `ADMIN_DATABASE_URL` → `avnadmin`, the schema owner. Used **only** by Alembic.
-- `DATABASE_URL` → `trackbit_school_app`, a **NOBYPASSRLS** role. This split is what makes
-  architectural law 2 real: `avnadmin` has `rolbypassrls = true`, so pointing the app at it
-  would silently disable every RLS policy.
+| var | local mode | prod mode | why |
+|---|---|---|---|
+| `DATABASE_URL` | `trackbit_school_app` (**NOBYPASSRLS**) @ `localhost/trackbit_school` | `doadmin` @ DigitalOcean | the app |
+| `ADMIN_DATABASE_URL` | `postgres` @ localhost | `doadmin` @ DigitalOcean | **Alembic only** |
+| `TEST_DATABASE_URL` | `trackbit_school_app` @ **`localhost/trackbit_school_test`** | *(unchanged — stays local)* | pytest hard-deletes orgs |
 
-`?sslmode=require` is mandatory. To touch the DB, read `api/.env` and connect with psycopg2
-from the uv venv; do not try to start a server.
+🚨 **`TEST_DATABASE_URL` stays on the local test database in BOTH modes.** The suite creates and
+hard-deletes organizations; pointing it at prod would delete real orgs. `conftest.py` blocks the
+obvious case (test URL == app URL) but it cannot know that some *other* remote URL is precious —
+that guard is not a substitute for never editing this line.
+
+Law 2 note: locally the app runs as a NOBYPASSRLS role, so RLS is genuinely enforced and a
+cross-org leak fails a test. In prod mode the app runs as `doadmin`, which **bypasses RLS** — so
+prefer local for anything security-related.
+
+⚠️ **Never point `TEST_DATABASE_URL` at a superuser.** A superuser bypasses RLS entirely — even
+`FORCE ROW LEVEL SECURITY` — so `test_rls.py` fails for reasons that have nothing to do with the
+code. The restricted role needs `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public`
+plus matching `ALTER DEFAULT PRIVILEGES`, so tables from future migrations work without re-granting.
 
 ```bash
 # from api/ — .env is read automatically, don't export DATABASE_URL over it
 uv run alembic upgrade head
 uv run alembic current
+uv run python -m scripts.seed         # demo org: kc@demo.trackbit.app / demo1234
+
+# Migrate a DIFFERENT database (e.g. the test one) without touching .env:
+ALEMBIC_DATABASE_URL="postgresql+psycopg2://postgres:PASSWORD@localhost:5432/trackbit_school_test" \
+  uv run alembic upgrade head
 ```
 
-The test suite needs a real Postgres and runs **against `trackbit_school`**, because as of
-2026-07-10 that Aiven database is a **development/prototyping** database, not production —
-the founder's explicit call. The suite creates and hard-deletes orgs; that is fine here.
-A separate production database arrives later, and that switch is where this stops being safe.
+The Aiven database is retired for this purpose: its `trackbit_school_app` does not own
+`organizations`, so `alembic upgrade` failed there with `must be owner of table organizations` and
+**the suite had never actually run** — which is how three real bugs reached main (see DASH3).
+Treat "the tests pass" as meaningless until you have seen them execute.
 
-⚠️ `TEST_DATABASE_URL` is declared in `app/core/config.py` but **nothing reads it**. `pytest`
-connects via `DATABASE_URL`. There is no safety net — the day a production URL lands in
-`api/.env`, `uv run pytest -q` will delete orgs out of it. Wire `conftest.py` to honour
-`TEST_DATABASE_URL` before that happens.
+✅ **`conftest.py` honours `TEST_DATABASE_URL`** and refuses to start if it resolves to the same
+host+database as `DATABASE_URL` (escape hatch: `ALLOW_TESTS_ON_DATABASE_URL=1`) — which is why the
+two are separate *databases*, not just separate roles. Both engines, including the privileged
+cleanup engine that reads `ADMIN_DATABASE_URL`, are redirected at the test database.
 
 Worktrees have no `.env` (gitignored, not copied). Copy it in before running Alembic or pytest
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: schema is at head `f7c8d9e0f1a2`, 47 tables carry an `org_isolation` policy, and
-`trackbit_school_app` is confirmed `rolbypassrls = false`.
+Current state: local dev DB and **DO prod are both at head `e0f1a2b3c4d5`** (SF-1 + HW-1 + DASH3,
+applied 2026-07-29); 55 tables carry an `org_isolation` policy. Full suite **375 passing in
+~4.5 min**.
+
+⚠️ **In PRODUCTION `DATABASE_URL` still points at `doadmin`**, not a restricted app role — so
+`rolbypassrls = true` and every RLS policy is inert there. Locally the app role is correct, so law
+2 is real in dev and a cross-org leak would now fail a test before it could ship.
+`scripts/provision_app_role.py` creates the restricted role on a managed cluster; swapping prod
+onto it is the outstanding piece.
 
 ### Deployment — Dokploy
 
@@ -511,6 +705,10 @@ their students, tasks). Migration `e9fab0c1d2e3` collapsed coordinator/office �
 `require_coordinator_up` / `require_office_up` are now **admin-only aliases** (consolidate to
 `require_admin` opportunistically when touching a file); `require_academic` = any member.
 Non-negotiable: **teachers never see fees; band tiers never reach parents/guardians.**
+*(One narrow exception, founder decision `D-83` 2026-08-01: a teacher **assigned a fee follow-up
+task** sees that one student's fee detail — history, instalment, pending amount, conversation log —
+**inside that task only**. Never a fees nav item, never a class list or collection figure, never a
+fee field on any academic surface or Lucy tool.)*
 **Parents (PC-1, founder decision 2026-07-23):** guardians get a **read-only portal login** —
 NOT a membership. A `guardians.user_id` link + a `role='parent'` token (no token_version;
 revocation = the live guardian-link check). Phone-OTP login (`/parent/auth/*`), optional
@@ -547,7 +745,10 @@ Two rules make it safe in the setup wizard's critical path:
 
 ## Fences — v2 (SPRD2 §11, binding; supersedes arch §8)
 
-**Moved IN by founder decision (July 2026):** per-period attendance (capture-by-exception only) ·
+**Moved IN by founder decision (July 2026):** **staff attendance · leave · teacher timesheet
+(SF-1, 2026-07-29)** — operational only: who covers period 4, not payroll or HR ·
+**period substitutions + the admin operating board (DASH3)** ·
+per-period attendance (capture-by-exception only) ·
 timetable (import-first + AI-assisted draft with **deterministic** validators — still no guaranteed
 solver) · daily report generation · per-student homework · **Lucy, a staff-only agentic chat
 surface (2026-07-12)** — tools wrap existing services only, widget data is server-materialized,
@@ -559,12 +760,19 @@ writes are human-confirmed pending actions; the registry is the seed of a future
 designer · test authoring/conducting · **any parent/guardian-facing chat or AI surface** ·
 parent WRITES of any kind (the portal is read-only; leave requests/messages are a future
 decision) · **mandatory per-student capture** (exception-only, always — P1v2) · per-student
-evidence photos (batch only). LMS + teacher training = Playground's lane.
+evidence photos (batch only — **two decided exceptions**: hostel session media (HS-2) and **exam
+script photos, `D-82` 2026-08-01**, where a photo per student's marked paper *is* the capture
+mechanism). LMS + teacher training = Playground's lane.
 
 ## Build order
 
-Work **packet-by-packet** per **SPRD2 §10**; do not mark a packet done until its **Done-when**
-criteria pass. Sequence: V2-P0-B (IA reshell) → V2-P1 (timetable) → V2-P2 (attendance + My Day v2)
+**Current work (2026-08-01 →): the v1 release plan at `docs/v1/IMPLEMENTATION-PLAN.md`** —
+14 packets V1-0…V1-13, built from the brainstorm sessions (`docs/brainstorm/`); its scope
+decisions are `D-78`–`D-88` in `docs/brainstorm/decisions.md` (session 10). V1-0 (the
+one-computation foundation + defect sweep) comes first and everything depends on it.
+
+For historical packets: work **packet-by-packet** per **SPRD2 §10**; do not mark a packet done
+until its **Done-when** criteria pass. Sequence: V2-P0-B (IA reshell) → V2-P1 (timetable) → V2-P2 (attendance + My Day v2)
 → V2-P3 (recommendations/checks) → V2-P4 (daily report + timeline + cron wiring) → V2-P5 (wizard +
 plan generation). After every packet the v1 flows (quick log, sessions, fees, tasks) must still
 pass their tests. The core loop v2: **wizard compiles the year → teachers confirm each period by

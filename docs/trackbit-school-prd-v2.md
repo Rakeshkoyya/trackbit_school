@@ -273,6 +273,16 @@ report-card designer · test authoring/conducting · parent app or login (notifi
 chat UI / AI orchestrator surface · mandatory per-student capture (exception-only, always) ·
 per-student evidence photos (batch only) · LMS + teacher training (Playground's lane).
 
+> **Addendum 2026-08-01 (v1 scope, `D-78`–`D-88` in `docs/brainstorm/decisions.md`):** later
+> founder decisions supersede parts of the two lists above — parent **login** is IN (PC-1,
+> read-only, curated projection); a staff-only chat surface is IN (Lucy); staff attendance /
+> leave / timesheet are IN (SF-1, operational only). Two fences are **narrowed**: per-student
+> photos gain a second decided exception — **exam script photos** (`D-82`), where a photo per
+> student's marked paper is the capture mechanism; and teachers-and-fees gains one — a teacher
+> **assigned a fee follow-up task** sees that one student's fee detail **inside the task only**
+> (`D-83`). Payroll remains OUT (`D-78` defers it; v1 ships only the staff month summary it
+> would be computed from). The current build spec is `docs/v1/IMPLEMENTATION-PLAN.md`.
+
 ## §12. Screen migration map (v1 → v2)
 
 | v1 | v2 |
