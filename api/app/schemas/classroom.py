@@ -124,10 +124,18 @@ class HomeworkOut(BaseModel):
 
 
 class HomeworkResultIn(BaseModel):
-    """One student who did NOT do it. Doing it is the norm and has no row."""
+    """One student whose homework was NOT done-on-time. Done has no row.
+
+    `late`, `carried` and `waived` joined the vocabulary in V1-5 — see
+    `core/homework_verdict.py` for what each is worth. `late` is a status the
+    teacher sets whenever she likes, with no threshold and nothing locking
+    (`D-85`); `carried` is an absence, not a refusal (`D-34`); `waived` is how a
+    carried item stops being pending (`S-98`).
+    """
 
     student_id: uuid.UUID
-    status: str = Field(default="not_done", pattern="^(not_done|partial)$")
+    status: str = Field(default="not_done",
+                        pattern="^(not_done|partial|late|carried|waived)$")
     note: str | None = Field(default=None, max_length=300)
 
 
@@ -145,9 +153,20 @@ class HomeworkSheetRow(BaseModel):
     student_id: uuid.UUID
     full_name: str
     roll_no: str | None = None
-    # done | not_done | partial — `done` is the derived default (no row).
+    # See core/homework_verdict.py. `done` is the derived default (no row).
     status: str = "done"
     note: str | None = None
+    # S-85: this child was absent the day it was set. Shown, and **not**
+    # preselected as a miss — the teacher may know a friend passed it on, and a
+    # hard exclusion cannot be overridden. Absent is not a refusal.
+    absent_when_set: bool = False
+    # S-97: items still carried from while they were away. She is already
+    # holding these notebooks; nothing new to remember.
+    carried_pending: int = 0
+    # S-89: the intervention, at the moment she is standing in front of the
+    # child holding the book — the cheapest intervention moment in the product,
+    # and until now this number lived only on the principal's dashboard.
+    miss_streak: int = 0
 
 
 class HomeworkSheetOut(BaseModel):
@@ -171,6 +190,9 @@ class HomeworkSheetOut(BaseModel):
     done_count: int = 0
     not_done_count: int = 0
     partial_count: int = 0
+    late_count: int = 0
+    carried_count: int = 0
+    waived_count: int = 0
 
 
 # ── deep log — lesson observations (teacher-view redesign) ──────────────────

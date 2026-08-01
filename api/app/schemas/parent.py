@@ -59,9 +59,11 @@ class ParentTaughtItem(BaseModel):
 class ParentHomeworkItem(BaseModel):
     subject_name: str
     text: str
-    # done | not_done | partial | not_checked (HW-1). `not_checked` means the
-    # teacher hasn't gone through it — the UI must say "not checked yet", never
-    # imply the child missed it.
+    # done | late | partial | not_done | carried | waived | not_checked.
+    # `not_checked` means the teacher hasn't gone through it — the UI must say
+    # "not checked yet", never imply the child missed it. `carried` (D-35) is
+    # work missed because the child was ABSENT: shown **yellow**, pending, never
+    # red — nothing was refused.
     status: str = "not_checked"
     due_date: date | None = None
     personal: bool = False
@@ -74,6 +76,8 @@ class ParentHomeworkDay(BaseModel):
     done: int = 0
     not_done: int = 0
     partial: int = 0
+    late: int = 0
+    carried: int = 0
     not_checked: int = 0
 
 
@@ -118,8 +122,15 @@ class ParentTodayOut(BaseModel):
     # Yesterday's homework, so the first question a parent asks — "did they do
     # it?" — is answered without navigating anywhere (HW-1).
     yesterday: ParentHomeworkDay | None = None
-    # Set and not yet due: what's still to do tonight.
+    # S-94 — two lists, because they are two different things and one of them
+    # is not actionable. `pending` is work that can still be handed in: not yet
+    # due, or CARRIED because the child was away (D-35 — yellow, never red).
+    # `missed` is work whose deadline has passed and was not done: a fact, and
+    # it carries **no red** either, because the child may well have finished it
+    # since. Before this split, a missed item sat in "still to do" for eight
+    # days looking like something that could still be handed in.
     pending: list[ParentHomeworkItem] = []
+    missed: list[ParentHomeworkItem] = []
 
 
 class ParentReportSubject(BaseModel):

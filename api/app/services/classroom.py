@@ -6,12 +6,14 @@ teacher's payback, P3) with plain homework text only — never band/tier info (P
 """
 
 import uuid
+from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core import homework_verdict as verdicts
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
@@ -61,11 +63,14 @@ from app.schemas.periods import (
     PeriodPlanOut,
 )
 from app.schemas.timetable import TeacherSlot
-from app.services.attendance import AttendanceService
+from app.services.attendance import AttendanceService, day_absence_maps, is_day_absent
 from app.services.notify_guardian import notify_guardians
 from app.services.periods import assert_can_take_class, find_period, get_or_create_period
 from app.services.planner import PlannerService
 from app.services.timetable import TimetableService
+
+# How far back the check sheet looks to show a child's miss streak (S-89).
+SHEET_STREAK_DAYS = 30
 
 
 def _label(klass: SchoolClass) -> str:
@@ -785,21 +790,96 @@ class ClassroomService:
                 select(User.name).join(Membership, Membership.user_id == User.id)
                 .where(Membership.id == check.checked_by_member_id))
 
+        students = self._homework_roster(m.org_id, hw, cs.class_id)
+        context = self._sheet_context(m, hw, cs.class_id, [st.id for st in students])
+
         rows: list[HomeworkSheetRow] = []
-        for st in self._homework_roster(m.org_id, hw, cs.class_id):
+        for st in students:
             hit = results.get(st.id)
+            absent, carried, streak = context.get(st.id, (False, 0, 0))
             rows.append(HomeworkSheetRow(
                 student_id=st.id, full_name=st.full_name, roll_no=st.roll_no,
-                status=hit.status if hit else "done", note=hit.note if hit else None))
-        not_done = sum(1 for r in rows if r.status == "not_done")
-        partial = sum(1 for r in rows if r.status == "partial")
+                # S-85: an absent child is SHOWN, never preselected. `done` stays
+                # the default until a human says otherwise — the sheet reports
+                # what it knows and lets the teacher decide.
+                status=hit.status if hit else "done", note=hit.note if hit else None,
+                absent_when_set=absent, carried_pending=carried, miss_streak=streak))
+        counts = verdicts.tally(r.status for r in rows)
         return HomeworkSheetOut(
             assignment_id=hw.id, class_label=_label(klass), subject_name=subject,
             text=hw.text, date=hw.date, due_date=hw.due_date,
             checked=check is not None, checked_at=check.checked_at if check else None,
             checked_by=checked_by, student_id=hw.student_id, roster=rows,
-            done_count=len(rows) - not_done - partial,
-            not_done_count=not_done, partial_count=partial)
+            done_count=counts["done"], not_done_count=counts["not_done"],
+            partial_count=counts["partial"], late_count=counts["late"],
+            carried_count=counts["carried"], waived_count=counts["waived"])
+
+    def _sheet_context(self, m: CurrentMember, hw: HomeworkAssignment,
+                       class_id: uuid.UUID, student_ids: list[uuid.UUID],
+                       ) -> dict[uuid.UUID, tuple[bool, int, int]]:
+        """student → (absent when it was set, carried items still pending, streak).
+
+        The three things the teacher needs while she is holding the notebooks,
+        in three queries for the whole class rather than three per child.
+
+        Everything here is a READ over capture that already happened — attendance
+        knows who was in the room, `homework_results` knows what is still carried,
+        and the streak is the same one the admin board computes. None of it is a
+        second copy: a "was absent when set" column would drift from attendance
+        the first time a register was corrected.
+        """
+        if not student_ids:
+            return {}
+        # 1 · Who was day-absent on the day it was set (THE shared rule).
+        marked, absents = day_absence_maps(self.db, m.org_id, hw.date, hw.date)
+        taken = marked.get((class_id, hw.date), 0)
+
+        # 2 · This class's earlier homework, so the streak is computed over ALL
+        # of it. Reading only the exception rows would count every day in the
+        # window as a bad one — "done" has no row, which is the whole design.
+        since = hw.date - timedelta(days=SHEET_STREAK_DAYS)
+        past = self.db.execute(
+            select(HomeworkAssignment.id, HomeworkAssignment.date,
+                   HomeworkAssignment.student_id)
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   ClassSubject.class_id == class_id,
+                   HomeworkAssignment.date >= since,
+                   HomeworkAssignment.date < hw.date)).all()
+        past_ids = [aid for aid, _d, _s in past]
+        checked_ids = set(self.db.scalars(
+            select(HomeworkCheck.assignment_id)
+            .where(HomeworkCheck.assignment_id.in_(past_ids)))) if past_ids else set()
+        rows = self.db.execute(
+            select(HomeworkResult.assignment_id, HomeworkResult.student_id,
+                   HomeworkResult.status)
+            .where(HomeworkResult.assignment_id.in_(past_ids),
+                   HomeworkResult.student_id.in_(student_ids))).all() if past_ids else []
+        verdict_at: dict[tuple[uuid.UUID, uuid.UUID], str] = {
+            (aid, sid): status for aid, sid, status in rows
+        }
+
+        wanted = set(student_ids)
+        dated: dict[uuid.UUID, list[tuple[date, str]]] = defaultdict(list)
+        carried: dict[uuid.UUID, int] = defaultdict(int)
+        for aid, on, only_for in past:
+            targets = wanted if only_for is None else ({only_for} & wanted)
+            for sid in targets:
+                if aid not in checked_ids:
+                    status = "not_checked"
+                else:
+                    status = verdict_at.get((aid, sid), "done")
+                dated[sid].append((on, status))
+                # S-97: still waiting to be resolved from while they were away.
+                if status == "carried":
+                    carried[sid] += 1
+
+        return {
+            sid: (is_day_absent(taken, absents.get(sid, {}).get(hw.date, 0)),
+                  carried.get(sid, 0),
+                  verdicts.miss_streak(dated.get(sid, [])))
+            for sid in student_ids
+        }
 
     def check_homework(self, m: CurrentMember, assignment_id: uuid.UUID,
                        body: HomeworkCheckIn) -> HomeworkSheetOut:

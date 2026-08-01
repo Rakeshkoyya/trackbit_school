@@ -21,6 +21,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import homework_verdict as verdicts
 from app.core.context import CurrentParent
 from app.core.exceptions import ForbiddenError
 from app.models import Organization, Student
@@ -88,7 +89,7 @@ class ParentPortalService:
                 homework_done=s.homework_done, log_note=s.log_note)
             for s in t.sessions
         ]
-        yesterday, pending = self._homework(p, student_id, t.date)
+        yesterday, pending, missed = self._homework(p, student_id, t.date)
         month, present_days, marked_days = self._month_pattern(p, student_id, t.date)
         return ParentTodayOut(
             date=t.date, status=status, marked_periods=t.marked_periods,
@@ -98,7 +99,7 @@ class ParentPortalService:
                             if status in ("absent", "left_after_lunch") else None),
             school_phone=p.org.phone,
             taught=taught, homework=homework, sessions=sessions,
-            yesterday=yesterday, pending=pending)
+            yesterday=yesterday, pending=pending, missed=missed)
 
     def _month_pattern(self, p: CurrentParent, student_id: uuid.UUID, today: date,
                        ) -> tuple[list["ParentMonthDay"], int, int]:
@@ -199,18 +200,33 @@ class ParentPortalService:
         if past:
             last_day = max(i.date for i in past)
             items = [project(i) for i in past if i.date == last_day]
+            counts = verdicts.tally(i.status for i in items)
             yesterday = ParentHomeworkDay(
                 date=last_day, items=items,
-                done=sum(1 for i in items if i.status == "done"),
-                not_done=sum(1 for i in items if i.status == "not_done"),
-                partial=sum(1 for i in items if i.status == "partial"),
-                not_checked=sum(1 for i in items if i.status == "not_checked"))
+                done=counts["done"], not_done=counts["not_done"],
+                partial=counts["partial"], late=counts["late"],
+                carried=counts["carried"], not_checked=counts["not_checked"])
 
-        pending = [
-            project(i) for i in history.items
-            if i.status != "done" and (i.due_date is None or i.due_date >= today)
-        ]
-        return yesterday, pending
+        # S-94 — split what can still be handed in from what was missed.
+        # `waived` appears in neither: the teacher decided it is not required,
+        # which is precisely how a carried item stops being pending (S-98) and
+        # how the parent's yellow finally clears.
+        pending: list[ParentHomeworkItem] = []
+        missed: list[ParentHomeworkItem] = []
+        for i in history.items:
+            if i.status in ("done", "late", "waived"):
+                continue
+            if i.status == "carried":
+                # D-35: missed because the child was ABSENT. Yellow, pending,
+                # never red — nothing was refused.
+                pending.append(project(i))
+            elif i.due_date is None or i.due_date >= today:
+                pending.append(project(i))
+            elif i.status != "not_checked":
+                missed.append(project(i))
+            # `not_checked` past its due date belongs in neither list: the
+            # teacher hasn't looked yet, and that is never the child's miss.
+        return yesterday, pending, missed
 
     def report(self, p: CurrentParent, student_id: uuid.UUID) -> ParentReportOut:
         self._assert_child(p, student_id)

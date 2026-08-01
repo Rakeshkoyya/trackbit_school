@@ -25,8 +25,8 @@ from datetime import date, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core import homework_verdict as verdicts
 from app.core.context import CurrentMember
-from app.core.coverage import completion_pct
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
     AcademicYear,
@@ -35,14 +35,20 @@ from app.models import (
     HomeworkCheck,
     HomeworkResult,
     Membership,
+    PeriodSubstitution,
     SchoolClass,
     Student,
     Subject,
     User,
 )
 from app.schemas.homework import (
+    HomeworkLoad,
+    HomeworkLoadCell,
     HomeworkOverview,
+    HomeworkQueue,
+    HomeworkQueueItem,
     HomeworkScopeRow,
+    RoughClassRow,
     StudentHomeworkHistory,
     StudentHomeworkItem,
     StudentHomeworkRow,
@@ -55,6 +61,10 @@ WINDOW_DAYS = 14
 # A student is on the red list at this many consecutive homework days missed.
 STREAK_ALERT = 2
 MAX_LIST = 25
+# D-85's second signal fires at this many misses on ONE checked homework. A
+# constant, not a setting (DASH3 10.4): the school has no basis to tune it yet,
+# and a threshold nobody understands is worse than one nobody can change.
+MASS_MISS_ALERT = 5
 
 
 def _label(name: str, section: str | None) -> str:
@@ -147,26 +157,9 @@ class HomeworkService:
         hit = results.get(a["hw"].id, {}).get(student_id)
         return hit.status if hit else "done"
 
-    @staticmethod
-    def _streak(dated: list[tuple[date, str]]) -> int:
-        """Consecutive most-recent homework days that were missed.
-
-        Counts by DAY, not by assignment: three subjects missed on one afternoon
-        is one bad day, not a three-day streak. Days with nothing checked are
-        skipped rather than breaking the run — the teacher's gap is not the
-        student's, and treating it as a clean day would hide a real pattern.
-        """
-        by_day: dict[date, bool] = {}
-        for d, status in dated:
-            if status == "not_checked":
-                continue
-            by_day[d] = by_day.get(d, False) or status in ("not_done", "partial")
-        streak = 0
-        for d in sorted(by_day, reverse=True):
-            if not by_day[d]:
-                break
-            streak += 1
-        return streak
+    # The streak lives in `core/homework_verdict` so the admin board, the
+    # teacher's check sheet (S-89) and the report card all show one number.
+    _streak = staticmethod(verdicts.miss_streak)
 
     # ── admin overview ───────────────────────────────────────────────────────
     def overview(self, m: CurrentMember, window_days: int = WINDOW_DAYS) -> HomeworkOverview:
@@ -179,20 +172,31 @@ class HomeworkService:
                                     assigned=0, checked=0, check_rate=None,
                                     overall_completion=None)
 
-        # scope accumulators: key → [assigned, checked, expected, done, not_done, partial]
-        by_class: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
-        by_subject: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
-        # teacher → [assigned, checked, unchecked_overdue]
+        # scope accumulators: key → the verdict tally plus assigned/checked.
+        def _acc() -> dict[str, int]:
+            # `not_checked` is carried through the accumulators so it can be
+            # reported, and `graded` deliberately excludes it — that separation
+            # is HW-1's load-bearing rule and this is where it is enforced.
+            return {"assigned": 0, "checked": 0, "done": 0, "late": 0, "partial": 0,
+                    "not_done": 0, "carried": 0, "waived": 0, "not_checked": 0,
+                    "graded": 0}
+
+        by_class: dict[str, dict[str, int]] = defaultdict(_acc)
+        by_subject: dict[str, dict[str, int]] = defaultdict(_acc)
+        # teacher → [assigned, checked, unchecked_overdue, last_checked_at]
         by_teacher: dict[uuid.UUID | None, list] = defaultdict(lambda: [0, 0, 0, None])
         per_student: dict[uuid.UUID, dict] = {}
-        totals = [0, 0, 0, 0, 0, 0]
+        totals = _acc()
+        # D-85's second admin signal: this class WAS checked, and N children
+        # missed it. Different from "nobody checked" and needing a different
+        # conversation, so it is counted separately rather than buried in a rate.
+        rough: list[tuple[int, dict]] = []
 
-        # S-85/D-34 (V1-0e guard): a child who was day-absent when the homework
-        # was set never reads as a miss — not in any figure, not in the streak,
-        # never on the red list that fires guardian reminders. The full carried/
-        # waived lifecycle is V1-5; until then absent-when-set simply leaves the
-        # denominator, exactly like not_checked. Day-absence comes from THE
-        # shared rule (services/attendance.py), not a local one.
+        # S-85/D-34: a child who was day-absent when the homework was set never
+        # reads as a miss. The verdict becomes `carried` — pending, not refused —
+        # so it leaves every figure, the streak and the red list that fires
+        # guardian reminders. Day-absence comes from THE shared rule
+        # (services/attendance.py), not a local one.
         marked_by_class, absents_by_student = day_absence_maps(
             self.db, m.org_id, since, until)
 
@@ -204,49 +208,48 @@ class HomeworkService:
             hw = a["hw"]
             checked = hw.id in checks
             targets = self._targets(a, roster)
-            n_done = n_not = n_part = n_expected = 0
+            counts = _acc()
             for sid, name, roll in targets:
                 status = self._status(a, sid, checks, results)
-                if (status in ("not_done", "partial")
+                # The teacher can say "carried" explicitly; attendance says it
+                # for her when she hasn't. Either way it is one verdict.
+                if (verdicts.is_miss(status)
                         and _absent_when_set(a["class_id"], hw.date, sid)):
-                    continue
-                if checked:
-                    n_expected += 1
+                    status = "carried"
+                counts[status] = counts.get(status, 0) + 1
+                if verdicts.is_graded(status):
+                    counts["graded"] += 1
+
                 rec = per_student.setdefault(sid, {
                     "name": name, "roll": roll, "class_label": a["class_label"],
-                    "assigned": 0, "done": 0, "not_done": 0, "partial": 0,
+                    "assigned": 0, "done": 0, "late": 0, "not_done": 0, "partial": 0,
+                    "carried": 0, "waived": 0,
                     "dated": [], "subjects": set(), "teachers": set()})
                 rec["assigned"] += 1
                 rec["dated"].append((hw.date, status))
-                if status == "done":
-                    rec["done"] += 1
-                    n_done += 1
-                elif status == "not_done":
-                    rec["not_done"] += 1
-                    n_not += 1
+                if status in rec:
+                    rec[status] += 1
+                if verdicts.is_miss(status):
                     rec["subjects"].add(a["subject"])
                     if a["teacher_member_id"]:
                         rec["teachers"].add(teachers.get(a["teacher_member_id"], "—"))
-                elif status == "partial":
-                    rec["partial"] += 1
-                    n_part += 1
-                    rec["subjects"].add(a["subject"])
 
-            expected = n_expected
+            counts["assigned"] = 1
+            counts["checked"] = 1 if checked else 0
             for bucket, key in ((by_class, a["class_label"]), (by_subject, a["subject"])):
-                acc = bucket[key]
-                acc[0] += 1
-                acc[1] += 1 if checked else 0
-                acc[2] += expected
-                acc[3] += n_done
-                acc[4] += n_not
-                acc[5] += n_part
-            totals[0] += 1
-            totals[1] += 1 if checked else 0
-            totals[2] += expected
-            totals[3] += n_done
-            totals[4] += n_not
-            totals[5] += n_part
+                for k, v in counts.items():
+                    bucket[key][k] += v
+            for k, v in counts.items():
+                totals[k] += v
+
+            misses = counts["not_done"] + counts["partial"]
+            if checked and misses >= MASS_MISS_ALERT:
+                rough.append((misses, {
+                    "class_label": a["class_label"], "subject": a["subject"],
+                    "date": hw.date, "text": hw.text, "assignment_id": hw.id,
+                    "graded": counts["graded"],
+                    "teacher": teachers.get(a["teacher_member_id"]) if a["teacher_member_id"] else None,
+                }))
 
             t = by_teacher[a["teacher_member_id"]]
             t[0] += 1
@@ -265,10 +268,13 @@ class HomeworkService:
         def scope_rows(bucket: dict) -> list[HomeworkScopeRow]:
             return sorted(
                 (HomeworkScopeRow(
-                    key=key, assigned=v[0], checked=v[1], students_expected=v[2],
-                    done=v[3], not_done=v[4], partial=v[5],
-                    # V1-0d/Q-40: partly done counts PARTIAL_WEIGHT, not zero.
-                    completion=completion_pct(v[3], v[5], v[2]), check_rate=_pct(v[1], v[0]))
+                    key=key, assigned=v["assigned"], checked=v["checked"],
+                    students_expected=v["graded"],
+                    done=v["done"], not_done=v["not_done"], partial=v["partial"],
+                    late=v["late"], carried=v["carried"],
+                    # ONE arithmetic (core/homework_verdict): late counts as done,
+                    # partly counts PARTIAL_WEIGHT, carried/waived are not in it.
+                    completion=verdicts.completion(v), check_rate=_pct(v["checked"], v["assigned"]))
                  for key, v in bucket.items()),
                 key=lambda r: (r.completion if r.completion is not None else 2, r.key))
 
@@ -282,13 +288,13 @@ class HomeworkService:
 
         students = []
         for sid, rec in per_student.items():
-            misses = rec["not_done"] + rec["partial"]
-            graded = rec["done"] + misses
+            counts = verdicts.tally(st for _d, st in rec["dated"])
             students.append(StudentHomeworkRow(
                 student_id=sid, full_name=rec["name"], class_label=rec["class_label"],
                 roll_no=rec["roll"], assigned=rec["assigned"], done=rec["done"],
                 not_done=rec["not_done"], partial=rec["partial"],
-                completion=completion_pct(rec["done"], rec["partial"], graded),
+                late=rec["late"], carried=rec["carried"],
+                completion=verdicts.completion(counts),
                 streak=self._streak(rec["dated"]),
                 subjects=sorted(rec["subjects"]), teachers=sorted(rec["teachers"])))
 
@@ -306,21 +312,52 @@ class HomeworkService:
         improved: list[StudentHomeworkRow] = []
         for s in students:
             rec = per_student[s.student_id]
-            early = sum(1 for d, st in rec["dated"] if d < midpoint and st in ("not_done", "partial"))
-            late = sum(1 for d, st in rec["dated"] if d >= midpoint and st in ("not_done", "partial"))
-            if early > late:
+            early = sum(1 for d, st in rec["dated"] if d < midpoint and verdicts.is_miss(st))
+            recent = sum(1 for d, st in rec["dated"] if d >= midpoint and verdicts.is_miss(st))
+            if early > recent:
                 s2 = s.model_copy()
-                s2.streak = early - late  # reuse as the improvement delta for sorting
+                s2.streak = early - recent  # reuse as the improvement delta for sorting
                 improved.append(s2)
         improved.sort(key=lambda s: -s.streak)
 
+        rough.sort(key=lambda r: -r[0])
         return HomeworkOverview(
             window_days=window_days, from_date=since, to_date=until,
-            assigned=totals[0], checked=totals[1], check_rate=_pct(totals[1], totals[0]),
-            overall_completion=completion_pct(totals[3], totals[5], totals[2]),
+            assigned=totals["assigned"], checked=totals["checked"],
+            check_rate=_pct(totals["checked"], totals["assigned"]),
+            overall_completion=verdicts.completion(totals),
+            late=totals["late"], carried=totals["carried"],
             by_class=scope_rows(by_class), by_subject=scope_rows(by_subject),
             teachers=teacher_rows, needs_attention=needs, perfect=perfect,
-            most_improved=improved[:10])
+            most_improved=improved[:10],
+            delayed_teachers=self._delayed_teachers(m, teacher_rows, until),
+            rough_classes=[
+                RoughClassRow(assignment_id=r["assignment_id"], class_label=r["class_label"],
+                              subject_name=r["subject"], date=r["date"], text=r["text"],
+                              missed=n, students_expected=r["graded"],
+                              teacher_name=r["teacher"])
+                for n, r in rough[:MAX_LIST]])
+
+    def _delayed_teachers(self, m: CurrentMember, rows: list[TeacherCheckingRow],
+                          until: date) -> list[TeacherCheckingRow]:
+        """D-85's first admin signal: *this teacher has not checked anything for
+        N days.*
+
+        **Derived, never written into a child's record.** That separation is the
+        whole of `D-85`: the child being late is a status the teacher sets in her
+        own words, and the teacher being late is this — read from `checked_at`,
+        reported to the admin, and invisible on every student surface.
+
+        A teacher with nothing overdue is not delayed, however long ago she last
+        checked: a quiet fortnight is not a failure to check work nobody set.
+        """
+        cutoff = until - timedelta(days=max(1, m.org.homework_gap_days))
+        out = [
+            r for r in rows
+            if r.unchecked_overdue > 0
+            and (r.last_checked_at is None or r.last_checked_at.date() <= cutoff)
+        ]
+        return sorted(out, key=lambda r: -r.unchecked_overdue)[:MAX_LIST]
 
     # ── one student (feeds the growth report and the parent portal) ──────────
     def student_history(self, m: CurrentMember, student_id: uuid.UUID,
@@ -370,15 +407,15 @@ class HomeworkService:
         } if ids else {}
 
         items: list[StudentHomeworkItem] = []
-        tally = {"done": 0, "not_done": 0, "partial": 0, "not_checked": 0}
         dated: list[tuple[date, str]] = []
+        statuses: list[str] = []
         for hw, cname, section, sname in rows:
             if hw.id not in checked:
                 status = "not_checked"
             else:
                 hit = mine.get(hw.id)
                 status = hit.status if hit else "done"
-            tally[status] += 1
+            statuses.append(status)
             dated.append((hw.date, status))
             items.append(StudentHomeworkItem(
                 assignment_id=hw.id, date=hw.date, due_date=hw.due_date,
@@ -386,15 +423,183 @@ class HomeworkService:
                 personal=hw.student_id is not None, status=status,
                 note=mine[hw.id].note if hw.id in mine else None))
 
-        graded = tally["done"] + tally["not_done"] + tally["partial"]
+        counts = verdicts.tally(statuses)
         klass = self.db.get(SchoolClass, student.class_id) if student.class_id else None
         return StudentHomeworkHistory(
             student_id=student.id, full_name=student.full_name,
             class_label=_label(klass.name, klass.section) if klass else None,
-            window_days=window_days, assigned=len(items), done=tally["done"],
-            not_done=tally["not_done"], partial=tally["partial"],
-            not_checked=tally["not_checked"], completion=_pct(tally["done"], graded),
+            window_days=window_days, assigned=len(items), done=counts["done"],
+            not_done=counts["not_done"], partial=counts["partial"],
+            late=counts["late"], carried=counts["carried"], waived=counts["waived"],
+            not_checked=counts["not_checked"],
+            # The one arithmetic — this used to divide by a hand-rolled graded
+            # count that silently disagreed with the board's (late was missing).
+            completion=verdicts.completion(counts),
             streak=self._streak(dated), items=items)
+
+    # ── the teacher's Homework screen (D-36 / S-101) ────────────────────────
+    def queue(self, m: CurrentMember, window_days: int = 30,
+              class_subject_id: uuid.UUID | None = None,
+              on_date: date | None = None) -> HomeworkQueue:
+        """Her classes × what was given, **oldest unchecked first**.
+
+        `D-36` moved checking off My Day onto its own screen, because checking is
+        a desk activity with a stack of notebooks rather than a between-classes
+        tap. `S-100` is what decides whether that works: the button carries the
+        count, and the count is this query's `to_check`. An unlabelled button is
+        how a daily habit becomes a monthly one.
+
+        Ordering is the point (`S-83`): everything unchecked past its deadline,
+        oldest first, so Friday's homework survives the weekend and a day missed
+        is a day recovered rather than a record lost. Nothing expires (`D-85`).
+        """
+        until = on_date or self._today(m)
+        since = until - timedelta(days=max(1, window_days) - 1)
+
+        mine = self._my_class_subjects(m)
+        if class_subject_id is not None:
+            mine = [cs for cs in mine if cs == class_subject_id]
+        if not mine:
+            return HomeworkQueue(from_date=since, to_date=until, to_check=0)
+
+        rows = self.db.execute(
+            select(HomeworkAssignment, SchoolClass.name, SchoolClass.section, Subject.name,
+                   Student.full_name)
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .outerjoin(Student, Student.id == HomeworkAssignment.student_id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   HomeworkAssignment.class_subject_id.in_(mine),
+                   HomeworkAssignment.date >= since, HomeworkAssignment.date <= until)
+            .order_by(HomeworkAssignment.date.desc())).all()
+        ids = [hw.id for hw, *_ in rows]
+        checks = {
+            c.assignment_id: c for c in self.db.scalars(
+                select(HomeworkCheck).where(HomeworkCheck.assignment_id.in_(ids)))
+        } if ids else {}
+        misses: dict[uuid.UUID, int] = defaultdict(int)
+        carried: dict[uuid.UUID, int] = defaultdict(int)
+        if ids:
+            for aid, status, n in self.db.execute(
+                select(HomeworkResult.assignment_id, HomeworkResult.status,
+                       func.count(HomeworkResult.id))
+                .where(HomeworkResult.assignment_id.in_(ids))
+                .group_by(HomeworkResult.assignment_id, HomeworkResult.status)).all():
+                if verdicts.is_miss(status):
+                    misses[aid] += int(n)
+                elif status == "carried":
+                    carried[aid] += int(n)
+
+        items: list[HomeworkQueueItem] = []
+        for hw, cname, section, sname, student_name in rows:
+            check = checks.get(hw.id)
+            deadline = hw.due_date or hw.date
+            items.append(HomeworkQueueItem(
+                assignment_id=hw.id, class_subject_id=hw.class_subject_id,
+                class_label=_label(cname, section), subject_name=sname,
+                date=hw.date, due_date=hw.due_date, text=hw.text,
+                student_id=hw.student_id, student_name=student_name,
+                checked=check is not None,
+                checked_at=check.checked_at if check else None,
+                # Overdue is a fact about the record, not a judgement: it means
+                # the deadline has passed with nothing gone through yet.
+                overdue=check is None and deadline < until,
+                days_waiting=max(0, (until - deadline).days) if check is None else 0,
+                missed=misses.get(hw.id, 0), carried=carried.get(hw.id, 0)))
+
+        # Unchecked first and oldest-first inside that, then the checked ones
+        # newest-first — the top of the list is always the work still to do.
+        items.sort(key=lambda i: (i.checked, i.date if not i.checked else -i.date.toordinal()))
+        return HomeworkQueue(
+            from_date=since, to_date=until, items=items,
+            to_check=sum(1 for i in items if not i.checked),
+            overdue=sum(1 for i in items if i.overdue))
+
+    def _my_class_subjects(self, m: CurrentMember) -> list[uuid.UUID]:
+        """The class-subjects this member may check — hers, plus any she covered.
+
+        Admins get everything: they are the ones chasing the checking, and a
+        board that hid the classes they do not personally teach would be empty.
+        """
+        if m.is_admin:
+            return list(self.db.scalars(
+                select(ClassSubject.id).where(ClassSubject.org_id == m.org_id)))
+        own = set(self.db.scalars(
+            select(ClassSubject.id).where(
+                ClassSubject.org_id == m.org_id,
+                ClassSubject.teacher_member_id == m.membership.id)))
+        # S-93: a substitute can check the homework in front of her, so the
+        # classes she covered have to reach her queue in the first place.
+        own.update(self.db.scalars(
+            select(PeriodSubstitution.class_subject_id).where(
+                PeriodSubstitution.org_id == m.org_id,
+                PeriodSubstitution.substitute_member_id == m.membership.id,
+                PeriodSubstitution.cancelled_at.is_(None),
+                PeriodSubstitution.class_subject_id.is_not(None))))
+        return list(own)
+
+    # ── D-37 / S-87: what one class was given in one evening ────────────────
+    def daily_load(self, m: CurrentMember, class_id: uuid.UUID | None = None,
+                   days: int = 14) -> HomeworkLoad:
+        """How many subjects set homework for a class, per day.
+
+        Six teachers each set thirty minutes of work, independently, and until
+        now no screen anywhere added them up — the child has three hours and the
+        school has six reasonable decisions. This needs no new capture at all:
+        it is `homework_assignments` grouped by class × date.
+
+        **Admin and class teacher only** (`D-37`). A subject teacher sees none of
+        it, deliberately: the number exists to be discussed in the staff room,
+        not to make one teacher feel they should have set less.
+
+        Informational — **no cap and no rota** (`D-37`). A limit turns into
+        "whose turn is it to set homework", which is worse than the problem.
+        """
+        until = self._today(m)
+        since = until - timedelta(days=max(1, days) - 1)
+        allowed = self._load_scope(m, class_id)
+        if not allowed:
+            return HomeworkLoad(from_date=since, to_date=until)
+
+        rows = self.db.execute(
+            select(SchoolClass.id, SchoolClass.name, SchoolClass.section,
+                   HomeworkAssignment.date,
+                   func.count(func.distinct(ClassSubject.subject_id)),
+                   func.count(HomeworkAssignment.id))
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   SchoolClass.id.in_(allowed),
+                   # Class-wide homework only: a personal note to one child is
+                   # not part of what the class was given that evening.
+                   HomeworkAssignment.student_id.is_(None),
+                   HomeworkAssignment.date >= since, HomeworkAssignment.date <= until)
+            .group_by(SchoolClass.id, SchoolClass.name, SchoolClass.section,
+                      HomeworkAssignment.date)
+            .order_by(HomeworkAssignment.date)).all()
+
+        cells = [
+            HomeworkLoadCell(class_id=cid, class_label=_label(cname, section), date=d,
+                             subjects=int(nsub), assignments=int(nass))
+            for cid, cname, section, d, nsub, nass in rows
+        ]
+        busiest = max(cells, key=lambda c: c.subjects, default=None)
+        return HomeworkLoad(
+            from_date=since, to_date=until, cells=cells,
+            busiest_class_label=busiest.class_label if busiest else None,
+            busiest_date=busiest.date if busiest else None,
+            busiest_subjects=busiest.subjects if busiest else 0)
+
+    def _load_scope(self, m: CurrentMember, class_id: uuid.UUID | None) -> list[uuid.UUID]:
+        """Which classes' load this member may read (D-37). Admin: all. Class
+        teacher: her own class. Anyone else: nothing, and that is the feature."""
+        q = select(SchoolClass.id).where(SchoolClass.org_id == m.org_id)
+        if not m.is_admin:
+            q = q.where(SchoolClass.class_teacher_member_id == m.membership.id)
+        if class_id is not None:
+            q = q.where(SchoolClass.id == class_id)
+        return list(self.db.scalars(q))
 
     # ── small reads for other services ──────────────────────────────────────
     def unchecked_count(self, m: CurrentMember, on_or_before: date | None = None) -> int:

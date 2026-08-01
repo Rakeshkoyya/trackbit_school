@@ -221,8 +221,12 @@ class HomeworkResult(Base, UUIDPKMixin, CreatedAtMixin):
         UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
-    # not_done = nothing · partial = started it. Anything else is "done", which
-    # has no row.
+    # The exception vocabulary (V1-5). "Done on time" has NO row — that is what
+    # keeps capture one tap for the norm. See `core/homework_verdict.py` for what
+    # each is worth; nothing here decides that twice.
+    #   not_done · partial · late (did it, after the deadline — D-85)
+    #   carried  (absent when set; pending, never a miss — D-34)
+    #   waived   (teacher decided the backlog isn't required — S-98)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_done")
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -230,5 +234,7 @@ class HomeworkResult(Base, UUIDPKMixin, CreatedAtMixin):
 
     __table_args__ = (
         UniqueConstraint("assignment_id", "student_id", name="uq_homework_results_student"),
-        CheckConstraint("status IN ('not_done', 'partial')", name="homework_result_status_valid"),
+        CheckConstraint(
+            "status IN ('not_done', 'partial', 'late', 'carried', 'waived')",
+            name="homework_result_status_valid"),
     )

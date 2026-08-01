@@ -213,14 +213,29 @@ class GrowthService:
         hw_not_done: dict[uuid.UUID, int] = defaultdict(int)
         hw_partial: dict[uuid.UUID, int] = defaultdict(int)
         hw_unchecked: dict[uuid.UUID, int] = defaultdict(int)
+        hw_late: dict[uuid.UUID, int] = defaultdict(int)
+        hw_carried: dict[uuid.UUID, int] = defaultdict(int)
         for cs_id, _sid, hw_id in hw_rows:
             if hw_id not in hw_checked:
                 hw_unchecked[cs_id] += 1
-            elif hw_mine.get(hw_id) == "partial":
-                # V1-0d: partly done is not "not done" — folding them wrote a
-                # wrong fact onto the report card (Q-40).
+                continue
+            # V1-5: the verdict decides, not "is there a row". This branch used
+            # to read `hw_id in hw_mine` as not_done, so the moment `late`,
+            # `carried` and `waived` existed, a child who handed work in late —
+            # or was off sick — would have read as a refusal on their report
+            # card. Exactly the wrong fact this module exists to avoid.
+            status = hw_mine.get(hw_id, "done")
+            if status == "partial":
                 hw_partial[cs_id] += 1
-            elif hw_id in hw_mine:
+            elif status == "late":
+                # Late IS done (S-99), and it is named so the pattern is visible.
+                hw_done[cs_id] += 1
+                hw_late[cs_id] += 1
+            elif status == "carried":
+                hw_carried[cs_id] += 1
+            elif status == "waived":
+                pass  # not required — out of every figure, like not_checked
+            elif status == "not_done":
                 hw_not_done[cs_id] += 1
             else:
                 hw_done[cs_id] += 1
@@ -278,6 +293,8 @@ class GrowthService:
                 homework_done=hw_done.get(cs.id, 0),
                 homework_not_done=hw_not_done.get(cs.id, 0),
                 homework_partial=hw_partial.get(cs.id, 0),
+                homework_late=hw_late.get(cs.id, 0),
+                homework_carried=hw_carried.get(cs.id, 0),
                 homework_not_checked=hw_unchecked.get(cs.id, 0),
                 checks_flagged=checks_flagged.get(cs.id, 0),
                 observations=obs_by_cs.get(cs.id, []),

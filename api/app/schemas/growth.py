@@ -79,6 +79,11 @@ class GrowthSubject(BaseModel):
     # V1-0d: 'partly' is its own count — it used to be folded into not_done,
     # which wrote a wrong fact onto the report card (Q-40).
     homework_partial: int = 0
+    # V1-5: `late` is INSIDE homework_done (it is done — S-99) and named here so
+    # the pattern stays visible. `carried` is an absence, not a refusal (D-34):
+    # its own count, in neither done nor not_done.
+    homework_late: int = 0
+    homework_carried: int = 0
     homework_not_checked: int = 0
     checks_flagged: int = 0  # daily-check "didn't do it" exceptions
     observations: list[GrowthObservation] = []
