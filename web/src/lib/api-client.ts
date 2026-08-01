@@ -144,6 +144,28 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   return parse<T>(res);
 }
 
+/** Authenticated file download → browser save dialog. Plain links can't carry
+ *  the bearer token, so fetch → blob → a temporary anchor click. */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  let res = await raw(path, { method: "GET" });
+  if (res.status === 401 && tokenStore.refresh) {
+    if (await tryRefresh()) res = await raw(path, { method: "GET" });
+  }
+  if (!res.ok) {
+    await parse(res); // throws the structured ApiError
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   get: <T>(path: string, auth = true) => apiFetch<T>(path, { method: "GET", auth }),
   post: <T>(path: string, body?: unknown, auth = true) =>
@@ -154,4 +176,5 @@ export const api = {
     apiFetch<T>(path, { method: "PATCH", body, auth }),
   del: <T>(path: string, auth = true) => apiFetch<T>(path, { method: "DELETE", auth }),
   upload: <T>(path: string, form: FormData) => apiUpload<T>(path, form),
+  download: (path: string, filename: string) => apiDownload(path, filename),
 };

@@ -78,21 +78,26 @@ function useInvalidate() {
 }
 
 // ── 0. prep ───────────────────────────────────────────────────────────────────
+// V1-2 §6 ②: each card downloads a blank template generated from the importer's
+// own field list, so a filled template maps back with zero gap questions.
 const PREP_DOCS = [
   {
     icon: Users,
     title: "Teaching staff",
-    columns: "Teacher Name · Email · Assignments with periods/week (e.g. “6-A Mathematics x6; 7-B Science x5”)",
+    columns: "Teacher Name · Email · Date of Birth · Subjects Taught with periods/week (e.g. “6-A Mathematics x6; 7-B Science x5”)",
+    download: () => schoolApi.downloadStaffTemplate(),
   },
   {
     icon: GraduationCap,
     title: "Students",
-    columns: "Student Name · Admission No · Class · Section · Father/Mother phone",
+    columns: "Student Name · Admission No · Class · Section · Date of Birth · Father/Mother phone",
+    download: () => schoolApi.downloadRosterTemplate(),
   },
   {
     icon: BookOpen,
     title: "Syllabus / lesson plan",
-    columns: "Chapter · Topic · Periods — or just paste the chapter list as text",
+    columns: "Chapter · Topic · Periods · Term — or just paste the chapter list as text",
+    download: () => schoolApi.downloadSyllabusTemplate(),
   },
 ];
 
@@ -130,6 +135,12 @@ function PrepStep({ onStart }: { onStart: () => void }) {
               <d.icon className="h-5 w-5 text-primary" />
               <h3 className="mt-2 text-sm font-semibold">{d.title}</h3>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{d.columns}</p>
+              <button
+                onClick={() => d.download().catch(() => toast.error("Could not download"))}
+                className="mt-2 text-xs font-medium text-primary hover:underline"
+              >
+                Download blank template
+              </button>
             </motion.div>
           ))}
         </div>
@@ -1135,7 +1146,21 @@ function StudentsStep() {
     onSuccess: (r) => {
       invalidate("students");
       setAnalysis(null);
-      toast.success(`${r.created} students added`);
+      toast.success(`${r.created} students added`
+        + (r.skipped ? ` · ${r.skipped} already existed` : ""));
+      if (r.errors.length) {
+        toast.warning(`${r.errors.length} row${r.errors.length === 1 ? "" : "s"} skipped — `
+          + r.errors.slice(0, 3).map((x) => `row ${x.row}: ${x.reason}`).join("; "));
+      }
+      // D-13: an unreadable DOB is reported, never guessed — those parents
+      // cannot log in until it's fixed on the student's page.
+      if (r.unresolved?.length) {
+        toast.warning(
+          `${r.unresolved.length} date${r.unresolved.length === 1 ? "" : "s"} of birth `
+          + `couldn't be read (${r.unresolved.slice(0, 3).map((u) => u.student).join(", ")}`
+          + `${r.unresolved.length > 3 ? "…" : ""}) — fix them on the Students page or `
+          + "those parents cannot log in.", { duration: 12000 });
+      }
     },
     onError: (e) => showApiError(e, "Could not import students"),
   });

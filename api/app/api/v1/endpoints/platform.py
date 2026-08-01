@@ -13,8 +13,14 @@ from app.core.database import get_db
 from app.core.dependencies import require_super_admin
 from app.core.rate_limit import limiter
 from app.schemas.auth import SessionResponse
-from app.schemas.platform import CreateSchoolRequest, CreateSchoolResult, PlatformOrgOut
+from app.schemas.platform import (
+    CreateSchoolRequest,
+    CreateSchoolResult,
+    PlatformOrgOut,
+    ReadinessOut,
+)
 from app.services.platform import PlatformService
+from app.services.readiness import ReadinessService
 
 router = APIRouter()
 
@@ -46,3 +52,23 @@ def enter_org(
     db: Session = Depends(get_db),
 ) -> SessionResponse:
     return SessionResponse(**PlatformService(db).enter_org(member, org_id))
+
+
+# ── the readiness report (V1-2, §6 ⑤) ────────────────────────────────────────
+@router.get("/orgs/{org_id}/readiness", response_model=ReadinessOut)
+def org_readiness(
+    org_id: uuid.UUID,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ReadinessOut:
+    """The page the operator reads before giving the school its password."""
+    return ReadinessService(db).report(org_id)
+
+
+@router.post("/orgs/{org_id}/handover", response_model=ReadinessOut)
+def mark_handed_over(
+    org_id: uuid.UUID,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ReadinessOut:
+    return ReadinessService(db).mark_handed_over(org_id)

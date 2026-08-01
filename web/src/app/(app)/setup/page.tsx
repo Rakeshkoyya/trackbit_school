@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, GraduationCap, Plus, Star, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -126,6 +126,53 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
 
 const classLabel = (c: SchoolClass) => c.name + (c.section ? `-${c.section}` : "");
 
+/** D-03 (V1-2): who owns this class. The field has existed since P0-C and no
+ * screen ever set it — which is why every absence row read "class teacher: —"
+ * and every intervention was unassigned. */
+function ClassTeacherPicker({ klass, canEdit }: { klass: SchoolClass; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
+  const staff = (membersData?.members ?? []).filter((m) => m.member_id);
+  const save = useMutation({
+    mutationFn: (memberId: string | null) =>
+      schoolApi.updateClass(klass.id, { class_teacher_member_id: memberId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["classes"] });
+      toast.success("Class teacher set");
+    },
+    onError: (e) => showApiError(e, "Could not set the class teacher"),
+  });
+  const currentName = staff.find((t) => t.member_id === klass.class_teacher_member_id)?.name;
+
+  if (!canEdit) {
+    return (
+      <p className="mb-2 text-xs text-muted-foreground">
+        Class teacher: {currentName ?? "—"}
+      </p>
+    );
+  }
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">Class teacher</span>
+      <select
+        aria-label={`Class teacher of ${classLabel(klass)}`}
+        className="rounded-md border border-border bg-card px-2 py-1 text-sm"
+        value={klass.class_teacher_member_id ?? ""}
+        disabled={save.isPending}
+        onChange={(e) => save.mutate(e.target.value || null)}
+      >
+        <option value="">— not assigned</option>
+        {staff.map((t) => (
+          <option key={t.member_id} value={t.member_id!}>{t.name}</option>
+        ))}
+      </select>
+      {!klass.class_teacher_member_id ? (
+        <span className="text-xs text-warning">absence follow-ups for this class have no owner</span>
+      ) : null}
+    </div>
+  );
+}
+
 /** By-class view: each class expands into its subject table (teacher, periods/week,
  * allocation bar, copy-from-section) — the same panel the wizard uses. */
 function ByClassView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: boolean }) {
@@ -170,7 +217,12 @@ function ByClassView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: bo
               </button>
             ) : null}
           </div>
-          {openId === c.id ? <ClassSubjectsPanel classId={c.id} canEdit={canEdit} /> : null}
+          {openId === c.id ? (
+            <>
+              <ClassTeacherPicker klass={c} canEdit={canEdit} />
+              <ClassSubjectsPanel classId={c.id} canEdit={canEdit} />
+            </>
+          ) : null}
         </div>
       ))}
       {canEdit ? (
@@ -186,39 +238,62 @@ function ByClassView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: bo
   );
 }
 
-/** By-teacher view: pick a teacher, see everything on their plate — classes,
- * subjects, weekly period load, and which classes they're class-teacher of. */
-function ByTeacherView({ classes }: { classes: SchoolClass[] }) {
+/** By-teacher view — WRITABLE (V1-2, D-28/S-77): pick a teacher, tick the
+ * class-subjects they take, save many at once. The smallest change with the
+ * largest effect on setup time. One batched read for the whole year (the old
+ * view fired a query per class to draw one screen). */
+function ByTeacherView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { yearId } = useYear();
   const { data: membersData } = useQuery({ queryKey: ["members"], queryFn: appApi.members });
   const staff = (membersData?.members ?? []).filter((m) => m.member_id);
   const [picked, setPicked] = useState("");
   const teacherId = staff.some((t) => t.member_id === picked) ? picked : (staff[0]?.member_id ?? "");
 
-  const results = useQueries({
-    queries: classes.map((c) => ({
-      queryKey: ["class-subjects", c.id],
-      queryFn: () => schoolApi.classSubjects(c.id),
-    })),
-  });
-  const loading = results.some((r) => r.isLoading);
-
-  type Row = { classId: string; classLabel: string; subject: string; ppw: number };
-  const byTeacher = new Map<string, Row[]>();
-  const unassigned: Row[] = [];
-  classes.forEach((c, i) => {
-    for (const cs of results[i]?.data ?? []) {
-      const row = { classId: c.id, classLabel: classLabel(c), subject: cs.subject_name ?? "?", ppw: cs.periods_per_week };
-      if (cs.teacher_member_id) {
-        byTeacher.set(cs.teacher_member_id, [...(byTeacher.get(cs.teacher_member_id) ?? []), row]);
-      } else {
-        unassigned.push(row);
-      }
-    }
+  const { data: allCs = [], isLoading: loading } = useQuery({
+    queryKey: ["all-class-subjects", yearId],
+    queryFn: () => schoolApi.allClassSubjects(yearId ?? undefined),
+    enabled: !!yearId,
   });
 
-  const rows = byTeacher.get(teacherId) ?? [];
-  const totalPpw = rows.reduce((a, r) => a + r.ppw, 0);
+  const nameOf = new Map(staff.map((t) => [t.member_id!, t.name]));
+  const mineIds = new Set(allCs.filter((cs) => cs.teacher_member_id === teacherId).map((cs) => cs.id));
+  const [draft, setDraft] = useState<Set<string> | null>(null);
+  const checked = draft ?? mineIds;
+  const toggle = (id: string) => {
+    const next = new Set(checked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setDraft(next);
+  };
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const adds = [...checked].filter((id) => !mineIds.has(id));
+      const removes = [...mineIds].filter((id) => !checked.has(id));
+      await Promise.all([
+        ...adds.map((id) => schoolApi.updateClassSubject(id, { teacher_member_id: teacherId })),
+        ...removes.map((id) => schoolApi.updateClassSubject(id, { teacher_member_id: null })),
+      ]);
+      return adds.length + removes.length;
+    },
+    onSuccess: (n) => {
+      qc.invalidateQueries({ queryKey: ["all-class-subjects"] });
+      qc.invalidateQueries({ queryKey: ["class-subjects"] });
+      setDraft(null);
+      toast.success(`${n} assignment${n === 1 ? "" : "s"} updated`);
+    },
+    onError: (e) => {
+      showApiError(e, "Could not save assignments");
+      qc.invalidateQueries({ queryKey: ["all-class-subjects"] });
+      setDraft(null);
+    },
+  });
+
+  const shown = allCs.filter((cs) => checked.has(cs.id));
+  const totalPpw = shown.reduce((a, r) => a + r.periods_per_week, 0);
   const classTeacherOf = classes.filter((c) => c.class_teacher_member_id === teacherId);
+  const unassigned = allCs.filter((cs) => !cs.teacher_member_id && !checked.has(cs.id));
 
   if (!staff.length) return <p className="text-sm text-muted-foreground">No staff yet — add members first.</p>;
 
@@ -229,47 +304,71 @@ function ByTeacherView({ classes }: { classes: SchoolClass[] }) {
           aria-label="Teacher"
           className="rounded-md border border-border bg-card px-2 py-1.5 text-sm"
           value={teacherId}
-          onChange={(e) => setPicked(e.target.value)}
+          onChange={(e) => { setPicked(e.target.value); setDraft(null); }}
         >
           {staff.map((t) => (
-            <option key={t.member_id} value={t.member_id!}>
-              {t.name}{byTeacher.has(t.member_id!) ? ` · ${byTeacher.get(t.member_id!)!.length}` : ""}
-            </option>
+            <option key={t.member_id} value={t.member_id!}>{t.name}</option>
           ))}
         </select>
-        <Badge tone="primary"><GraduationCap className="h-3 w-3" /> {rows.length} subject{rows.length === 1 ? "" : "s"}</Badge>
+        <Badge tone="primary"><GraduationCap className="h-3 w-3" /> {shown.length} subject{shown.length === 1 ? "" : "s"}</Badge>
         <Badge tone={totalPpw > 48 ? "danger" : "neutral"}>{totalPpw} periods/week</Badge>
         {classTeacherOf.length ? (
           <Badge tone="success">class teacher of {classTeacherOf.map(classLabel).join(", ")}</Badge>
+        ) : null}
+        {draft !== null ? (
+          <span className="ml-auto flex gap-2">
+            <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+              {save.isPending ? "Saving…" : "Save assignments"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>Cancel</Button>
+          </span>
         ) : null}
       </div>
 
       {loading ? (
         <PageLoading label="Reading assignments…" />
-      ) : rows.length === 0 ? (
+      ) : allCs.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
-          Nothing assigned yet — assign subjects from the class view.
+          No subjects on any class yet — add them from the class view first.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40 text-left text-xs text-muted-foreground">
+                {canEdit ? <th className="w-8 px-3 py-2" aria-label="Teaches" /> : null}
                 <th className="px-3 py-2 font-medium">Class</th>
                 <th className="px-3 py-2 font-medium">Subject</th>
                 <th className="px-3 py-2 font-medium">Periods/week</th>
+                <th className="px-3 py-2 font-medium">Currently</th>
               </tr>
             </thead>
             <tbody>
-              {rows
-                .sort((a, b) => a.classLabel.localeCompare(b.classLabel) || a.subject.localeCompare(b.subject))
-                .map((r, i) => (
-                  <tr key={i} className="border-b border-border/60 bg-card last:border-0">
-                    <td className="px-3 py-2 font-medium">{r.classLabel}</td>
-                    <td className="px-3 py-2">{r.subject}</td>
-                    <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.ppw || <span className="text-warning">not set</span>}</td>
+              {allCs.map((cs) => {
+                const isChecked = checked.has(cs.id);
+                const current = cs.teacher_member_id ? (nameOf.get(cs.teacher_member_id) ?? "—") : null;
+                return (
+                  <tr key={cs.id}
+                    onClick={canEdit ? () => toggle(cs.id) : undefined}
+                    className={`border-b border-border/60 last:border-0 ${isChecked ? "bg-primary/5" : "bg-card"} ${canEdit ? "cursor-pointer hover:bg-muted/30" : ""}`}>
+                    {canEdit ? (
+                      <td className="px-3 py-2">
+                        <input type="checkbox" readOnly checked={isChecked}
+                          className="h-4 w-4 accent-[var(--primary)]" aria-label={`${cs.class_label} ${cs.subject_name}`} />
+                      </td>
+                    ) : null}
+                    <td className="px-3 py-2 font-medium">{cs.class_label}</td>
+                    <td className="px-3 py-2">{cs.subject_name}</td>
+                    <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                      {cs.periods_per_week || <span className="text-warning">not set</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {cs.teacher_member_id === teacherId ? "this teacher"
+                        : current ?? <span className="text-warning">nobody</span>}
+                    </td>
                   </tr>
-                ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -278,7 +377,7 @@ function ByTeacherView({ classes }: { classes: SchoolClass[] }) {
       {!loading && unassigned.length ? (
         <p className="text-xs text-warning">
           {unassigned.length} subject{unassigned.length === 1 ? " has" : "s have"} no teacher:{" "}
-          {unassigned.slice(0, 4).map((r) => `${r.classLabel} ${r.subject}`).join(", ")}
+          {unassigned.slice(0, 4).map((r) => `${r.class_label} ${r.subject_name}`).join(", ")}
           {unassigned.length > 4 ? ` +${unassigned.length - 4} more` : ""}
         </p>
       ) : null}
@@ -323,7 +422,7 @@ function AssignmentsCard({ canEdit }: { canEdit: boolean }) {
       ) : view === "class" ? (
         <ByClassView classes={classes} canEdit={canEdit} />
       ) : (
-        <ByTeacherView classes={classes} />
+        <ByTeacherView classes={classes} canEdit={canEdit} />
       )}
     </Card>
   );

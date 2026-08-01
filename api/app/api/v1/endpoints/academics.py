@@ -161,6 +161,15 @@ def list_class_subjects(class_id: uuid.UUID, m: CurrentMember = Depends(require_
     return AcademicService(db).list_class_subjects(m, class_id)
 
 
+@router.get("/class-subjects", response_model=list[ClassSubjectOut])
+def list_all_class_subjects(year_id: uuid.UUID | None = None,
+                            m: CurrentMember = Depends(require_academic),
+                            db: Session = Depends(get_db)):
+    """The whole year's class-subjects in one read (V1-2, S-77) — the batched
+    feed for the by-teacher assignment lens."""
+    return AcademicService(db).list_all_class_subjects(m, year_id)
+
+
 @router.post("/class-subjects", response_model=ClassSubjectOut)
 def create_class_subject(body: ClassSubjectCreate,
                          m: CurrentMember = Depends(require_admin),

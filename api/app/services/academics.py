@@ -230,6 +230,27 @@ class AcademicService:
             out.append(item)
         return out
 
+    def list_all_class_subjects(self, m: CurrentMember,
+                                year_id: uuid.UUID | None = None) -> list[ClassSubjectOut]:
+        """Every class-subject of the year in ONE read (V1-2, S-77) — the
+        by-teacher assignment lens was firing a query per class to draw one
+        screen. Ordered by class then subject."""
+        q = (select(ClassSubject, Subject.name, SchoolClass.name, SchoolClass.section)
+             .join(Subject, Subject.id == ClassSubject.subject_id)
+             .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+             .where(ClassSubject.org_id == m.org_id))
+        if year_id is not None:
+            q = q.where(SchoolClass.academic_year_id == year_id)
+        rows = self.db.execute(
+            q.order_by(SchoolClass.name, SchoolClass.section, Subject.name)).all()
+        out: list[ClassSubjectOut] = []
+        for cs, subject_name, cname, section in rows:
+            item = ClassSubjectOut.model_validate(cs)
+            item.subject_name = subject_name
+            item.class_label = cname + (f"-{section}" if section else "")
+            out.append(item)
+        return out
+
     def create_class_subject(self, m: CurrentMember, body: ClassSubjectCreate) -> ClassSubjectOut:
         self._scoped(SchoolClass, m.org_id, body.class_id)
         subject = self._scoped(Subject, m.org_id, body.subject_id)

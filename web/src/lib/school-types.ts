@@ -977,6 +977,8 @@ export interface ClassSubject {
   class_id: string;
   subject_id: string;
   subject_name: string | null;
+  /** Set by the year-wide read (V1-2, S-77). */
+  class_label?: string | null;
   teacher_member_id: string | null;
   periods_per_week: number;
 }
@@ -1022,6 +1024,8 @@ export interface StudentListItem {
   full_name: string;
   class_id: string | null;
   roll_no: string | null;
+  /** V1-2 (D-13): the parent's portal password; null = parent cannot log in. */
+  date_of_birth: string | null;
   status: string;
   category_id: string | null;
 }
@@ -1041,6 +1045,8 @@ export interface RosterCommitResult {
   created: number;
   skipped: number;
   errors: { row: number; reason: string }[];
+  /** V1-2 (D-13): DOB values that would not parse — reported, never guessed. */
+  unresolved: { row: number; field: string; value: string; student: string; reason: string }[];
 }
 
 // â”€â”€ fees â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

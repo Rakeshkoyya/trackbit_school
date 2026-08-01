@@ -240,7 +240,7 @@ class WorkloadInsights:
             if entry is not None:
                 board.working.append(NowPerson(
                     member_id=mid, name=name, role=role, work_type=entry.work_type,
-                    work_label=label_for(entry.work_type), note=entry.note,
+                    work_label=label_for(entry.work_type, m.org), note=entry.note,
                     open_tasks=tasks.get(uid, 0)))
                 continue
             board.free.append(NowPerson(
@@ -290,7 +290,8 @@ class WorkloadInsights:
             week_work[mid] += int(n)
             buckets[work_type] += int(n)
         out.buckets = sorted(
-            (WorkBucket(key=k, label=label_for(k), periods=v) for k, v in buckets.items()),
+            (WorkBucket(key=k, label=label_for(k, m.org), periods=v)
+             for k, v in buckets.items()),
             key=lambda b: -b.periods)
 
         # Today's strip — the same three reads the live board uses, reused.
@@ -330,7 +331,7 @@ class WorkloadInsights:
                 entry = entries_today.get(mid, {}).get(p.period_no)
                 if entry is not None:
                     strip.append(LoadStripCell(period_no=p.period_no, kind="work",
-                                               label=label_for(entry.work_type)))
+                                               label=label_for(entry.work_type, m.org)))
                     continue
                 strip.append(LoadStripCell(period_no=p.period_no, kind="free"))
                 if today.weekday() in working:

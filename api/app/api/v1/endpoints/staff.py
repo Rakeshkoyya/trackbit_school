@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import require_academic, require_admin
-from app.core.work_types import WORK_TYPES
+from app.core.work_types import active_work_types
 from app.schemas.staff import (
     LeaveApplyIn,
     LeaveBalance,
@@ -59,8 +59,9 @@ def mark_staff(body: StaffAttendanceIn, m: CurrentMember = Depends(require_admin
 
 # ── timesheet ────────────────────────────────────────────────────────────────
 @router.get("/work-types", response_model=list[WorkTypeOut])
-def work_types(_: CurrentMember = Depends(require_academic)):
-    return [WorkTypeOut(key=k, label=v) for k, v in WORK_TYPES.items()]
+def work_types(m: CurrentMember = Depends(require_academic)):
+    """The picker list — the org's own categories (D-19), active only."""
+    return [WorkTypeOut(key=k, label=v) for k, v in active_work_types(m.org).items()]
 
 
 @router.get("/timesheet/day", response_model=TimesheetDay)

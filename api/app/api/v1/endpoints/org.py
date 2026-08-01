@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
@@ -26,7 +26,7 @@ from app.schemas.org import (
     UsernameAvailabilityResponse,
 )
 from app.schemas.report import NudgeResponse, OrgDashboardResponse
-from app.services import staff_import
+from app.services import staff_import, templates
 from app.services.member import MemberService
 from app.services.nudge import NudgeService
 from app.services.org import OrgService
@@ -37,6 +37,15 @@ router = APIRouter()
 
 
 # ── staff document import (V2-P7, SPRD2 §5.1) ────────────────────────────────
+@router.get("/members/import/template")
+def staff_import_template(_: CurrentMember = Depends(require_admin)):
+    """V1-2 §6 ②: blank staff template, generated from the importer's SPECS."""
+    return Response(
+        content=templates.staff_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="staff-template.xlsx"'})
+
+
 @router.post("/members/import/analyze", response_model=AnalyzeOut)
 async def staff_import_analyze(file: UploadFile = File(...),
                                _: CurrentMember = Depends(require_admin)):

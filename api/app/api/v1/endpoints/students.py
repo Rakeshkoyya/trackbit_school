@@ -9,7 +9,7 @@ their own modules, not here.
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
@@ -32,7 +32,7 @@ from app.schemas.students import (
     StudentUpdate,
 )
 from app.schemas.timeline import StudentTimelineOut
-from app.services import roster_import
+from app.services import roster_import, templates
 from app.services.growth import GrowthService
 from app.services.roster_import import RosterImporter
 from app.services.students import StudentService
@@ -57,6 +57,16 @@ def student_growth(student_id: uuid.UUID, m: CurrentMember = Depends(get_current
 
 
 # ── roster xlsx import (SPRD §5.6) ───────────────────────────────────────────
+@router.get("/import/template")
+def import_template(_: CurrentMember = Depends(require_coordinator_up)):
+    """V1-2 §6 ②: the blank template the school fills in — generated from the
+    importer's own field list, so it can never drift from what commit accepts."""
+    return Response(
+        content=templates.roster_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="students-template.xlsx"'})
+
+
 @router.post("/import/analyze", response_model=RosterAnalyzeOut)
 async def import_analyze(file: UploadFile = File(...),
                          _: CurrentMember = Depends(require_coordinator_up)):

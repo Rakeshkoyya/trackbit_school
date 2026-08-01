@@ -486,7 +486,7 @@ class AttendanceInsights:
         # nudged below a truly-free colleague — never an exclusion, because the
         # admin may judge the cover more urgent than the notebook pile.
         recorded: dict[tuple[uuid.UUID, int], str] = {
-            (e.member_id, e.period_no): label_for(e.work_type)
+            (e.member_id, e.period_no): label_for(e.work_type, m.org)
             for e in self.db.scalars(
                 select(TimesheetEntry).where(TimesheetEntry.org_id == m.org_id,
                                              TimesheetEntry.date == on))

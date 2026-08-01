@@ -121,6 +121,23 @@ class OrgUsageOut(BaseModel):
     members: int
 
 
+class WorkCategoryOut(BaseModel):
+    """One timesheet category (D-19): stable key, mutable label, retire never
+    delete. `other` is always present and always active."""
+
+    key: str
+    label: str
+    active: bool = True
+
+
+class WorkCategoryIn(BaseModel):
+    # key absent/blank = a NEW category: the server mints a stable key from the
+    # label, once, and never regenerates it on rename.
+    key: str | None = Field(default=None, max_length=40)
+    label: str = Field(min_length=1, max_length=60)
+    active: bool = True
+
+
 class OrgSettingsOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -129,6 +146,15 @@ class OrgSettingsOut(BaseModel):
     plan: str
     plan_status: str
     plan_renews_at: datetime | None = None
+    # V1-2 — setup & onboarding
+    school_code: str | None = None  # read-only: minted at creation (S-57)
+    address: str | None = None
+    state: str | None = None
+    board: str | None = None
+    attendance_mode: str = "every_period"  # D-01
+    min_attendance_pct: int = 75
+    homework_gap_days: int = 3
+    work_categories: list[WorkCategoryOut] = []
     limits: PlanLimitsOut
     usage: OrgUsageOut
 
@@ -137,3 +163,13 @@ class OrgSettingsUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     timezone: str | None = None
     report_card_hour: int | None = Field(default=None, ge=0, le=23)
+    address: str | None = Field(default=None, max_length=300)
+    state: str | None = Field(default=None, max_length=60)
+    board: str | None = Field(default=None, max_length=60)
+    attendance_mode: str | None = Field(
+        default=None, pattern="^(every_period|first_period|twice_daily)$")
+    min_attendance_pct: int | None = Field(default=None, ge=0, le=100)
+    homework_gap_days: int | None = Field(default=None, ge=1, le=30)
+    # Full replace of the visible list; the service applies the D-19 rules
+    # (missing keys are retired, never deleted).
+    work_categories: list[WorkCategoryIn] | None = None

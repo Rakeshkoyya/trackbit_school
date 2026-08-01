@@ -330,6 +330,16 @@ export interface OrgUsage {
   members: number;
 }
 
+/** One timesheet category (V1-2, D-19): stable key, mutable label, retire
+ *  never delete. `other` is always present and always active. */
+export interface WorkCategory {
+  key: string;
+  label: string;
+  active: boolean;
+}
+
+export type AttendanceMode = "every_period" | "first_period" | "twice_daily";
+
 export interface OrgSettings {
   id: string;
   name: string;
@@ -338,6 +348,15 @@ export interface OrgSettings {
   plan: "free" | "pro";
   plan_status: "none" | "active" | "grace";
   plan_renews_at: string | null;
+  // V1-2 — setup & onboarding
+  school_code: string | null;
+  address: string | null;
+  state: string | null;
+  board: string | null;
+  attendance_mode: AttendanceMode;
+  min_attendance_pct: number;
+  homework_gap_days: number;
+  work_categories: WorkCategory[];
   limits: PlanLimits;
   usage: OrgUsage;
 }

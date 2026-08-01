@@ -77,4 +77,4 @@ def test_import_round_trips_the_sheet(client, cleanup):
     # re-committing the same rows skips the duplicates (append-safe)
     again = client.post("/api/v1/students/import/commit", headers=h, json={
         "mapping": data["mapping"], "rows": data["rows"], "academic_year_id": year["id"]})
-    assert again.json() == {"created": 0, "skipped": 2, "errors": []}
+    assert again.json() == {"created": 0, "skipped": 2, "errors": [], "unresolved": []}

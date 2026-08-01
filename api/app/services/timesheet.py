@@ -117,7 +117,7 @@ class TimesheetService:
 
     # ── assembly ─────────────────────────────────────────────────────────────
     def _build_day(self, on: date, periods, working: set[int], teaching, entries,
-                   covers=None, away_reason: str | None = None) -> TimesheetDay:
+                   covers=None, away_reason: str | None = None, org=None) -> TimesheetDay:
         # S-72: a person who is away has no free periods. Every cell reads
         # 'away' and nothing counts — the old shape showed an absent teacher as
         # eight free periods on the screen used to find cover.
@@ -152,7 +152,8 @@ class TimesheetService:
                 work += 1
                 slots.append(TimesheetSlot(
                     period_no=p.period_no, start=p.start, end=p.end, kind="work",
-                    work_type=entry.work_type, work_label=label_for(entry.work_type),
+                    work_type=entry.work_type,
+                    work_label=label_for(entry.work_type, org),
                     note=entry.note))
             else:
                 free += 1
@@ -175,7 +176,8 @@ class TimesheetService:
             on, periods, working,
             self._teaching(m.org_id, mid, on, on),
             self._entries(m.org_id, mid, on, on),
-            covers=covers_between(self.db, m.org_id, on, on, mid).get(mid, {}))
+            covers=covers_between(self.db, m.org_id, on, on, mid).get(mid, {}),
+            org=m.org)
 
     def week(self, m: CurrentMember, member_id: uuid.UUID | None = None,
              week_start: date | None = None) -> TimesheetWeek:
@@ -193,7 +195,7 @@ class TimesheetService:
         covers = covers_between(self.db, m.org_id, monday, sunday, mid).get(mid, {})
         days = [
             self._build_day(monday + timedelta(days=i), periods, working, teaching, entries,
-                            covers=covers)
+                            covers=covers, org=m.org)
             for i in range(7) if (monday + timedelta(days=i)).weekday() in working
         ]
         return TimesheetWeek(
@@ -305,7 +307,7 @@ class TimesheetService:
             day = self._build_day(on, periods, working,
                                   by_teacher.get(mid, {}), entries_by.get(mid, {}),
                                   covers=covers_all.get(mid, {}),
-                                  away_reason=away.get(mid))
+                                  away_reason=away.get(mid), org=m.org)
             out.append(TimesheetWeek(
                 member_id=mid, member_name=name, week_start=on, days=[day],
                 teaching_periods=day.teaching_count, work_periods=day.work_count,

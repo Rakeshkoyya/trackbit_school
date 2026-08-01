@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.school_code import new_school_code
 from app.core.security import hash_password
 from app.models import (
     AcademicYear,
@@ -64,6 +65,8 @@ class PlatformService:
                 class_count=class_counts.get(o.id, 0),
                 active_year=active_years.get(o.id),
                 last_active_at=last_actives.get(o.id),
+                school_code=o.school_code,
+                handed_over_at=o.handed_over_at,
             )
             for o in self.db.scalars(
                 select(Organization).order_by(Organization.created_at.desc()))
@@ -81,7 +84,9 @@ class PlatformService:
             raise ConflictError("An account with this email already exists.",
                                 code="email_taken")
 
-        org = Organization(name=body.org_name, timezone=body.timezone)
+        org = Organization(name=body.org_name, timezone=body.timezone,
+                           address=body.address, state=body.state, board=body.board,
+                           school_code=new_school_code(self.db))
         self.db.add(org)
         self.db.flush()
         # New rows belong to the NEW org; point RLS there for the WITH CHECK policies.
@@ -106,7 +111,8 @@ class PlatformService:
         self._set_org_scope("")
         return CreateSchoolResult(org=self._org_out(org),
                                   admin_email=body.admin_email,
-                                  admin_name=body.admin_name)
+                                  admin_name=body.admin_name,
+                                  school_code=org.school_code)
 
     # ── enter ────────────────────────────────────────────────────────────────
     def enter_org(self, operator: CurrentMember, org_id: uuid.UUID) -> dict:

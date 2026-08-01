@@ -6,8 +6,9 @@ have no login in v1 and receive outbound notifications only (SPRD §3.4).
 """
 
 import uuid
+from datetime import date
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,6 +48,10 @@ class Student(Base, UUIDPKMixin, CreatedAtMixin):
         UUID(as_uuid=True), ForeignKey("school_classes.id", ondelete="SET NULL"), nullable=True
     )
     roll_no: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # V1-2 (D-13): the parent's password at portal login, and the birthday feed
+    # (D-56). Nullable — the readiness report counts the gap ("45 parents cannot
+    # log in"), the importer parses it tolerantly and NEVER guesses.
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("student_categories.id", ondelete="SET NULL"), nullable=True

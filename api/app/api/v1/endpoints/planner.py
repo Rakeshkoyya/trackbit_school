@@ -6,7 +6,7 @@ Reads: academic staff. Structural writes: coordinator/director. Plan approval
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
@@ -36,6 +36,7 @@ from app.schemas.planner import (
     UnitOut,
     WeekScheduleOut,
 )
+from app.services import templates
 from app.services.planner import PlannerService
 from app.services.syllabus_import import SyllabusImporter, analyze_file, analyze_text
 from app.services.week_schedule import WeekScheduleService
@@ -91,6 +92,16 @@ def split_syllabus(body: SplitIn, _: CurrentMember = Depends(require_coordinator
 
 
 # ── syllabus document import (V2-P7, SPRD2 §5.1) ─────────────────────────────
+@router.get("/syllabus/import/template")
+def syllabus_import_template(_: CurrentMember = Depends(require_coordinator_up)):
+    """V1-2 §6 ②: blank syllabus template (one sheet per class-subject),
+    generated from the importer's SPECS — blank Periods = not sized, never 1."""
+    return Response(
+        content=templates.syllabus_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="syllabus-template.xlsx"'})
+
+
 @router.post("/syllabus/import/analyze", response_model=SyllabusAnalyzeOut)
 async def syllabus_import_analyze(file: UploadFile = File(...),
                                   _: CurrentMember = Depends(require_coordinator_up)):

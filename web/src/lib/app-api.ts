@@ -135,8 +135,12 @@ export const appApi = {
 
   // Org settings + billing (S9)
   settings: () => api.get<OrgSettings>("/org/settings"),
-  updateSettings: (body: { name?: string; timezone?: string; report_card_hour?: number }) =>
-    api.patch<OrgSettings>("/org/settings", body),
+  updateSettings: (body: {
+    name?: string; timezone?: string; report_card_hour?: number;
+    address?: string | null; state?: string | null; board?: string | null;
+    attendance_mode?: string; min_attendance_pct?: number; homework_gap_days?: number;
+    work_categories?: { key?: string | null; label: string; active: boolean }[];
+  }) => api.patch<OrgSettings>("/org/settings", body),
   billing: () => api.get<Billing>("/billing"),
   startCheckout: () => api.post<Checkout>("/billing/checkout"),
 

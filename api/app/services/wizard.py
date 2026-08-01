@@ -64,8 +64,11 @@ class WizardService:
         syllabus_topics = self.db.scalar(
             select(func.count(SyllabusTopic.id)).where(SyllabusTopic.org_id == org)) or 0
         plans_total = len(cs_ids)
+        # V1-2: `partial` counts — a school locking only Term 2 has finished the
+        # wizard; the unsized future terms are a STATE ("Term 1 not planned"),
+        # never a blocker (plan §6 ④, the mid-year guarantee).
         plans_approved = self.db.scalar(select(func.count(Plan.id)).where(
-            Plan.org_id == org, Plan.status == "approved")) or 0
+            Plan.org_id == org, Plan.status.in_(("approved", "partial")))) or 0
         exams = self._count(
             CalendarEvent, CalendarEvent.org_id == org, CalendarEvent.type == "exam_block")
         timetable_slots = self._count(

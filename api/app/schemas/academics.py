@@ -118,6 +118,7 @@ class ClassSubjectOut(BaseModel):
     class_id: uuid.UUID
     subject_id: uuid.UUID
     subject_name: str | None = None
+    class_label: str | None = None  # set by the year-wide read (V1-2, S-77)
     teacher_member_id: uuid.UUID | None
     periods_per_week: int
 

@@ -7,7 +7,9 @@ the parsed rows, the client confirms the mapping, and commit re-sends both.
 """
 
 import io
+import re
 import uuid
+from datetime import date, timedelta
 from typing import Any
 
 from openpyxl import load_workbook
@@ -20,7 +22,8 @@ from app.services.ai.extract import phrase_gap_question
 
 # Unified student roster target fields the importer can populate.
 TARGET_FIELDS = [
-    "full_name", "admission_no", "roll_no", "class_name", "section", "category",
+    "full_name", "admission_no", "roll_no", "class_name", "section",
+    "date_of_birth", "category",
     "father_name", "father_phone", "mother_name", "mother_phone", "phone",
 ]
 
@@ -32,6 +35,7 @@ REQUIRED_FIELDS = ("full_name", "admission_no")
 FIELD_LABELS: dict[str, str] = {
     "full_name": "name", "admission_no": "admission number", "roll_no": "roll number",
     "class_name": "class", "section": "section", "category": "category",
+    "date_of_birth": "date of birth",
 }
 
 FIELD_HINTS: dict[str, list[str]] = {
@@ -40,6 +44,7 @@ FIELD_HINTS: dict[str, list[str]] = {
     "roll_no": ["roll number", "roll no", "roll"],
     "class_name": ["class", "grade", "standard", "std", "class name"],
     "section": ["section", "sec", "div", "division"],
+    "date_of_birth": ["date of birth", "dob", "d.o.b", "birth date", "birthdate", "born"],
     "category": ["category", "student category", "type"],
     "father_name": ["father's name", "father name", "father"],
     "father_phone": ["father's mobile", "father mobile", "father's phone", "father phone"],
@@ -47,6 +52,58 @@ FIELD_HINTS: dict[str, list[str]] = {
     "mother_phone": ["mother's mobile", "mother mobile", "mother's phone", "mother phone"],
     "phone": ["contact number", "contact", "mobile", "phone", "mobile no", "guardian"],
 }
+
+# ── date-of-birth parsing (D-13 / Q-24) ──────────────────────────────────────
+# Indian sheets mix dd/mm/yyyy, dd-mm-yy, dd.mm.yyyy, Excel serials, and real
+# date cells (which read_first_sheet stringifies to "2015-06-03 00:00:00").
+# Anything that doesn't parse cleanly — or gives an implausible age — lands in
+# `unresolved`, NEVER a guess: this value is the parent's password.
+_DMY = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$")
+_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$")
+_EXCEL_EPOCH = date(1899, 12, 30)
+
+
+def parse_dob(raw: str, today: date | None = None,
+              min_age: int = 2, max_age: int = 30) -> date | None:
+    """One date or None — None means "could not read this safely".
+
+    Accepted: dd/mm/yyyy · dd-mm-yy · dd.mm.yyyy · yyyy-mm-dd (incl. the
+    stringified Excel date cell) · a bare Excel serial. Day-first always — that
+    is what Indian registers write; a US-ordered sheet fails the month>12 check
+    and surfaces as unresolved rather than silently swapping fields.
+    Plausibility: not in the future, age within [min_age, max_age] at import
+    time (students 2–30; the staff importer passes 16–80)."""
+    today = today or date.today()
+    raw = raw.strip()
+    parsed: date | None = None
+
+    m = _ISO.match(raw)
+    if m:
+        try:
+            parsed = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    if parsed is None:
+        m = _DMY.match(raw)
+        if m:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if y < 100:  # dd-mm-yy: students are born this century until ~2090
+                y += 2000 if y <= today.year % 100 else 1900
+            try:
+                parsed = date(y, mo, d)
+            except ValueError:
+                return None
+    if parsed is None and raw.isdigit():
+        serial = int(raw)
+        if 10_000 <= serial <= 60_000:  # ≈1927–2064: any plausible DOB serial
+            parsed = _EXCEL_EPOCH + timedelta(days=serial)
+    if parsed is None:
+        return None
+
+    age_years = (today - parsed).days / 365.25
+    if parsed > today or not (min_age <= age_years <= max_age):
+        return None
+    return parsed
 
 
 def read_first_sheet(data: bytes) -> tuple[list[str], list[dict[str, Any]]]:
@@ -168,6 +225,9 @@ class RosterImporter:
         created = 0
         skipped = 0
         errors: list[dict[str, Any]] = []
+        # DOB values we could not read safely (D-13). The student is still
+        # created — the value is reported, never guessed and never blocking.
+        unresolved: list[dict[str, Any]] = []
 
         def val(row: dict, field: str) -> str | None:
             col = mapping.get(field)
@@ -197,9 +257,18 @@ class RosterImporter:
             if cat:
                 category_id = self._get_or_create_category(m.org_id, cat, cat_cache)
 
+            dob_raw = val(row, "date_of_birth")
+            dob = parse_dob(dob_raw) if dob_raw else None
+            if dob_raw and dob is None:
+                unresolved.append({
+                    "row": idx + 1, "field": "date_of_birth", "value": dob_raw,
+                    "student": name,
+                    "reason": "could not read this as a date of birth"})
+
             student = Student(
                 org_id=m.org_id, admission_no=adm, full_name=name,
                 roll_no=val(row, "roll_no"), class_id=class_id, category_id=category_id,
+                date_of_birth=dob,
             )
             self.db.add(student)
             self.db.flush()
@@ -225,4 +294,5 @@ class RosterImporter:
             created += 1
 
         self.db.flush()
-        return {"created": created, "skipped": skipped, "errors": errors}
+        return {"created": created, "skipped": skipped, "errors": errors,
+                "unresolved": unresolved}

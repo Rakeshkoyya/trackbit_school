@@ -9,7 +9,7 @@ Updated at the close of every working session. **Read this first when resuming v
 |---|---|---|---|
 | **V1-0** · Foundation: one computation | ✅ **DONE** | `c14daf6` | 5 facts unified (day status · partial weight · who-is-free · homework verdict · working days) + defect sweep. Backend 381 passed. Also pre-landed V1-1's FIX items: S-111 client re-filter deleted, S-112 org-local rail due dates, D-47 open-task dedupe. |
 | **V1-1** · Tasks & the action rail | ✅ **DONE** | see git log | Migration `e1f2a3b4c5d6` (subject/outcome on task_instances) applied to **prod+dev+test**. D-46 subject+outcome (rail sets it, dedupe keys on it, timeline shows it, complete asks "what happened?") · D-44 board 7-day done window + date filter + hidden count · D-45 stale group (never auto-closed) · D-41/D-43 My Day task window (3 working days ∪ due today, cap 5, older-count footer) · S-106 asked-by. `test_tasks_v1_1.py` (7) + 64 regression green; web tsc/eslint/build clean. |
-| V1-2 · Setup, onboarding & handover | not started | — | Migration: school_code, students.date_of_birth, memberships.date_of_birth. |
+| **V1-2** · Setup, onboarding & handover | ✅ **DONE** | see git log | Migration `f2a3b4c5d6e7` (school_code + address/state/board + attendance_mode + thresholds + work_categories + handed_over_at + student/staff DOB) applied to **prod+dev+test**, school codes backfilled. Template downloads generated from importers' own fields (round-trip tested) · DOB parser (day-first, never guesses, unresolved reported) · class-teacher picker (D-03) · writable batched by-teacher lens (D-28/S-77) · readiness report + handover (§6 ⑤) · settings: D-01 mode, thresholds, D-19 work categories (stable key/retire-never-delete) · wizard counts partial plans (mid-year). `test_setup_onboarding.py` (7) + 89 regression green; web gates clean. |
 | V1-3 · Attendance + class teacher | not started | — | Needs V1-1, V1-2. |
 | V1-4 · Staff, leave, cover & time | not started | — | Needs V1-2. |
 | V1-5 · Homework | not started | — | Needs V1-3. Simplified by D-85. |
@@ -36,7 +36,13 @@ Updated at the close of every working session. **Read this first when resuming v
   frontend + tests). Also fixed en route: the rail lost its default title when an explicit
   assignee was picked for a student follow-up. Note: `api/.env` was in PROD mode, so the
   migration went to DO prod first (additive, safe), then test+dev were migrated via
-  `ALEMBIC_DATABASE_URL`. Next up: **V1-2 (setup, onboarding & handover)**.
+  `ALEMBIC_DATABASE_URL`.
+- **2026-08-01 (session 2, cont.)** — **V1-2 built and shipped.** Deviations worth knowing:
+  the readiness report is a Sheet on `/platform` org cards (not its own route); copy-handover-
+  credentials stays at create time (the temp password is never stored); staff DOB is collected
+  by the staff importer only (no member-edit UI yet — V1-7 can add if needed). `work_types.
+  label_for(key, org)` is now org-aware — new render sites must pass the org. Next up:
+  **V1-3 (attendance + class teacher)** — needs D-01 mode consumed end-to-end.
 
 ## Standing reminders
 

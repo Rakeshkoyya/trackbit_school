@@ -1,6 +1,7 @@
 """Students / guardians / categories schemas (SPRD §4.2)."""
 
 import uuid
+from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,6 +53,7 @@ class StudentCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=120)
     class_id: uuid.UUID | None = None
     roll_no: str | None = Field(default=None, max_length=16)
+    date_of_birth: date | None = None  # V1-2 (D-13): the parent's password
     category_id: uuid.UUID | None = None
     # Optional inline guardians so roster import / add-student is one round-trip.
     guardians: list[GuardianCreate] = Field(default_factory=list, max_length=10)
@@ -61,6 +63,7 @@ class StudentUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=120)
     class_id: uuid.UUID | None = None
     roll_no: str | None = Field(default=None, max_length=16)
+    date_of_birth: date | None = None
     category_id: uuid.UUID | None = None
     status: str | None = Field(default=None, pattern="^(active|left)$")
 
@@ -72,6 +75,7 @@ class StudentOut(BaseModel):
     full_name: str
     class_id: uuid.UUID | None
     roll_no: str | None
+    date_of_birth: date | None = None
     status: str
     category_id: uuid.UUID | None
 
@@ -99,3 +103,5 @@ class RosterCommitOut(BaseModel):
     created: int
     skipped: int
     errors: list[dict] = Field(default_factory=list)
+    # V1-2 (D-13): DOB values that would not parse — reported, never guessed.
+    unresolved: list[dict] = Field(default_factory=list)

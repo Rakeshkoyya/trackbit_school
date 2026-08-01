@@ -1,11 +1,12 @@
 """Organization (tenant + billing boundary) and Membership."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -26,6 +27,32 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
 
     name: Mapped[str] = mapped_column(Text, nullable=False)
     timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="Asia/Kolkata")
+    # V1-2 (D-13/S-57): random 6–8 char code — how a parent picks their school at
+    # login. Unique, unguessable, never derived from the name. Generated at
+    # platform create; backfilled for older orgs by the migration.
+    school_code: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    # V1-2 (§6 ①): collected at school creation. `state` + `board` (CBSE / state
+    # board) are what scope the V1-7 observance catalogue to a school — a school
+    # is never asked to declare a region or a religion (D-61).
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    board: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # V1-2 (D-01): how often attendance is taken. Drives what teachers are asked
+    # for, what the capture heatmap expects, and what "absent today" means (V1-3).
+    attendance_mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="every_period")
+    # V1-2: thresholds the later packets consume — minimum attendance % (V1-3's
+    # drifting list) and the homework nothing-checked-for-N-days admin signal
+    # (D-85, V1-5). Settings live here so the consumers never hardcode them.
+    min_attendance_pct: Mapped[int] = mapped_column(Integer, nullable=False, server_default="75")
+    homework_gap_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    # V1-2 (D-19/S-69): org work-category config — [{key, label, active}].
+    # NULL = the core/work_types.py defaults. Keys are stable, labels mutable,
+    # retired entries keep rendering on historical rows, never deleted.
+    work_categories: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # V1-2 (§6 ⑤): set when the operator marks the school handed over.
+    handed_over_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     plan: Mapped[str] = mapped_column(Text, nullable=False, server_default="free")
     # Subscription lifecycle (plan P4-BE-01). 'none' on Free; 'active'/'grace' on
     # Pro. Grace = a payment failed but we don't downgrade for 7 days, and we
@@ -61,6 +88,12 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
                         name="band_thresholds_valid"),
         CheckConstraint("leaves_per_year >= 0 AND leaves_per_month >= 0",
                         name="leave_policy_valid"),
+        CheckConstraint(
+            "attendance_mode IN ('every_period', 'first_period', 'twice_daily')",
+            name="attendance_mode_valid"),
+        CheckConstraint("min_attendance_pct >= 0 AND min_attendance_pct <= 100",
+                        name="min_attendance_pct_valid"),
+        CheckConstraint("homework_gap_days >= 1", name="homework_gap_days_valid"),
     )
 
     def __repr__(self) -> str:
@@ -78,6 +111,8 @@ class Membership(Base, UUIDPKMixin, CreatedAtMixin):
     )
     org_role: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    # V1-2: staff date of birth — feeds the V1-7 birthday feed. Optional always.
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Throttled heartbeat for the Members screen "Last active" column (plan G2).
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Per-member channel/digest preferences; consumed from Phase 2 on (plan B6/O4).

@@ -59,6 +59,11 @@ export const schoolApi = {
     api.get<SchoolClass[]>(`/academics/classes${qs({ year_id: yearId, mine: mine ? "true" : undefined })}`),
   createClass: (b: { academic_year_id: string; name: string; section?: string | null }) =>
     api.post<SchoolClass>("/academics/classes", b),
+  /** V1-2 (D-03): the class-teacher picker — the field existed since P0-C and
+   *  no screen had ever set it. Pass null to unassign. */
+  updateClass: (id: string, b: { name?: string; section?: string | null;
+    class_teacher_member_id?: string | null }) =>
+    api.patch<SchoolClass>(`/academics/classes/${id}`, b),
   deleteClass: (id: string) => api.del<{ message: string }>(`/academics/classes/${id}`),
 
   // calendar (M1)
@@ -88,6 +93,16 @@ export const schoolApi = {
 
   classSubjects: (classId: string) =>
     api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
+  /** The whole year in ONE read (V1-2, S-77) — feeds the by-teacher lens. */
+  allClassSubjects: (yearId?: string) =>
+    api.get<ClassSubject[]>(`/academics/class-subjects${qs({ year_id: yearId })}`),
+  // V1-2 §6 ②: the blank templates the school fills in.
+  downloadRosterTemplate: () =>
+    api.download("/students/import/template", "students-template.xlsx"),
+  downloadStaffTemplate: () =>
+    api.download("/org/members/import/template", "staff-template.xlsx"),
+  downloadSyllabusTemplate: () =>
+    api.download("/planner/syllabus/import/template", "syllabus-template.xlsx"),
   /** Copy another class's subjects (+ syllabus) onto this one — for sibling sections. */
   copyClassSubjects: (classId: string, fromClassId: string, includeSyllabus = true) =>
     api.post<{ subjects_added: number; units_copied: number; topics_copied: number }>(

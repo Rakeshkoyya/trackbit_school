@@ -26,7 +26,7 @@ import type { RosterAnalyze, StudentListItem } from "@/lib/school-types";
 function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
   const { yearId } = useYear();
-  const [form, setForm] = useState({ admission_no: "", full_name: "", roll_no: "", class_id: "", category_id: "" });
+  const [form, setForm] = useState({ admission_no: "", full_name: "", roll_no: "", class_id: "", category_id: "", date_of_birth: "" });
   const [g, setG] = useState({ name: "", phone: "", relation: "" });
   const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId ?? undefined), enabled: !!yearId });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: schoolApi.categories });
@@ -38,6 +38,7 @@ function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: 
       roll_no: form.roll_no.trim() || null,
       class_id: form.class_id || null,
       category_id: form.category_id || null,
+      date_of_birth: form.date_of_birth || null,
       guardians: g.name.trim() && g.phone.trim()
         ? [{ name: g.name.trim(), phone: g.phone.trim(), relation: g.relation.trim() || null, is_primary: true }]
         : [],
@@ -45,7 +46,7 @@ function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: 
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["students"] });
       toast.success("Student added");
-      setForm({ admission_no: "", full_name: "", roll_no: "", class_id: "", category_id: "" });
+      setForm({ admission_no: "", full_name: "", roll_no: "", class_id: "", category_id: "", date_of_birth: "" });
       setG({ name: "", phone: "", relation: "" });
       onOpenChange(false);
     },
@@ -60,6 +61,11 @@ function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: 
           <div><Label>Roll no.</Label><Input value={form.roll_no} onChange={(e) => setForm({ ...form, roll_no: e.target.value })} /></div>
         </div>
         <div><Label>Full name</Label><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required /></div>
+        <div>
+          <Label>Date of birth</Label>
+          <Input type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} />
+          <p className="mt-1 text-xs text-muted-foreground">The parent&apos;s login password — without it they can&apos;t sign in.</p>
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <Label>Class</Label>
@@ -102,6 +108,7 @@ function EditStudentForm({ data, onSaved }: { data: import("@/lib/school-types")
     roll_no: data.roll_no ?? "",
     class_id: data.class_id ?? "",
     category_id: data.category_id ?? "",
+    date_of_birth: data.date_of_birth ?? "",
     status: data.status,
   });
 
@@ -111,6 +118,7 @@ function EditStudentForm({ data, onSaved }: { data: import("@/lib/school-types")
       roll_no: form.roll_no.trim() || null,
       class_id: form.class_id || null,
       category_id: form.category_id || null,
+      date_of_birth: form.date_of_birth || null,
       status: form.status,
     }),
     onSuccess: () => {
@@ -125,6 +133,13 @@ function EditStudentForm({ data, onSaved }: { data: import("@/lib/school-types")
   return (
     <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (form.full_name.trim()) save.mutate(); }}>
       <div><Label>Full name</Label><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required /></div>
+      <div>
+        <Label>Date of birth</Label>
+        <Input type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} />
+        {!form.date_of_birth ? (
+          <p className="mt-1 text-xs text-warning">Missing — this parent cannot log in to the portal.</p>
+        ) : null}
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <div><Label>Roll no.</Label><Input value={form.roll_no} onChange={(e) => setForm({ ...form, roll_no: e.target.value })} /></div>
         <div>
@@ -229,6 +244,15 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["students"] });
       toast.success(`Imported ${res.created} · skipped ${res.skipped}`);
+      // D-13: an unreadable DOB is reported, never guessed — that parent
+      // cannot log in until it's set by hand.
+      if (res.unresolved?.length) {
+        toast.warning(
+          `${res.unresolved.length} date${res.unresolved.length === 1 ? "" : "s"} of birth `
+          + `couldn't be read (${res.unresolved.slice(0, 3).map((u) => u.student).join(", ")}`
+          + `${res.unresolved.length > 3 ? "…" : ""}) — those parents cannot log in until `
+          + "it's fixed here.", { duration: 12000 });
+      }
       setAnalysis(null);
       onOpenChange(false);
     },
@@ -242,6 +266,12 @@ function ImportSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
           <p className="text-sm text-muted-foreground">
             Upload your student register. Columns are matched automatically — review before importing.
           </p>
+          <button
+            onClick={() => schoolApi.downloadRosterTemplate().catch(() => toast.error("Could not download"))}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            Download the blank template (.xlsx)
+          </button>
           <input
             type="file" accept=".xlsx"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) analyze.mutate(f); }}

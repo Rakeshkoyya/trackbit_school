@@ -22,7 +22,7 @@ from app.core.context import CurrentMember
 from app.core.security import hash_password
 from app.models import ClassSubject, Membership, SchoolClass, Subject, User
 from app.services.ingest import FieldSpec, build_analysis
-from app.services.roster_import import read_first_sheet
+from app.services.roster_import import parse_dob, read_first_sheet
 
 SPECS = [
     FieldSpec("full_name", ["teacher name", "name", "staff name", "full name", "teacher"],
@@ -31,6 +31,8 @@ SPECS = [
               label="username / employee id"),
     FieldSpec("email", ["email", "e-mail", "mail"], label="email"),
     FieldSpec("phone", ["mobile", "phone", "contact", "mobile no"], label="phone number"),
+    FieldSpec("date_of_birth", ["date of birth", "dob", "d.o.b", "birth date", "birthdate"],
+              label="date of birth"),
     FieldSpec("assignments", ["assignments", "classes", "class & subject", "subjects taught",
                               "class subject", "teaches"],
               label="classes and subjects they teach"),
@@ -160,8 +162,12 @@ class StaffImporter:
                         password_hash=hash_password(password), must_set_password=True)
             self.db.add(user)
             self.db.flush()
+            # V1-2: staff DOB feeds the birthday feed (D-56). Unreadable values
+            # degrade to blank — never a guess, never a blocked row.
+            dob_raw = val(row, "date_of_birth")
+            dob = parse_dob(dob_raw, min_age=16, max_age=80) if dob_raw else None
             membership = Membership(org_id=m.org_id, user_id=user.id, org_role="teacher",
-                                    status="active")
+                                    status="active", date_of_birth=dob)
             self.db.add(membership)
             self.db.flush()
             created.append({"name": name, "username": uname, "password": password,

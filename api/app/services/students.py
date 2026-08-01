@@ -114,6 +114,7 @@ class StudentService:
         student = Student(
             org_id=m.org_id, admission_no=body.admission_no, full_name=body.full_name,
             class_id=body.class_id, roll_no=body.roll_no, category_id=body.category_id,
+            date_of_birth=body.date_of_birth,
         )
         self.db.add(student)
         self.db.flush()
