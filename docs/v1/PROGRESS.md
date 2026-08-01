@@ -12,7 +12,7 @@ Updated at the close of every working session. **Read this first when resuming v
 | **V1-2** · Setup, onboarding & handover | ✅ **DONE** | see git log | Migration `f2a3b4c5d6e7` (school_code + address/state/board + attendance_mode + thresholds + work_categories + handed_over_at + student/staff DOB) applied to **prod+dev+test**, school codes backfilled. Template downloads generated from importers' own fields (round-trip tested) · DOB parser (day-first, never guesses, unresolved reported) · class-teacher picker (D-03) · writable batched by-teacher lens (D-28/S-77) · readiness report + handover (§6 ⑤) · settings: D-01 mode, thresholds, D-19 work categories (stable key/retire-never-delete) · wizard counts partial plans (mid-year). `test_setup_onboarding.py` (7) + 89 regression green; web gates clean. |
 | **V1-3** · Attendance + class teacher | ✅ **DONE** | see git log | Migration `a3b4c5d6e7f8` (exception reasons · `student_absence_notes` append-only · `students.enrolled_on` · `organizations.phone`) applied to **prod+dev+test**. D-01 mode drives the marking slots (`school_clock.marking_period_nos`), the heatmap denominator (new `not_expected` cell), My Day / the period card and the 16:00 reminder · D-02/D-86 reason → amber, none → red, computed server-side · S-24 informed absence suppresses the alert · Q-03 `left_after_lunch` is its own state with its own PM alert · D-03 My Class month register + `is_class_teacher` nav signal · S-08 the admin tab as questions (charts behind More) · S-12 one roll-call component (everyone present, "Call the roll" preserved) · S-11/S-25 parent month strip, reason, tel: link. `test_attendance_v1_3.py` (7) + 68 regression green; web tsc/eslint/build clean. |
 | **V1-4** · Staff, leave, cover & time | ✅ **DONE** | see git log | Migration `b4c5d6e7f8a9` (`staff_absences.status`/`portion` · `leave_requests.days`→numeric + `is_half_day`/`portion`). D-04 half-day (AM/PM) + late, `present_value` the one day→days-worked function · D-27/S-80/S-81 approve→cover_dates→one sheet per day + the rail item · D-29/S-79 next-planned-topic tier + behind-warning · D-78/S-34 the month summary (`/staff/month`, no money, `not marked` its own count) · D-18/S-64 Day·Week·Month on `/timesheet` · S-75 pre-select-never-write · S-70 her own counters · S-68 hostel evenings beside the periods · D-21/S-66 the slack profile · S-76 the unlogged tile deleted. New: `services/staff_month.py`, `calendar.org_working_days`, `school_clock.periods_before_lunch`/`half_day_periods`. `test_staff_v1_4.py` (11). |
-| V1-5 · Homework | not started | — | Needs V1-3. Simplified by D-85. |
+| **V1-5** · Homework | 🟡 **BACKEND DONE, frontend to do** | `8e67390` | Migration `c5d6e7f8a9b0` (`homework_results.status` widened to `late`/`carried`/`waived`) on **dev + test; NOT yet on prod**. Done: `core/homework_verdict.py` (the one vocabulary + arithmetic + `miss_streak`) · D-85 late-as-status + the two derived admin signals (`delayed_teachers`, `rough_classes`) · D-34/S-98/S-102 carried & waived · D-36/S-100 `queue()` + `to_check` · S-85/S-89/S-97 on the sheet · D-37 `daily_load()` · growth + parent-portal readers fixed (S-94/D-35). `test_homework_v1_5.py` (11). **Remaining: the whole frontend** — see the session log. |
 | V1-6 · Syllabus, planning & mid-year | not started | — | |
 | V1-7 · Events, dates & birthdays | not started | — | Needs V1-2 (DOB). Q-63 research runs before this packet. |
 | V1-8 · Exams, scores & reports | not started | — | Largest packet. Corrections + lock ship first; photo flow + report levels follow. |
@@ -73,6 +73,42 @@ Updated at the close of every working session. **Read this first when resuming v
     fees → V1-10). V1-4's own surface is clean, and it wired `insightsApi.substitutions` (an
     orphan since DASH3) onto `/staff/today` as "who is covering for whom".
 
+- **2026-08-02 (session 2) — V1-5 backend built and committed (`8e67390`). The packet is NOT
+  closed: the entire frontend remains.** Read this before resuming.
+
+  **What is already true on the server** (all tested, don't rebuild it):
+  - `core/homework_verdict.py` is THE vocabulary and arithmetic. Every new surface must import it
+    rather than deciding again what `late`/`carried`/`partial` is worth. It also owns
+    `miss_streak`, so one number appears beside a name everywhere.
+  - `GET /homework/queue` → the backlog (unchecked first, oldest first) + `to_check` for `S-100`'s
+    button. `GET /homework/load` → `D-37`'s per-class evening. `GET /homework/student/{id}` has
+    existed since HW-1 and is **still called by nothing** — wiring it is `S-86` and it delivers
+    `D-31` from the same component as the teacher's by-student view (`S-101`).
+  - The check sheet (`/classroom/homework/{id}/sheet`) rows now carry `absent_when_set`,
+    `carried_pending` and `miss_streak`; `HomeworkResultIn.status` accepts the five verdicts.
+
+  **What is left — all frontend:**
+  1. `/homework` — `D-36`/`S-101`'s three levels: her classes × what was given → the check sheet →
+     by student / by day. The by-student view is ONE component shared with the admin's `D-31`
+     drill-down; build it once.
+  2. `S-100` — the counted button on My Day (*"Homework · 4 to check"*), and **remove My Day's
+     yesterday-homework block** (`D-36` — checking is a desk activity, not a between-classes tap;
+     recorded so nobody optimises it back).
+  3. The check sheet UI: the five-verdict cycle, the absentee badge (shown, **not** preselected),
+     the carried-pending badge, and the streak on the row (`S-89`).
+  4. `/students/[id]` — mount the homework history block (`S-86`).
+  5. `/dashboard/homework` — `delayed_teachers` + `rough_classes` as named rows; `late` and
+     `carried` reported beside completion, never inside it.
+  6. Class-teacher + admin daily load (`D-37`), and the parent's `pending` / `missed` split
+     (`S-94`) with carried rendering **yellow, never red** (`D-35`).
+  7. Then the gates: full `pytest`, `tsc`/`eslint`/`next build`, the no-dead-ends grep,
+     **migrate prod** (`c5d6e7f8a9b0` is on dev+test only), and re-seed so the screens have data.
+
+  Watch for: `homework_gap_days` (org setting, default 3) drives the delayed-teacher signal — do
+  not hardcode 3 in the UI. And `not_checked` must never render as a student miss on any surface,
+  parent-facing included; that is the module's load-bearing rule and the thing most likely to be
+  broken by someone tidying the copy.
+
 ## Standing reminders
 
 - Fence propagation (plan §12.4): `D-82` (per-student exam photos) + `D-83` (teacher fee detail
@@ -80,4 +116,5 @@ Updated at the close of every working session. **Read this first when resuming v
   need the same note **before V1-8 / V1-10 start**.
 - Test DB: local `trackbit_school_test` only; full suite ~4.5 min. Mid-work, run the touched
   file + ruff/tsc only (user preference).
-- Migration head at V1-0 close: `e0f1a2b3c4d5`.
+- Migration head at V1-0 close: `e0f1a2b3c4d5`. **Now `c5d6e7f8a9b0`** — on dev + test;
+  **prod is at `b4c5d6e7f8a9`** and needs `c5d6e7f8a9b0` when V1-5 closes.
