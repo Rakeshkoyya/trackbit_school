@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models import (
+    AcademicYear,
     ClassSubject,
     LeaveRequest,
     Membership,
@@ -45,6 +46,7 @@ from app.models import (
 )
 from app.schemas.insights import SubstitutionIn, SubstitutionOut
 from app.services import notifications
+from app.services.school_clock import half_day_periods
 
 
 def _label(name: str, section: str | None) -> str:
@@ -93,6 +95,7 @@ def covers_between(db: Session, org_id: uuid.UUID, start: date, end: date,
 class SubstitutionService:
     def __init__(self, db: Session):
         self.db = db
+        self._half_cache: dict[str, set[int]] = {}
 
     # ── reads ────────────────────────────────────────────────────────────────
     def live(self, org_id: uuid.UUID, on: date) -> list[PeriodSubstitution]:
@@ -180,24 +183,50 @@ class SubstitutionService:
                 PeriodSubstitution.cancelled_at.is_(None)).limit(1))
         if covering is not None:
             return "already covering another class that period"
-        away = self.db.scalar(
-            select(StaffAbsence.id)
+        away = self.db.execute(
+            select(StaffAbsence.status, StaffAbsence.portion)
             .join(StaffAttendanceDay, StaffAttendanceDay.id == StaffAbsence.day_id)
             .where(StaffAbsence.org_id == org_id, StaffAttendanceDay.date == on,
-                   StaffAbsence.member_id == member_id).limit(1))
+                   StaffAbsence.member_id == member_id).limit(1)).first()
         if away is not None:
-            return "marked away today"
+            status, portion = away
+            # V1-4 (D-04): `late` is present, and a half-day only costs its own
+            # half. Refusing a substitute for the half she IS in would hand the
+            # admin an empty candidate list on the exact morning cover matters.
+            if status == "absent":
+                return "marked away today"
+            if status == "half_day" and period_no in self.half_periods(org_id, on, portion):
+                return f"away for the {portion or 'am'} half today"
         # S-82: a future date has no staff-absence row, so without this clause an
         # admin arranging Friday's cover from a leave approval (D-27) could assign
         # it to someone who is herself on approved leave that Friday.
-        on_leave = self.db.scalar(
-            select(LeaveRequest.id).where(
+        leave = self.db.execute(
+            select(LeaveRequest.is_half_day, LeaveRequest.portion).where(
                 LeaveRequest.org_id == org_id, LeaveRequest.member_id == member_id,
                 LeaveRequest.status == "approved",
-                LeaveRequest.start_date <= on, LeaveRequest.end_date >= on).limit(1))
-        if on_leave is not None:
-            return "on approved leave that day"
+                LeaveRequest.start_date <= on, LeaveRequest.end_date >= on).limit(1)).first()
+        if leave is not None:
+            is_half, portion = leave
+            if not is_half:
+                return "on approved leave that day"
+            if period_no in self.half_periods(org_id, on, portion):
+                return f"on approved half-day leave that {portion or 'am'}"
         return None
+
+    def half_periods(self, org_id: uuid.UUID, on: date, portion: str | None) -> set[int]:
+        """Period numbers covered by a half-day absence — `school_clock`'s cut.
+
+        Cached per service instance: ranking six candidates for eight periods
+        would otherwise re-read the year once per (candidate, period) pair.
+        """
+        key = portion or "am"
+        if key not in self._half_cache:
+            year = self.db.scalar(select(AcademicYear).where(
+                AcademicYear.org_id == org_id, AcademicYear.is_active.is_(True)))
+            self._half_cache[key] = set(half_day_periods(
+                year.period_times if year else [], key,
+                year.periods_per_day if year else 8))
+        return self._half_cache[key]
 
     # ── writes ───────────────────────────────────────────────────────────────
     def create(self, m: CurrentMember, body: SubstitutionIn) -> SubstitutionOut:

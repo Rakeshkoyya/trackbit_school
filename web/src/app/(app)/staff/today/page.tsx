@@ -18,6 +18,7 @@ import { useState } from "react";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
+import { insightsApi } from "@/lib/insights-api";
 import { schoolApi } from "@/lib/school-api";
 import type { TimesheetSlot } from "@/lib/school-types";
 
@@ -47,6 +48,11 @@ function StaffTodayInner() {
   const { data = [], isLoading } = useQuery({
     queryKey: ["staff-today", day],
     queryFn: () => schoolApi.orgTimesheetToday(day),
+  });
+
+  const { data: covers = [] } = useQuery({
+    queryKey: ["insights", "substitutions", day],
+    queryFn: () => insightsApi.substitutions(day),
   });
 
   const periods = data[0]?.days[0]?.slots.map((s) => s.period_no) ?? [];
@@ -81,6 +87,28 @@ function StaffTodayInner() {
               </div>
             ))}
           </div>
+
+          {/* Who is covering FOR WHOM — the one thing the grid below cannot
+              say. A cover cell names the class the substitute is walking into;
+              it cannot name the colleague whose day broke. */}
+          {covers.length ? (
+            <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Cover arranged today
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {covers.map((c) => (
+                  <li key={c.id} className="flex flex-wrap items-center gap-1.5 text-sm">
+                    <span className="font-medium">{c.substitute_name ?? "Someone"}</span>
+                    <span className="text-muted-foreground">
+                      takes P{c.period_no} · {c.class_label} {c.subject_name ?? ""}
+                      {c.absent_name ? ` for ${c.absent_name}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {/* Wide content scrolls inside its own container — the page never does. */}
           <div className="overflow-x-auto rounded-xl border border-border bg-card">

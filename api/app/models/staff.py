@@ -9,9 +9,13 @@ capture the classroom already uses for students: `staff_attendance_days` says
 "attendance was taken for this date", and `staff_absences` carries a row ONLY
 for the people who were away. Present is derived — roster minus absences — so
 there are no per-member present rows to write, and "everyone came in" is an
-empty exception set. Founder call: **present/absent only, no late tier** for
-staff; a teacher who arrives late is present, and the timetable already records
-which period they actually took.
+empty exception set.
+
+SF-1 shipped this present/absent only. **`D-04` (V1-4) reversed that**: the row
+now carries a `status` of absent · half_day · late, and a half-day carries the
+AM/PM `portion`, because `D-78`'s month summary is *days worked out of working
+days* and a half day is half a day. The widening stayed inside the existing row
+(`S-18`) — a second table would fork the truth about one person's one day.
 
 Re-marking is a full replace of the absence set, exactly like
 `AttendanceService.mark`, so the admin can reopen the day and correct it without
@@ -36,12 +40,14 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
     text,
@@ -90,7 +96,21 @@ class StaffAttendanceDay(Base, UUIDPKMixin, CreatedAtMixin):
 
 
 class StaffAbsence(Base, UUIDPKMixin, CreatedAtMixin):
-    """An exception row: this member was NOT in on this day. No present rows."""
+    """An exception row: this member did not have a normal full day.
+
+    Still one row per person per day and still a full replace — `status` widens
+    what the row can say (V1-4, `D-04`/`S-18`) rather than adding a table:
+
+      * ``absent``   — not in at all. Worth 0 days present.
+      * ``half_day`` — in for one half; ``portion`` says WHICH half, because the
+        cover board's whole job is knowing which periods need covering and "0.5
+        days" cannot answer that (`S-31`). Worth 0.5.
+      * ``late``     — in, but not on time. **Worth a full day present** (`D-04`
+        counts days present; lateness is a flag, not a deduction — `S-19`), so a
+        late row exists to be seen and counted, never to reduce anything.
+
+    Present with nothing to say is still no row at all.
+    """
 
     __tablename__ = "staff_absences"
 
@@ -106,6 +126,8 @@ class StaffAbsence(Base, UUIDPKMixin, CreatedAtMixin):
     # 'manual' = the admin unchecked them · 'leave' = an approved leave request
     # covered this date, so the roster pre-unchecked them.
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default="manual")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="absent")
+    portion: Mapped[str | None] = mapped_column(Text, nullable=True)  # am | pm
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     day: Mapped["StaffAttendanceDay"] = relationship(back_populates="absences")
@@ -113,6 +135,10 @@ class StaffAbsence(Base, UUIDPKMixin, CreatedAtMixin):
     __table_args__ = (
         UniqueConstraint("day_id", "member_id", name="uq_staff_absences_day_member"),
         CheckConstraint("source IN ('manual', 'leave')", name="staff_absence_source_valid"),
+        CheckConstraint("status IN ('absent', 'half_day', 'late')",
+                        name="staff_absence_status_valid"),
+        CheckConstraint("portion IS NULL OR portion IN ('am', 'pm')",
+                        name="staff_absence_portion_valid"),
     )
 
 
@@ -167,9 +193,17 @@ class LeaveRequest(Base, UUIDPKMixin, CreatedAtMixin):
     # Working days in the range, computed at apply time from the year's
     # working_weekdays and calendar holidays — a Sunday inside a leave span is
     # not a leave day, and the balance would be wrong if we stored raw span.
-    days: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # Numeric since V1-4: a half-day is 0.5 here rather than a second column the
+    # balance arithmetic has to remember to subtract (D-04).
+    days: Mapped[float] = mapped_column(
+        Numeric(4, 1, asdecimal=False), nullable=False, server_default="1")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    # D-04 — half-day leave. `portion` says which half, so the cover board knows
+    # which periods to fill (S-31). Constrained to a single date by the DB.
+    is_half_day: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"))
+    portion: Mapped[str | None] = mapped_column(Text, nullable=True)  # am | pm
 
     events: Mapped[list["LeaveRequestEvent"]] = relationship(
         back_populates="request", cascade="all, delete-orphan",
@@ -180,6 +214,10 @@ class LeaveRequest(Base, UUIDPKMixin, CreatedAtMixin):
         CheckConstraint("end_date >= start_date", name="leave_dates_valid"),
         CheckConstraint("status IN ('pending', 'approved', 'rejected', 'cancelled')",
                         name="leave_status_valid"),
+        CheckConstraint("portion IS NULL OR portion IN ('am', 'pm')",
+                        name="leave_portion_valid"),
+        CheckConstraint("is_half_day IS FALSE OR start_date = end_date",
+                        name="leave_half_day_single"),
         Index("ix_leave_requests_org_status", "org_id", "status"),
     )
 

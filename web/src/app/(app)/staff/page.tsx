@@ -2,23 +2,29 @@
 
 // Staff attendance — the admin's first job of the day.
 //
-// The sheet opens with everyone ticked, because on almost every day almost
-// everyone is in. The admin unticks the exceptions and saves: that is the whole
+// The sheet opens with everyone present, because on almost every day almost
+// everyone is in. The admin taps the exceptions and saves: that is the whole
 // interaction, and it is the same capture-by-exception contract the classroom
 // uses for students (P1v2). Nothing is written for the people who came in.
+//
+// V1-4 (`D-04`) gave the tap four states instead of two — present · half day ·
+// late · away — and a half day asks which half, because the cover board's whole
+// job is knowing which periods need filling and "0.5 days" cannot answer that
+// (`S-31`). Late is still PRESENT: it is a flag to be seen, never a deduction.
 //
 // Two things the screen has to be honest about:
 //   * an unmarked day is NOT a full house — until someone saves, the header
 //     says "not taken yet" rather than showing a reassuring 12/12;
-//   * an approved leave has already been decided, so those rows open unticked
-//     and say why. The admin still saves the day, so the record is always
-//     something a human confirmed.
+//   * an approved leave has already been decided, so those rows open away (or
+//     half-day, if that is what was approved) and say why. The admin still
+//     saves the day, so the record is always something a human confirmed.
 //
 // Saving again replaces the day, so a correction at noon needs no undo.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  CalendarOff, Check, CheckCheck, ChevronLeft, ChevronRight, Loader2, UserCheck, Users,
+  CalendarOff, Check, CheckCheck, ChevronLeft, ChevronRight, Clock, Loader2,
+  Sunrise, Sunset, UserCheck, Users, X,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -29,9 +35,23 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type { StaffRosterRow } from "@/lib/school-types";
+import type { StaffDayStatus, StaffRosterRow } from "@/lib/school-types";
 
 const ROLE_LABEL: Record<string, string> = { admin: "Admin staff", teacher: "Teachers" };
+
+/** One tap moves to the next state; the fourth returns to present. Half day
+ *  then asks which half — the only follow-up question in the flow. */
+const CYCLE: StaffDayStatus[] = ["present", "absent", "half_day", "late"];
+
+const STATE: Record<StaffDayStatus, { label: string; icon: typeof Check; className: string }> = {
+  present: {
+    label: "In", icon: Check,
+    className: "border-[color:var(--success,#234a37)]/40 bg-[color:var(--success,#234a37)]/5",
+  },
+  absent: { label: "Away", icon: X, className: "border-danger/40 bg-danger-soft" },
+  half_day: { label: "Half day", icon: Sunrise, className: "border-warning/40 bg-warning-soft" },
+  late: { label: "Late", icon: Clock, className: "border-border bg-card" },
+};
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -48,11 +68,13 @@ function shift(dateStr: string, days: number): string {
   return iso(d);
 }
 
+type Mark = { status: StaffDayStatus; portion: "am" | "pm" | null };
+
 function StaffAttendanceInner() {
   const qc = useQueryClient();
   const [day, setDay] = useState(() => iso(new Date()));
   // null until the sheet loads, then a local working copy the admin edits.
-  const [present, setPresent] = useState<Record<string, boolean> | null>(null);
+  const [marks, setMarks] = useState<Record<string, Mark> | null>(null);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   const { data: sheet, isLoading } = useQuery({
@@ -62,24 +84,32 @@ function StaffAttendanceInner() {
 
   // Seed the working copy once per day loaded (derived, no effect).
   if (sheet && loadedFor !== day) {
-    setPresent(Object.fromEntries(sheet.roster.map((r) => [r.member_id, r.present])));
+    setMarks(Object.fromEntries(sheet.roster.map((r) =>
+      [r.member_id, { status: r.status, portion: r.portion }])));
     setLoadedFor(day);
   }
 
   const save = useMutation({
     mutationFn: () => schoolApi.markStaffAttendance({
       date: day,
-      absent_member_ids: Object.entries(present ?? {})
-        .filter(([, isPresent]) => !isPresent)
-        .map(([memberId]) => memberId),
+      // Only deviations travel — present people are never sent (P1v2).
+      marks: Object.entries(marks ?? {})
+        .filter(([, mark]) => mark.status !== "present")
+        .map(([member_id, mark]) => ({
+          member_id,
+          status: mark.status as "absent" | "half_day" | "late",
+          portion: mark.status === "half_day" ? (mark.portion ?? "am") : null,
+        })),
     }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["staff-attendance"] });
+      qc.invalidateQueries({ queryKey: ["staff-month"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["insights"] });
       toast.success(
-        res.absent_count === 0
+        res.absent_count === 0 && res.late_count === 0
           ? `Saved — all ${res.total} staff present`
-          : `Saved — ${res.present_count}/${res.total} present, ${res.absent_count} away`);
+          : `Saved — ${res.present_days} of ${res.total} days worked`);
     },
     onError: (e) => showApiError(e, "Could not save staff attendance"),
   });
@@ -87,9 +117,21 @@ function StaffAttendanceInner() {
   const goto = (days: number) => { setDay(shift(day, days)); };
 
   const rows = sheet?.roster ?? [];
-  const presentCount = Object.values(present ?? {}).filter(Boolean).length;
-  const dirty = !!sheet && !!present
-    && rows.some((r) => (present[r.member_id] ?? true) !== r.present);
+  const at = (id: string): Mark => marks?.[id] ?? { status: "present", portion: null };
+  const setMark = (id: string, next: Mark) =>
+    setMarks({ ...(marks ?? {}), [id]: next });
+  const cycle = (id: string) => {
+    const current = at(id).status;
+    const next = CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length];
+    setMark(id, { status: next, portion: next === "half_day" ? "am" : null });
+  };
+  // "In" is present + late — late is a flag on somebody who came (D-04/S-19).
+  const inCount = rows.filter((r) => at(r.member_id).status !== "absent"
+    && at(r.member_id).status !== "half_day").length;
+  const halfCount = rows.filter((r) => at(r.member_id).status === "half_day").length;
+  const dirty = !!sheet && !!marks
+    && rows.some((r) => at(r.member_id).status !== r.status
+      || (at(r.member_id).status === "half_day" && at(r.member_id).portion !== r.portion));
   const isFuture = day > iso(new Date());
 
   // Group by role so an admin scanning for a missing teacher isn't reading past
@@ -116,7 +158,7 @@ function StaffAttendanceInner() {
         </div>
       </div>
 
-      {isLoading || !sheet || !present ? (
+      {isLoading || !sheet || !marks ? (
         <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />
       ) : (
         <>
@@ -128,12 +170,12 @@ function StaffAttendanceInner() {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">
                 {sheet.marked
-                  ? `${presentCount} of ${sheet.total} present`
+                  ? `${inCount} of ${sheet.total} in${halfCount ? ` · ${halfCount} half day` : ""}`
                   : `${sheet.total} staff on the roll`}
               </p>
               <p className="text-xs text-muted-foreground">
                 {sheet.marked
-                  ? `Taken by ${sheet.marked_by ?? "an admin"}${sheet.marked_at ? ` at ${new Date(sheet.marked_at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}` : ""}`
+                  ? `${sheet.present_days} days worked · taken by ${sheet.marked_by ?? "an admin"}${sheet.marked_at ? ` at ${new Date(sheet.marked_at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}` : ""}`
                   : "Not taken yet — nobody has confirmed this day"}
               </p>
             </div>
@@ -152,10 +194,14 @@ function StaffAttendanceInner() {
             </p>
           ) : (
             <>
-              <div className="mb-2 flex items-center justify-end">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Tap a name to cycle: in → away → half day → late.
+                </p>
                 <Button size="sm" variant="ghost"
-                  onClick={() => setPresent(Object.fromEntries(rows.map((r) => [r.member_id, true])))}>
-                  <CheckCheck className="h-4 w-4" /> Tick everyone
+                  onClick={() => setMarks(Object.fromEntries(
+                    rows.map((r) => [r.member_id, { status: "present", portion: null }])))}>
+                  <CheckCheck className="h-4 w-4" /> Everyone in
                 </Button>
               </div>
 
@@ -166,27 +212,53 @@ function StaffAttendanceInner() {
                   </h2>
                   <div className="grid gap-1 sm:grid-cols-2">
                     {members.map((r) => {
-                      const on = present[r.member_id] ?? true;
+                      const mark = at(r.member_id);
+                      const state = STATE[mark.status];
+                      const Icon = state.icon;
                       return (
-                        <button key={r.member_id} type="button"
-                          onClick={() => setPresent({ ...present, [r.member_id]: !on })}
-                          aria-pressed={on}
-                          className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm active:scale-[0.99] ${on ? "border-[color:var(--success,#234a37)]/40 bg-[color:var(--success,#234a37)]/5" : "border-border bg-card"}`}>
-                          <span className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${on ? "border-[color:var(--success,#234a37)] bg-[color:var(--success,#234a37)] text-white" : "border-border bg-background"}`}>
-                            {on ? <Check className="h-3.5 w-3.5" /> : null}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate">{r.name}</span>
+                        <div key={r.member_id}
+                          className={`rounded-lg border ${state.className}`}>
+                          <button type="button" onClick={() => cycle(r.member_id)}
+                            className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm active:scale-[0.99]">
+                            <span className="grid h-5 w-5 shrink-0 place-items-center rounded border border-border/60 bg-background/70">
+                              <Icon className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate">{r.name}</span>
+                              {r.on_leave ? (
+                                <span className="block truncate text-xs text-muted-foreground">
+                                  Approved leave — {r.leave_reason}
+                                </span>
+                              ) : null}
+                            </span>
                             {r.on_leave ? (
-                              <span className="block truncate text-xs text-muted-foreground">
-                                Approved leave — {r.leave_reason}
-                              </span>
+                              <Badge tone="outline"><CalendarOff className="h-3 w-3" /> leave</Badge>
                             ) : null}
-                          </span>
-                          {r.on_leave ? (
-                            <Badge tone="outline"><CalendarOff className="h-3 w-3" /> leave</Badge>
+                            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                              {state.label}
+                            </span>
+                          </button>
+
+                          {/* A half day is not half a fact — it has to say which
+                              half, or the cover board cannot name the periods. */}
+                          {mark.status === "half_day" ? (
+                            <div className="flex gap-1.5 border-t border-border/60 px-3 py-2">
+                              {(["am", "pm"] as const).map((half) => {
+                                const active = (mark.portion ?? "am") === half;
+                                const HalfIcon = half === "am" ? Sunrise : Sunset;
+                                return (
+                                  <button key={half} type="button" aria-pressed={active}
+                                    onClick={() => setMark(r.member_id,
+                                      { status: "half_day", portion: half })}
+                                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium ${active ? "border-primary bg-accent text-accent-foreground" : "border-border bg-background text-muted-foreground"}`}>
+                                    <HalfIcon className="h-3 w-3" />
+                                    away {half === "am" ? "morning" : "afternoon"}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           ) : null}
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -198,8 +270,8 @@ function StaffAttendanceInner() {
                 {save.isPending
                   ? "Saving…"
                   : sheet.marked && !dirty
-                    ? `Saved — ${presentCount}/${sheet.total} present`
-                    : `${sheet.marked ? "Update" : "Save"} attendance — ${presentCount}/${sheet.total} present`}
+                    ? `Saved — ${inCount}/${sheet.total} in`
+                    : `${sheet.marked ? "Update" : "Save"} attendance — ${inCount}/${sheet.total} in`}
               </Button>
               {sheet.marked ? (
                 <p className="mt-2 text-center text-xs text-muted-foreground">

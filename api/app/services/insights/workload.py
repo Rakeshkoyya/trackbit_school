@@ -13,13 +13,21 @@ period, and a school that never entered its timings gets `unset` — not a guess
 **What the free ones are doing** comes from `timesheet_entries` (SF-1), which is
 capture rather than inference. The original plan derived this from task
 categories; a real timesheet is better data and it is what shipped. A teacher
-with a free period and no entry shows as exactly that, which is itself the
-finding — `unfilled_free_periods` counts them.
+with a free period and no entry simply reads as free — `D-23` decided an unfilled
+period *is* free, and V1-4 deleted the tile that counted them (`S-76`): it was
+the school's adoption rate wearing the costume of a workload figure, and it was
+at its reddest at 8:30am when nothing could have been logged yet.
 
 **The week** is teaching periods per teacher against the org mean, with over/under
-flags. `TimetableService.teacher_week` does one teacher; this is the batched
-org-wide version — the whole staff in three queries, because the alternative is
-one remote round-trip per person.
+flags, plus the hostel evenings each one runs — reported beside the periods and
+never added to them (`S-68`). `TimetableService.teacher_week` does one teacher;
+this is the batched org-wide version — the whole staff in three queries, because
+the alternative is one remote round-trip per person.
+
+**The slack profile** (`D-21`/`S-66`) is the one genuinely new chart: teaching /
+working / free per (weekday, period) across people who teach at all, so the admin
+can find the one slot where the whole staff could meet. Its job is finding slack,
+not watching people — there is no ranking here and there never will be (`S-67`).
 """
 
 import uuid
@@ -45,23 +53,29 @@ from app.models import (
     TimetableSlot,
     User,
 )
+
+# Aliased: `Session` here is sqlalchemy's, and the hostel block is a model.
+from app.models import Session as HostelSession
 from app.schemas.insights import (
     LeavePulse,
     LeaveQueueRow,
     LoadStripCell,
     NowBoard,
     NowPerson,
+    SlackProfile,
+    SlackSlot,
     StaffBoard,
     TeacherLoad,
+    UpcomingCover,
     WorkBucket,
     WorkloadWeek,
 )
-from app.services.calendar import event_rows, expand_blocked_dates
+from app.services.calendar import event_rows, expand_blocked_dates, org_working_days
 from app.services.insights.attendance import AttendanceInsights
 from app.services.leave import LeaveService
 from app.services.school_clock import day_periods, phase, today_in
 from app.services.staff_attendance import StaffAttendanceService
-from app.services.substitution import covers_between
+from app.services.substitution import SubstitutionService, covers_between
 
 # Over/under-load is a share of the org mean, not an absolute count: a school
 # with 5 periods a day and one with 9 cannot share a threshold.
@@ -159,7 +173,9 @@ class WorkloadInsights:
         listing = service.list_requests(m, status="pending")
         policy = listing.policy
         month_start = today.replace(day=1)
-        approved_this_month = int(self.db.scalar(
+        # float, not int: `days` is numeric since V1-4 and int() would round
+        # every half-day in the month away to nothing.
+        approved_this_month = float(self.db.scalar(
             select(func.coalesce(func.sum(LeaveRequest.days), 0))
             .where(LeaveRequest.org_id == m.org_id, LeaveRequest.status == "approved",
                    LeaveRequest.start_date >= month_start,
@@ -173,13 +189,89 @@ class WorkloadInsights:
             approved_days_this_month=approved_this_month,
             allowed_per_year=policy.leaves_per_year,
             allowed_per_month=policy.leaves_per_month,
+            upcoming=self.upcoming_cover(m, today),
             queue=[
                 LeaveQueueRow(
                     request_id=r.id, member_id=r.member_id, member_name=r.member_name,
                     start_date=r.start_date, end_date=r.end_date, days=r.days,
-                    reason=r.reason, warnings=r.warnings, created_at=r.created_at)
+                    is_half_day=r.is_half_day, portion=r.portion,
+                    reason=r.reason, warnings=r.warnings, created_at=r.created_at,
+                    cover_dates=r.cover_dates)
                 for r in listing.requests[:15]
             ])
+
+    # ── approved leave that still needs cover (D-27 / S-81) ──────────────────
+    def upcoming_cover(self, m: CurrentMember, today: date,
+                       horizon_days: int = 14) -> list[UpcomingCover]:
+        """Future days someone is already approved away and periods are open.
+
+        Four queries for the whole horizon, whatever the headcount: the approved
+        leaves, the working days, the timetable rows for those teachers, and the
+        substitutions already assigned. The alternative — asking per leave, per
+        day — is a round-trip per row against a remote database, on a payload the
+        admin loads every morning.
+
+        Today is deliberately excluded: today's uncovered periods already have
+        their own rail item off staff attendance, and two rows for one problem is
+        how a rail becomes a list nobody reads.
+        """
+        horizon = today + timedelta(days=horizon_days)
+        leaves = self.db.execute(
+            select(LeaveRequest.id, LeaveRequest.member_id, LeaveRequest.start_date,
+                   LeaveRequest.end_date, LeaveRequest.is_half_day, LeaveRequest.portion,
+                   User.name)
+            .join(Membership, Membership.id == LeaveRequest.member_id)
+            .join(User, User.id == Membership.user_id)
+            .where(LeaveRequest.org_id == m.org_id, LeaveRequest.status == "approved",
+                   LeaveRequest.end_date > today, LeaveRequest.start_date <= horizon)).all()
+        if not leaves:
+            return []
+
+        working = set(org_working_days(self.db, m.org_id, today + timedelta(days=1), horizon))
+        member_ids = {row[1] for row in leaves}
+        by_weekday: dict[uuid.UUID, dict[int, list[int]]] = defaultdict(
+            lambda: defaultdict(list))
+        for tid, weekday, pno in self.db.execute(
+            select(ClassSubject.teacher_member_id, TimetableSlot.weekday,
+                   TimetableSlot.period_no)
+            .join(ClassSubject, ClassSubject.id == TimetableSlot.class_subject_id)
+            .where(TimetableSlot.org_id == m.org_id,
+                   TimetableSlot.effective_from <= horizon,
+                   or_(TimetableSlot.effective_to.is_(None),
+                       TimetableSlot.effective_to > today),
+                   ClassSubject.teacher_member_id.in_(member_ids))).all():
+            by_weekday[tid][int(weekday)].append(int(pno))
+
+        covered: dict[tuple[uuid.UUID, date], int] = defaultdict(int)
+        from app.models import PeriodSubstitution  # noqa: PLC0415
+
+        for absent_id, on in self.db.execute(
+            select(PeriodSubstitution.absent_member_id, PeriodSubstitution.date)
+            .where(PeriodSubstitution.org_id == m.org_id,
+                   PeriodSubstitution.date > today, PeriodSubstitution.date <= horizon,
+                   PeriodSubstitution.cancelled_at.is_(None),
+                   PeriodSubstitution.absent_member_id.is_not(None))).all():
+            covered[(absent_id, on)] += 1
+
+        subs = SubstitutionService(self.db)
+        out: list[UpcomingCover] = []
+        for req_id, member_id, start, end, is_half, portion, name in leaves:
+            d = max(start, today + timedelta(days=1))
+            while d <= min(end, horizon):
+                if d in working:
+                    periods = by_weekday.get(member_id, {}).get(d.weekday(), [])
+                    if is_half:
+                        half = subs.half_periods(m.org_id, d, portion)
+                        periods = [p for p in periods if p in half]
+                    done = covered.get((member_id, d), 0)
+                    if len(periods) > done:
+                        out.append(UpcomingCover(
+                            date=d, member_id=member_id, member_name=name,
+                            request_id=req_id, periods_due=len(periods),
+                            periods_covered=done))
+                d += timedelta(days=1)
+        out.sort(key=lambda r: (r.date, r.member_name))
+        return out[:20]
 
     # ── the live board ───────────────────────────────────────────────────────
     def now(self, m: CurrentMember, at: datetime | None = None) -> NowBoard:
@@ -279,6 +371,18 @@ class WorkloadInsights:
             if int(weekday) in working:
                 week_teaching[tid] += int(n)
 
+        # S-68 — the warden's evening. `sessions` is a staffed, recurring,
+        # timetabled block (owner + weekdays + time) that no load surface has
+        # ever read, so a teacher running prep six nights a week appeared on
+        # every board as somebody with a light load. Counted separately, never
+        # summed into teaching periods.
+        evenings: dict[uuid.UUID, int] = defaultdict(int)
+        for owner, weekdays in self.db.execute(
+            select(HostelSession.owner_member_id, HostelSession.weekdays)
+            .where(HostelSession.org_id == m.org_id, HostelSession.active.is_(True),
+                   HostelSession.owner_member_id.is_not(None))).all():
+            evenings[owner] += sum(1 for d in (weekdays or []) if int(d) in working)
+
         week_work: dict[uuid.UUID, int] = defaultdict(int)
         buckets: dict[str, int] = defaultdict(int)
         for mid, work_type, n in self.db.execute(
@@ -311,7 +415,6 @@ class WorkloadInsights:
         mean = round(sum(teachers_only) / len(teachers_only), 1) if teachers_only else 0.0
         out.mean_teaching = mean
 
-        unfilled = 0
         for mid, uid, name, role in staff:
             strip: list[LoadStripCell] = []
             for p in periods:
@@ -334,8 +437,6 @@ class WorkloadInsights:
                                                label=label_for(entry.work_type, m.org)))
                     continue
                 strip.append(LoadStripCell(period_no=p.period_no, kind="free"))
-                if today.weekday() in working:
-                    unfilled += 1
 
             teach = week_teaching.get(mid, 0)
             work = week_work.get(mid, 0)
@@ -349,8 +450,69 @@ class WorkloadInsights:
             out.teachers.append(TeacherLoad(
                 member_id=mid, name=name, role=role, teaching_periods=teach,
                 work_periods=work, free_periods=max(0, slots - teach - work),
+                evening_sessions=evenings.get(mid, 0),
                 delta_vs_mean=round(teach - mean, 1), load_flag=flag,
                 open_tasks=tasks.get(uid, 0), today=strip))
         out.teachers.sort(key=lambda t: (-t.teaching_periods, t.name))
-        out.unfilled_free_periods = unfilled
+        out.slack = self._slack(m, monday, working, periods, week_teaching)
         return out
+
+    # ── the slack profile (D-21 / S-66) ──────────────────────────────────────
+    def _slack(self, m: CurrentMember, monday: date, working: list[int],
+               periods, week_teaching: dict[uuid.UUID, int]) -> SlackProfile:
+        """Where the week's slack is — for finding a meeting slot, not for
+        watching people.
+
+        The denominator is **people who teach at all**, the same population the
+        load mean uses: including the office clerk's eight free periods would
+        make every slot look wide open and the answer would be wrong.
+
+        Two more queries on top of what `week` already read — the grid pivoted by
+        (weekday, period) and the week's timesheet entries by (weekday, period).
+        `free` here means "free or unrecorded" (`D-23`/`S-76`); the screen says so
+        once, which is the honest way to keep this chart rather than delete it.
+        """
+        teachers = {mid for mid, n in week_teaching.items() if n > 0}
+        profile = SlackProfile(
+            week_start=monday, teacher_count=len(teachers),
+            periods_per_day=len(periods), working_weekdays=working)
+        if not teachers or not periods:
+            return profile
+
+        busy: dict[tuple[int, int], set[uuid.UUID]] = defaultdict(set)
+        for tid, weekday, pno in self.db.execute(
+            select(ClassSubject.teacher_member_id, TimetableSlot.weekday,
+                   TimetableSlot.period_no)
+            .join(ClassSubject, ClassSubject.id == TimetableSlot.class_subject_id)
+            .where(TimetableSlot.org_id == m.org_id,
+                   TimetableSlot.effective_from <= monday + timedelta(days=6),
+                   or_(TimetableSlot.effective_to.is_(None),
+                       TimetableSlot.effective_to > monday),
+                   ClassSubject.teacher_member_id.in_(teachers))).all():
+            busy[(int(weekday), int(pno))].add(tid)
+
+        recorded: dict[tuple[int, int], set[uuid.UUID]] = defaultdict(set)
+        for mid, on, pno in self.db.execute(
+            select(TimesheetEntry.member_id, TimesheetEntry.date, TimesheetEntry.period_no)
+            .where(TimesheetEntry.org_id == m.org_id, TimesheetEntry.date >= monday,
+                   TimesheetEntry.date <= monday + timedelta(days=6),
+                   TimesheetEntry.member_id.in_(teachers))).all():
+            recorded[(on.weekday(), int(pno))].add(mid)
+
+        best: tuple[int, int, int] | None = None
+        for weekday in working:
+            for p in periods:
+                key = (weekday, p.period_no)
+                teaching = len(busy[key])
+                # A period she is teaching outranks anything she wrote down for
+                # it — one source of truth per period, the timesheet's own rule.
+                doing = len(recorded[key] - busy[key])
+                free = max(0, len(teachers) - teaching - doing)
+                profile.slots.append(SlackSlot(
+                    weekday=weekday, period_no=p.period_no,
+                    teaching=teaching, working=doing, free=free))
+                if best is None or free > best[2]:
+                    best = (weekday, p.period_no, free)
+        if best is not None and best[2] > 0:
+            profile.best_weekday, profile.best_period_no, profile.best_free = best
+        return profile

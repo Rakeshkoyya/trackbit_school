@@ -408,12 +408,19 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
 
     # Timetable — round-robin each class's five subjects across Mon–Fri, periods 1–5,
     # so My Day, the student timeline, and attendance all render from real slots.
+    #
+    # Each class's rotation is OFFSET by its position (V1-4). Without that offset
+    # every class ran the same subject in the same period, so one Maths teacher
+    # was scheduled into three rooms at once — a clash the timetable service's
+    # own validator would have refused, bypassed here because the seed writes
+    # rows directly. It made the cover sheet, the slack profile and the load mean
+    # all read a grid no school could run.
     subj_order = ["English", "Mathematics", "Science", "Social Studies", "Hindi"]
     sixa_today_slots: list[TimetableSlot] = []
     wd_today = today_ist.weekday()
-    for ckey in class_keys:
+    for offset, ckey in enumerate(class_keys):
         css = [class_subjects[(ckey, s)] for s in subj_order]
-        idx = 0
+        idx = offset
         for wd in range(5):  # Mon–Fri
             for period in range(1, 6):
                 cs = css[idx % len(css)]
@@ -493,7 +500,33 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     db.add(staff_day)
     db.flush()
     db.add(StaffAbsence(org_id=org.id, day_id=staff_day.id, member_id=mships[anil].id,
-                        source="manual", note="Sick"))
+                        source="manual", status="absent", note="Sick"))
+    # V1-4 (D-04): a half-day and a late, so the Month tab shows what they cost
+    # (0.5 and 0 respectively) and the cover board only asks for Priya's morning.
+    db.add(StaffAbsence(org_id=org.id, day_id=staff_day.id, member_id=mships[priya].id,
+                        source="manual", status="half_day", portion="am",
+                        note="Bank work"))
+
+    # A fortnight of marked days behind today, so the Month tab (D-78) reads as a
+    # real month rather than "nobody was marked". One day is deliberately LEFT
+    # UNMARKED — S-34's rule only shows on a screen that has a gap in it.
+    for back in range(1, 15):
+        past = today_ist - timedelta(days=back)
+        if past.weekday() not in year.working_weekdays or back == 4:
+            continue
+        past_day = StaffAttendanceDay(org_id=org.id, date=past,
+                                      marked_by_member_id=mships[kc].id)
+        db.add(past_day)
+        db.flush()
+        if back in (2, 9):
+            db.add(StaffAbsence(org_id=org.id, day_id=past_day.id,
+                                member_id=mships[anil].id, source="manual",
+                                status="absent", note="Sick"))
+        elif back == 6:
+            db.add(StaffAbsence(org_id=org.id, day_id=past_day.id,
+                                member_id=mships[ramesh].id, source="manual",
+                                status="late", note="Traffic"))
+    db.flush()
 
     # Ramesh's timesheet for today: the periods he is not teaching, filled in.
     # Period numbers here are free in the seeded grid (6-A/6-B use 1–4).
@@ -514,7 +547,13 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     approved = LeaveRequest(
         org_id=org.id, member_id=mships[anil].id,
         start_date=today_ist, end_date=today_ist, days=1, reason="Sick", status="approved")
-    db.add_all([pending, approved])
+    # V1-4 (D-27/S-81): an approved absence a few days out, so "Cover to arrange"
+    # and the rail's Arrange-cover item have something real to point at.
+    ahead = LeaveRequest(
+        org_id=org.id, member_id=mships[ramesh].id,
+        start_date=today_ist + timedelta(days=2), end_date=today_ist + timedelta(days=3),
+        days=2, reason="Family function", status="approved")
+    db.add_all([pending, approved, ahead])
     db.flush()
     db.add_all([
         LeaveRequestEvent(org_id=org.id, request_id=pending.id, action="applied",
@@ -523,7 +562,25 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
                           actor_member_id=mships[anil].id),
         LeaveRequestEvent(org_id=org.id, request_id=approved.id, action="approved",
                           actor_member_id=mships[kc].id, note="Get well soon."),
+        LeaveRequestEvent(org_id=org.id, request_id=ahead.id, action="applied",
+                          actor_member_id=mships[ramesh].id),
+        LeaveRequestEvent(org_id=org.id, request_id=ahead.id, action="approved",
+                          actor_member_id=mships[kc].id),
     ])
+    db.flush()
+
+    # A habit for S-75 to pre-select from. It keys on (weekday, period), and the
+    # suggestion is built from weeks BEFORE the one being viewed — so these have
+    # to land on the same working weekday, in earlier weeks, or the picker opens
+    # blank and the whole point of the decision is invisible in the demo.
+    habit_day = today_ist - timedelta(days=7)
+    while habit_day.weekday() not in year.working_weekdays:
+        habit_day -= timedelta(days=1)
+    for weeks_back in range(4):
+        past = habit_day - timedelta(weeks=weeks_back)
+        for period_no, work_type in ((5, "notebook_checking"), (6, "exam_work")):
+            db.add(TimesheetEntry(org_id=org.id, member_id=mships[ramesh].id, date=past,
+                                  period_no=period_no, work_type=work_type))
     db.flush()
 
     # The 8 AM daily report — generated from the day we just seeded (leads Dashboard).

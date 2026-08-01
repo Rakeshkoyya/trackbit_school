@@ -1513,12 +1513,18 @@ export interface StudentGrowth {
 
 // ── SF-1: staff attendance, timesheet, leave ─────────────────────────────────
 
+/** V1-4 (D-04). `late` is PRESENT — a flag to be seen, never a deduction (S-19). */
+export type StaffDayStatus = "present" | "absent" | "half_day" | "late";
+
 export interface StaffRosterRow {
   member_id: string;
   name: string;
   role: string;
-  /** Derived — present unless an absence row exists for the day. */
+  /** Derived — true unless an absence row exists. `late` is still present. */
   present: boolean;
+  status: StaffDayStatus;
+  /** Which half a half_day was away — what tells the cover board which periods. */
+  portion: "am" | "pm" | null;
   /** An approved leave covers this date, so the sheet opens them unticked. */
   on_leave: boolean;
   leave_reason: string | null;
@@ -1535,6 +1541,44 @@ export interface StaffAttendance {
   total: number;
   present_count: number;
   absent_count: number;
+  half_day_count: number;
+  late_count: number;
+  /** Days-present value of the day, half-days as 0.5 — what the month sums. */
+  present_days: number;
+}
+
+export interface StaffMark {
+  member_id: string;
+  status: "absent" | "half_day" | "late";
+  portion?: "am" | "pm" | null;
+  note?: string | null;
+}
+
+/** D-78 — days worked out of working days. **No money on this row, ever.** */
+export interface StaffMonthRow {
+  member_id: string;
+  name: string;
+  role: string;
+  working_days: number;
+  days_marked: number;
+  /** S-34: a day nobody marked is its own count, never an absence. */
+  days_not_marked: number;
+  days_present: number;
+  days_absent: number;
+  half_days: number;
+  lates: number;
+  leave_days: number;
+  leave_remaining: number;
+}
+
+export interface StaffMonth {
+  month: string;
+  start_date: string;
+  /** Clamped to today — a month in progress is not a month of absentees. */
+  end_date: string;
+  working_days: number;
+  days_marked: number;
+  rows: StaffMonthRow[];
 }
 
 /** 'class' = the timetable owns it (locked) · 'cover' = a live substitution
@@ -1552,6 +1596,17 @@ export interface TimesheetSlot {
   work_type: string | null;
   work_label: string | null;
   note: string | null;
+  /** S-75 — what she usually records here. The picker opens on it and writes
+   *  nothing; no row exists that a human did not put there. */
+  suggested_work_type: string | null;
+  suggested_work_label: string | null;
+}
+
+export interface TimesheetBreak {
+  after_period_no: number;
+  label: string;
+  start: string;
+  end: string;
 }
 
 export interface TimesheetDay {
@@ -1563,6 +1618,36 @@ export interface TimesheetDay {
   work_count: number;
   free_count: number;
   cover_count: number;
+  breaks: TimesheetBreak[];
+  /** S-68 — hostel blocks she runs, reported beside the periods, never in them. */
+  evening_labels: string[];
+}
+
+/** D-18/S-64 — month = shape, week = edit, day = do. One cell per DAY. */
+export type TimesheetDayState = "working" | "off" | "holiday" | "leave" | "away" | "future";
+
+export interface TimesheetMonthDay {
+  date: string;
+  weekday: number;
+  state: TimesheetDayState;
+  teaching: number;
+  work: number;
+  cover: number;
+  free: number;
+  label: string | null;
+}
+
+export interface TimesheetMonth {
+  member_id: string;
+  member_name: string;
+  month: string;
+  start_date: string;
+  end_date: string;
+  days: TimesheetMonthDay[];
+  teaching_periods: number;
+  work_periods: number;
+  covered_periods: number;
+  evening_sessions: number;
 }
 
 export interface TimesheetWeek {
@@ -1574,6 +1659,8 @@ export interface TimesheetWeek {
   work_periods: number;
   free_periods: number;
   covered_periods: number;
+  /** S-68 — evenings she runs this week. Beside the periods, never added in. */
+  evening_sessions: number;
   /** org-day rows only: why this person is away today (S-72). */
   away_reason: string | null;
 }
@@ -1613,13 +1700,18 @@ export interface LeaveRequest {
   member_name: string;
   start_date: string;
   end_date: string;
+  /** 0.5 for a half-day (D-04). */
   days: number;
+  is_half_day: boolean;
+  portion: "am" | "pm" | null;
   reason: string;
   status: LeaveStatus;
   created_at: string;
   /** Policy breaches. Advisory — the request still reaches the admin. */
   warnings: string[];
   events: LeaveEvent[];
+  /** D-27 — the working days this approved leave still needs cover for. */
+  cover_dates: string[];
 }
 
 export interface LeaveList {

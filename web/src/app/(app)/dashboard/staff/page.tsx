@@ -19,7 +19,9 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { ChartCard, RowBars, StatTile, STATUS_COLOR, type ChartRow } from "@/components/charts";
+import {
+  ChartCard, ColumnChart, RowBars, SERIES_COLORS, StatTile, STATUS_COLOR, type ChartRow,
+} from "@/components/charts";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { NowBoard } from "@/components/insights/now-board";
 import {
@@ -29,7 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { insightsApi } from "@/lib/insights-api";
-import type { LoadStripCell } from "@/lib/insights-types";
+import type { LoadStripCell, SlackProfile } from "@/lib/insights-types";
 import { cn } from "@/lib/utils";
 
 const STRIP: Record<LoadStripCell["kind"], string> = {
@@ -51,8 +53,60 @@ function DayStrip({ cells }: { cells: LoadStripCell[] }) {
   );
 }
 
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/** The slack profile (D-21/S-66): teaching · other work · free, per period, for
+ *  one weekday. The sentence above it IS the decision; the bars are its evidence
+ *  (ux §2). `free` means "free **or** unrecorded" and the hint says so once —
+ *  D-23 made an unfilled period free, so there is no third band to draw. */
+function SlackProfileCard({ slack }: { slack: SlackProfile }) {
+  const days = slack.working_weekdays.length ? slack.working_weekdays : [0, 1, 2, 3, 4, 5];
+  const [weekday, setWeekday] = useState(
+    () => (slack.best_weekday != null && days.includes(slack.best_weekday)
+      ? slack.best_weekday : days[0]));
+
+  const rows: ChartRow[] = slack.slots
+    .filter((s) => s.weekday === weekday)
+    .sort((a, b) => a.period_no - b.period_no)
+    .map((s) => ({
+      x: `P${s.period_no}`, teaching: s.teaching, working: s.working, free: s.free,
+    }));
+
+  const headline = slack.best_period_no != null
+    ? `Period ${slack.best_period_no} on ${DAY_NAMES[slack.best_weekday ?? 0]} is the widest slot — ${slack.best_free} of ${slack.teacher_count} teachers free.`
+    : `Every period this week has all ${slack.teacher_count} teachers committed — there is no whole-staff slot.`;
+
+  return (
+    <Section
+      title="Where the slack is"
+      hint="For finding a meeting slot or an invigilation period. “Free” means free or unrecorded — an unfilled period is a free one (D-23). Counted over people who teach at all."
+      action={
+        <select value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}
+          aria-label="Weekday"
+          className="rounded-md border border-border bg-card px-2 py-1 text-sm">
+          {days.map((d) => <option key={d} value={d}>{DAY_NAMES[d]}</option>)}
+        </select>
+      }
+    >
+      <p className="mb-3 text-sm">{headline}</p>
+      <ChartCard title={`${DAY_NAMES[weekday]} · ${slack.teacher_count} teachers`}>
+        {rows.length ? (
+          <ColumnChart rows={rows} stacked height={220} series={[
+            { key: "teaching", label: "Teaching", color: STATUS_COLOR.green },
+            { key: "working", label: "Other work (recorded)", color: SERIES_COLORS[0] },
+            { key: "free", label: "Free or unrecorded", color: STATUS_COLOR.neutral },
+          ]} />
+        ) : (
+          <Empty>No periods on this day.</Empty>
+        )}
+      </ChartCard>
+    </Section>
+  );
+}
+
 function StaffInner() {
-  const [coverFor, setCoverFor] = useState<{ id: string; name: string } | null>(null);
+  const [coverFor, setCoverFor] =
+    useState<{ id: string; name: string; date?: string } | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["insights", "staff"],
     queryFn: () => insightsApi.staff(),
@@ -99,13 +153,18 @@ function StaffInner() {
           tone={leave.pending ? "amber" : "green"}
           href="/staff/leave"
         />
-        {/* StatTile truncates its sub to one line — keep it short enough to read. */}
+        {/* StatTile truncates its sub to one line — keep it short enough to read.
+            S-76 deleted the "free periods unlogged" tile that stood here: under
+            D-23 an unfilled period IS free, so it counted nothing the school
+            had agreed was a problem, and it was at its reddest at 8:30am. */}
         <StatTile
-          label="Free periods unlogged"
-          value={String(week.unfilled_free_periods)}
-          sub="today, no timesheet entry"
-          tone={week.unfilled_free_periods > 8 ? "amber" : "neutral"}
-          href="/staff/today"
+          label="Cover ahead"
+          value={String(leave.upcoming.length)}
+          sub={leave.upcoming.length
+            ? `${dayLabel(leave.upcoming[0].date)}: ${leave.upcoming[0].member_name}`
+            : "no approved absences to arrange"}
+          tone={leave.upcoming.length ? "amber" : "green"}
+          href="/staff/leave"
         />
       </div>
 
@@ -142,6 +201,33 @@ function StaffInner() {
                   actions={
                     <Button size="sm" variant="outline"
                       onClick={() => setCoverFor({ id: a.member_id, name: a.name })}>
+                      <UserX className="h-3.5 w-3.5" /> Arrange cover
+                    </Button>
+                  }
+                />
+              );
+            })}
+          </div>
+        </Section>
+      ) : null}
+
+      {/* S-81 — the moment leave is approved the uncovered periods are known.
+          Saying so now beats remembering on the morning it starts. */}
+      {leave.upcoming.length ? (
+        <Section title="Cover to arrange"
+          hint="Approved absences in the next two weeks whose periods nobody has taken yet.">
+          <div className="space-y-2">
+            {leave.upcoming.slice(0, 8).map((u) => {
+              const open = Math.max(0, u.periods_due - u.periods_covered);
+              return (
+                <RedRow
+                  key={`${u.member_id}-${u.date}`}
+                  tone="amber"
+                  title={<>{dayLabel(u.date)} <span className="font-normal text-muted-foreground">· {u.member_name} away</span></>}
+                  subtitle={`${open} of ${u.periods_due} period${u.periods_due === 1 ? "" : "s"} still to cover`}
+                  actions={
+                    <Button size="sm" variant="outline"
+                      onClick={() => setCoverFor({ id: u.member_id, name: u.member_name, date: u.date })}>
                       <UserX className="h-3.5 w-3.5" /> Arrange cover
                     </Button>
                   }
@@ -218,6 +304,11 @@ function StaffInner() {
         </ChartCard>
       </div>
 
+      {/* D-21 / S-66 — the one genuinely new chart. Its job is finding slack:
+          when the whole staff could meet, which period invigilation should come
+          out of. Not a scoreboard, and framed so it cannot become one (S-67). */}
+      {week.slack ? <SlackProfileCard slack={week.slack} /> : null}
+
       <Section title="The day, teacher by teacher"
         hint="Each cell is one period: teaching · covering · other work · free · away.">
         <ScrollX>
@@ -260,7 +351,7 @@ function StaffInner() {
       </Section>
 
       <CoverSheet memberId={coverFor?.id ?? null} memberName={coverFor?.name}
-        onClose={() => setCoverFor(null)} />
+        onDate={coverFor?.date} onClose={() => setCoverFor(null)} />
     </div>
   );
 }

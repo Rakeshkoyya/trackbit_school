@@ -522,6 +522,57 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   `SectionCard`, `CustomSection`, `MetricCell`) replaces `module-card.tsx`; the `ShapeGrid`/
   `PulseRow` chart grid is gone — those charts live on the tabs that own them. `test_insights.py`
   (13, +2).
+- **V1-4 (staff, leave, cover & time, 2026-08-02)** — migration **`b4c5d6e7f8a9`** (head).
+  `D-04` reverses SF-1's "present/absent only, no late tier": `staff_absences` widens in place
+  (`S-18` — no second table) to `status` **absent | half_day | late** + `portion` **am | pm**, and
+  `leave_requests.days` becomes **numeric(4,1)** so a half-day is 0.5 rather than a flag the
+  arithmetic must remember. `staff_attendance.present_value` is THE one place a marked day becomes
+  a number of days present (late = 1.0 — a flag to be seen, never a deduction, `S-19`).
+  - **`school_clock.periods_before_lunch`** is now the one place the school day is cut in half —
+    `twice_daily` attendance (V1-3) and a half-day's AM/PM (`S-31`) share it, so a school on
+    twice_daily can never read two different middays. `half_day_periods(times, portion)` is what
+    tells the cover board which periods a half-day actually costs.
+  - **`calendar.org_working_days(db, org_id, a, b)`** — the one org-level working-days read (V1-0
+    §5), returning the DATES so the month summary (which must name the days nobody marked) and the
+    leave arithmetic (which needs a count) share one definition. `LeaveService._working_days` now
+    delegates to it.
+  - **`D-27`/`S-80`/`S-81`** — approving a leave returns `cover_dates` (working days from today
+    on), the decision sheet hands the admin one CoverSheet per day, and `LeavePulse.upcoming`
+    (four batched queries over a 14-day horizon) puts *"Tue 04 Aug: Ramesh away, 6 periods to
+    cover"* on the action rail the moment it is approved. `busy_reason` already carried the
+    approved-leave clause (`S-82`, V1-0) and now narrows a half-day to its own half.
+  - **`D-29`/`S-79`** — the cover picker says what the class **gains** (`_next_topics`: the first
+    planned topic with no full-coverage log, two queries for the whole sheet; a candidate who
+    teaches the subject AND has a topic to move is tier 0) and what the substitute **gives up**
+    (`S-74`'s recorded work, already there, plus `_behind_notes` off the batched `forecast_org` —
+    a warning on a still-assignable row, never a block).
+  - **`D-78`/`S-34`** — `services/staff_month.py` + `GET /staff/month`: days worked out of the
+    month's working days, leave used, leave left. **No money on it and no path from it to one**
+    (`D-25`). `days_not_marked` is its own count in its own word and never an absence — today a
+    display rule, in v2 the difference between a clerical gap and an unpaid day.
+    `LeaveService.prime_balances` batches what would have been two round-trips per member.
+  - **`D-18`/`S-64`** — `/timesheet` gains **Day · Week · Month**: month = one cell per DAY with
+    holidays and leave read from the calendar (never inferred from "no entries"), day = the
+    vertical timeline including breaks. **`S-75`** pre-selects her usual category in the picker
+    and **writes nothing**; **`S-70`** gives the counters back to her ("20 taught · 5 recorded ·
+    3 evenings"); **`S-68`** unions hostel sessions in as `evening_sessions`, **beside** the
+    periods and never inside the load mean.
+  - **`D-21`/`S-66`** — the slack profile: teaching/working/free per (weekday, period) over people
+    who teach at all, with the best slot as a sentence. **`S-76`** deleted the "free periods
+    unlogged" tile rather than fixing it (under `D-23` an unfilled period IS free, and it was at
+    its reddest at 8:30am).
+  - Also fixed, both pre-existing and both only reproducible on a Sunday: `CallBoard` computed its
+    headline and left-after-lunch lists for the raw calendar today, so on any closed day the
+    board read as *"nobody was absent"* rather than *"the school was shut"* — it now anchors on
+    `_last_school_day`; and `TimesheetService.week` dropped every non-working weekday, so a period
+    genuinely worked on a sports Sunday or an exam Saturday could not be seen OR recorded (module
+    §4.7) — a non-working day now appears if anything is on it. Seed: each class's subject
+    rotation is offset, one teacher was being scheduled into three rooms at once.
+  - `test_staff_v1_4.py` (11). Web: `/staff/month` + `/timesheet/month` (one
+    `components/staff/month-summary.tsx`), the four-state staff roster, half-day leave apply,
+    Arrange-cover from an approval, the slack chart, and `/staff/today` finally naming who is
+    covering **for whom**.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep

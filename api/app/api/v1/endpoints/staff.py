@@ -31,13 +31,16 @@ from app.schemas.staff import (
     LeaveRequestOut,
     StaffAttendanceIn,
     StaffAttendanceOut,
+    StaffMonthOut,
     TimesheetDay,
     TimesheetEntryIn,
+    TimesheetMonth,
     TimesheetWeek,
     WorkTypeOut,
 )
 from app.services.leave import LeaveService
 from app.services.staff_attendance import StaffAttendanceService
+from app.services.staff_month import StaffMonthService
 from app.services.timesheet import TimesheetService
 
 router = APIRouter()
@@ -55,6 +58,20 @@ def staff_roster(on_date: date | None = None,
 def mark_staff(body: StaffAttendanceIn, m: CurrentMember = Depends(require_admin),
                db: Session = Depends(get_db)):
     return StaffAttendanceService(db).mark(m, body)
+
+
+@router.get("/month", response_model=StaffMonthOut)
+def staff_month(month: str | None = None, member_id: uuid.UUID | None = None,
+                m: CurrentMember = Depends(require_academic),
+                db: Session = Depends(get_db)):
+    """Days worked out of the month's working days (D-78).
+
+    `require_academic`, not `require_admin`: the service restricts a teacher to
+    her own row. A person whose attendance record is being kept must be able to
+    read it — if a figure is ever disputed, the evidence has to be visible to
+    the person disputing it.
+    """
+    return StaffMonthService(db).summary(m, month, member_id)
 
 
 # ── timesheet ────────────────────────────────────────────────────────────────
@@ -76,6 +93,14 @@ def timesheet_week(member_id: uuid.UUID | None = None, week_start: date | None =
                    m: CurrentMember = Depends(require_academic),
                    db: Session = Depends(get_db)):
     return TimesheetService(db).week(m, member_id, week_start)
+
+
+@router.get("/timesheet/month", response_model=TimesheetMonth)
+def timesheet_month(member_id: uuid.UUID | None = None, month: str | None = None,
+                    m: CurrentMember = Depends(require_academic),
+                    db: Session = Depends(get_db)):
+    """One cell per day (D-18/S-64) — the month is a navigator, not an editor."""
+    return TimesheetService(db).month(m, member_id, month)
 
 
 @router.put("/timesheet/entry", response_model=TimesheetDay)

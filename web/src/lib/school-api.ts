@@ -17,6 +17,8 @@ import type {
   RosterCommitResult,
   SchoolClass,
   StaffAttendance,
+  StaffMark,
+  StaffMonth,
   StudentHomeworkHistory,
   StudentCategory,
   StudentDetail,
@@ -26,6 +28,7 @@ import type {
   Subject,
   Term,
   TimesheetDay,
+  TimesheetMonth,
   TimesheetWeek,
   WorkType,
 } from "@/lib/school-types";
@@ -546,15 +549,24 @@ export const schoolApi = {
   // ── SF-1 staff: attendance · timesheet · leave ────────────────────────────
   staffAttendance: (onDate?: string) =>
     api.get<StaffAttendance>(`/staff/attendance${qs({ on_date: onDate })}`),
-  /** Full replace of the day's absence set — "everyone in" is an empty list. */
-  markStaffAttendance: (b: { date?: string; absent_member_ids: string[]; notes?: Record<string, string> }) =>
-    api.post<StaffAttendance>("/staff/attendance", b),
+  /** Full replace of the day's exception set — "everyone in, on time" is empty.
+   *  `marks` carries D-04's half-day/late; `absent_member_ids` is the pre-V1-4
+   *  shorthand for plain absence and still works. */
+  markStaffAttendance: (b: {
+    date?: string; marks?: StaffMark[];
+    absent_member_ids?: string[]; notes?: Record<string, string>;
+  }) => api.post<StaffAttendance>("/staff/attendance", b),
+  /** D-78 — days worked out of working days. Admin: everyone. Teacher: herself. */
+  staffMonth: (p: { month?: string; member_id?: string } = {}) =>
+    api.get<StaffMonth>(`/staff/month${qs(p)}`),
 
   workTypes: () => api.get<WorkType[]>("/staff/work-types"),
   timesheetWeek: (p: { member_id?: string; week_start?: string } = {}) =>
     api.get<TimesheetWeek>(`/staff/timesheet/week${qs(p)}`),
   timesheetDay: (p: { member_id?: string; on_date?: string } = {}) =>
     api.get<TimesheetDay>(`/staff/timesheet/day${qs(p)}`),
+  timesheetMonth: (p: { member_id?: string; month?: string } = {}) =>
+    api.get<TimesheetMonth>(`/staff/timesheet/month${qs(p)}`),
   setTimesheetEntry: (b: { date: string; period_no: number; work_type: string; note?: string | null; member_id?: string }) =>
     api.put<TimesheetDay>("/staff/timesheet/entry", b),
   clearTimesheetEntry: (p: { on_date: string; period_no: number; member_id?: string }) =>
@@ -568,7 +580,10 @@ export const schoolApi = {
     api.get<LeaveBalance>(`/staff/leave/balance${qs({ member_id: memberId })}`),
   leaveRequests: (p: { status?: string; mine?: boolean } = {}) =>
     api.get<LeaveList>(`/staff/leave${qs({ status: p.status, mine: p.mine ? "true" : undefined })}`),
-  applyLeave: (b: { start_date: string; end_date: string; reason: string }) =>
+  applyLeave: (b: {
+    start_date: string; end_date: string; reason: string;
+    is_half_day?: boolean; portion?: "am" | "pm" | null;
+  }) =>
     api.post<LeaveRequest>("/staff/leave", b),
   decideLeave: (id: string, b: { action: "approved" | "rejected"; note?: string | null }) =>
     api.post<LeaveRequest>(`/staff/leave/${id}/decision`, b),

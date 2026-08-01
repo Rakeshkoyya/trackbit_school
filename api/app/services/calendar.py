@@ -81,6 +81,34 @@ def teaching_days(start: date, end: date, working_weekdays, blocked: set[date]) 
     return sum(1 for d in _daterange(start, end) if is_teaching_day(d, ww, blocked))
 
 
+def org_working_days(db: Session, org_id: uuid.UUID, start: date, end: date) -> list[date]:
+    """The school's working days in [start, end] — THE org-level read (V1-0 §5).
+
+    `teaching_days` is the pure count; this is the one place that loads the org's
+    active year and its calendar events to feed it, and it returns the dates
+    rather than a number so callers that need the *set* (V1-4's month summary,
+    which has to say which days nobody marked) and callers that need the *count*
+    (leave arithmetic) share one definition. A fifth implementation of "working
+    days between two dates" is exactly what V1-0 existed to stop.
+
+    No active year → weekdays are unknown, so every calendar day in the span is
+    returned. That is the honest fallback: a brand-new org has no working week to
+    subtract from, and returning nothing would make a leave application weightless.
+    """
+    year = db.scalar(select(AcademicYear).where(
+        AcademicYear.org_id == org_id, AcademicYear.is_active.is_(True)))
+    if year is None:
+        return list(_daterange(start, end))
+    events = list(db.scalars(
+        select(CalendarEvent).where(CalendarEvent.org_id == org_id,
+                                    CalendarEvent.academic_year_id == year.id)))
+    # `event_rows` first: the engine above is pure and consumes tuples, not ORM
+    # rows. Without it this raises the moment a school has ANY calendar event.
+    blocked = expand_blocked_dates(event_rows(events))
+    ww = set(year.working_weekdays or DEFAULT_WORKING_WEEKDAYS)
+    return [d for d in _daterange(start, end) if is_teaching_day(d, ww, blocked)]
+
+
 def effective_periods(
     periods_per_week: int,
     week_start: date,

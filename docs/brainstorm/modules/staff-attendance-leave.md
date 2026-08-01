@@ -6,6 +6,20 @@ somebody is paid by.
 
 ---
 
+> ## Built — V1-4, 2026-08-02 (migration `b4c5d6e7f8a9`)
+>
+> `D-04`, `S-18`, `S-31`, `S-19` and `S-34` are **shipped**. `staff_absences` widened in place —
+> `status` (absent | half_day | late) + `portion` (am | pm) — exactly as `S-18` argued; no second
+> table. `leave_requests.days` is numeric so a half-day is 0.5, with `is_half_day`/`portion`
+> beside it. `staff_attendance.present_value` is the one place a marked day becomes a number of
+> days present, and `S-19` was taken literally: **late is worth a full day**, a flag to be seen
+> and never a deduction. `D-78`'s month summary (`services/staff_month.py`) is the payoff, and
+> `S-34` is enforced in the service rather than left to a screen — `days_not_marked` is its own
+> count, in its own word, and never an absence.
+>
+> `S-33`'s grace period and `S-32`'s leave types stayed out: both are answers to `Q-08`, which is
+> deferred with payroll (`D-78`). §6's two consequences remain open and remain right.
+
 ## 1 · Where it stands today *(verified in code, 2026-07-30)*
 
 Shipped as **SF-1** on 2026-07-29. Migration `c7d8e9f0a1b2`, applied to production.

@@ -15,7 +15,7 @@ three services.
 Pure and I/O-free — it takes the JSON it is given. The caller loads the year.
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -91,6 +91,53 @@ def day_periods(period_times: list[dict] | None, periods_per_day: int) -> list[D
     return periods_of(period_times) or fallback_periods(periods_per_day)
 
 
+def periods_before_lunch(period_times: list[dict] | None) -> int | None:
+    """How many teaching periods fall before the midday break, or None.
+
+    The one place the school day is cut in half. Two features need the same cut
+    and must not disagree: `twice_daily` attendance (V1-3, Q-03) asks for the
+    first period *after* lunch, and a half-day (V1-4, `D-04`/`S-31`) needs to
+    know which periods an AM absence actually costs.
+
+    "Lunch" is computable with no extra config — `period_times` already carries
+    breaks as their own entries. Prefer a break whose kind mentions lunch; else
+    the break nearest the middle of the day. No break at all → None, and both
+    callers degrade rather than inventing a boundary.
+    """
+    entries = period_times or []
+    break_idxs = [i for i, e in enumerate(entries)
+                  if (e.get("kind") or PERIOD_KIND) != PERIOD_KIND]
+    if not break_idxs:
+        return None
+    lunch_idx = next(
+        (i for i in break_idxs if "lunch" in str(entries[i].get("kind", "")).lower()), None)
+    if lunch_idx is None:
+        mid = len(entries) / 2
+        lunch_idx = min(break_idxs, key=lambda i: abs(i - mid))
+    return sum(1 for e in entries[:lunch_idx]
+               if (e.get("kind") or PERIOD_KIND) == PERIOD_KIND)
+
+
+def half_day_periods(period_times: list[dict] | None, portion: str,
+                     periods_per_day: int = 8) -> list[int]:
+    """Which period numbers a half-day absence covers (V1-4, `S-31`).
+
+    ``portion='am'`` = away for the morning, so the periods before lunch are the
+    ones that need covering; ``'pm'`` = the ones after. With no break in the
+    timings the day cannot be halved honestly, so it falls back to splitting the
+    period list down the middle — a rounded guess is better than telling the
+    admin nobody needs covering, and the sheet shows which periods it picked.
+    """
+    periods = day_periods(period_times, periods_per_day)
+    if not periods:
+        return []
+    cut = periods_before_lunch(period_times)
+    if cut is None or cut <= 0 or cut >= len(periods):
+        cut = (len(periods) + 1) // 2
+    return [p.period_no for p in periods[:cut]] if portion == "am" \
+        else [p.period_no for p in periods[cut:]]
+
+
 def marking_period_nos(period_times: list[dict] | None, mode: str) -> list[int]:
     """Which period numbers take attendance under the org's mode (V1-3, D-01).
 
@@ -99,10 +146,10 @@ def marking_period_nos(period_times: list[dict] | None, mode: str) -> list[int]:
     * twice_daily   → the first period AND the first period after lunch — the
       mode a school picks precisely to see who left at midday (Q-03/S-05).
 
-    "After lunch" is computable with no extra config: `period_times` already
-    carries breaks as their own entries. Prefer a break whose kind mentions
-    lunch; else the break nearest the middle of the day. With no break at all
-    twice_daily degrades to first_period rather than inventing a slot.
+    "After lunch" comes from `periods_before_lunch` — the one place the day is
+    cut in half, shared with V1-4's half-day (`S-31`) so the two can never
+    disagree. With no break at all twice_daily degrades to first_period rather
+    than inventing a slot.
     """
     periods = periods_of(period_times)
     if not periods:
@@ -111,20 +158,9 @@ def marking_period_nos(period_times: list[dict] | None, mode: str) -> list[int]:
     if mode == "first_period":
         return [periods[0].period_no]
     if mode == "twice_daily":
-        entries = period_times or []
-        break_idxs = [i for i, e in enumerate(entries)
-                      if (e.get("kind") or PERIOD_KIND) != PERIOD_KIND]
-        lunch_idx = next(
-            (i for i in break_idxs if "lunch" in str(entries[i].get("kind", "")).lower()),
-            None)
-        if lunch_idx is None and break_idxs:
-            mid = len(entries) / 2
-            lunch_idx = min(break_idxs, key=lambda i: abs(i - mid))
-        if lunch_idx is None:
+        periods_before = periods_before_lunch(period_times)
+        if periods_before is None:
             return [periods[0].period_no]
-        periods_before = sum(
-            1 for e in entries[:lunch_idx]
-            if (e.get("kind") or PERIOD_KIND) == PERIOD_KIND)
         after = [p.period_no for p in periods if p.period_no > periods_before]
         return [periods[0].period_no] + after[:1]
     return [p.period_no for p in periods]  # every_period
@@ -169,3 +205,18 @@ def phase(
 
 def today_in(tz: str) -> date:
     return datetime.now(ZoneInfo(tz)).date()
+
+
+def month_bounds(month: str) -> tuple[date, date]:
+    """"2026-08" → (2026-08-01, 2026-08-31).
+
+    One parser for both month surfaces (the teacher's grid and the admin's
+    summary) so a bad string fails the same way on each, and so neither invents
+    its own idea of where a month ends. Raises `ValueError` on anything else;
+    the services turn that into a `ValidationError`.
+    """
+    year_s, month_s = str(month).split("-")[:2]
+    first = date(int(year_s), int(month_s), 1)
+    next_first = (date(first.year + 1, 1, 1) if first.month == 12
+                  else date(first.year, first.month + 1, 1))
+    return first, next_first - timedelta(days=1)

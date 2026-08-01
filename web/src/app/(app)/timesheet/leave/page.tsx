@@ -47,42 +47,75 @@ function ApplySheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [from, setFrom] = useState(() => iso(new Date()));
   const [to, setTo] = useState(() => iso(new Date()));
   const [reason, setReason] = useState("");
+  // D-04 — half a day. It is one date by definition, so choosing it collapses
+  // the range; the AM/PM half is what tells the cover board which periods (S-31).
+  const [half, setHalf] = useState<null | "am" | "pm">(null);
 
   const apply = useMutation({
-    mutationFn: () => schoolApi.applyLeave({ start_date: from, end_date: to, reason: reason.trim() }),
+    mutationFn: () => schoolApi.applyLeave({
+      start_date: from, end_date: half ? from : to, reason: reason.trim(),
+      is_half_day: !!half, portion: half,
+    }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["leave"] });
       toast.success(
         res.warnings.length
           ? "Sent — your admin will see it's over the usual allowance"
           : "Leave request sent");
-      setReason("");
+      setReason(""); setHalf(null);
       onClose();
     },
     onError: (e) => showApiError(e, "Could not send the request"),
   });
 
-  const backwards = to < from;
+  const backwards = !half && to < from;
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose(); }} title="Apply for leave">
+    <Sheet open={open} onOpenChange={(v) => { if (!v) { setHalf(null); onClose(); } }}
+      title="Apply for leave">
       <form className="space-y-4"
         onSubmit={(e) => { e.preventDefault(); if (!backwards && reason.trim()) apply.mutate(); }}>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="flex gap-1.5">
+          {([
+            { key: null, label: "Full day(s)" },
+            { key: "am" as const, label: "Half — morning" },
+            { key: "pm" as const, label: "Half — afternoon" },
+          ]).map((opt) => {
+            const active = half === opt.key;
+            return (
+              <button key={opt.label} type="button" aria-pressed={active}
+                onClick={() => setHalf(opt.key)}
+                className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${active ? "border-primary bg-accent text-accent-foreground" : "border-border bg-card text-muted-foreground"}`}>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className={half ? "" : "grid grid-cols-2 gap-3"}>
           <div>
-            <Label htmlFor="from">From</Label>
+            <Label htmlFor="from">{half ? "Date" : "From"}</Label>
             <Input id="from" type="date" value={from}
               onChange={(e) => {
                 setFrom(e.target.value);
                 if (to < e.target.value) setTo(e.target.value);
               }} />
           </div>
-          <div>
-            <Label htmlFor="to">To</Label>
-            <Input id="to" type="date" value={to} min={from}
-              onChange={(e) => setTo(e.target.value)} />
-          </div>
+          {half ? null : (
+            <div>
+              <Label htmlFor="to">To</Label>
+              <Input id="to" type="date" value={to} min={from}
+                onChange={(e) => setTo(e.target.value)} />
+            </div>
+          )}
         </div>
+
+        {half ? (
+          <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            Counts as half a day of your allowance. Your {half === "am" ? "morning" : "afternoon"}{" "}
+            periods are the ones the school will arrange cover for.
+          </p>
+        ) : null}
 
         <div>
           <Label htmlFor="reason">Reason</Label>
@@ -169,7 +202,9 @@ function MyLeaveInner() {
             <div key={r.id} className="rounded-lg border border-border bg-card px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-sm font-medium">
-                  {span(r)} · {r.days} day{r.days === 1 ? "" : "s"}
+                  {span(r)} · {r.is_half_day
+                    ? `half day (${r.portion === "pm" ? "afternoon" : "morning"})`
+                    : `${r.days} day${r.days === 1 ? "" : "s"}`}
                 </p>
                 <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge>
                 {r.status === "pending" ? (

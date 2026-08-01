@@ -159,6 +159,12 @@ export interface SubstituteCandidate {
   teaches_subject_elsewhere: boolean;
   teaches_this_class: boolean;
   teaching_periods_today: number;
+  /** S-74 — what she recorded for that period. Shown, never a block. */
+  work_label: string | null;
+  /** D-29/S-79(a) — this cover can be a real lesson, not a study period. */
+  can_teach_next_topic: boolean;
+  /** D-29/S-79(b) — she is behind in her own subjects. A warning, never a block. */
+  behind_note: string | null;
 }
 
 export interface ImpactPeriod {
@@ -172,6 +178,8 @@ export interface ImpactPeriod {
   substitution_id: string | null;
   covered_by_member_id: string | null;
   covered_by_name: string | null;
+  /** D-29 — what the class gains: the next planned topic nobody has logged. */
+  next_topic: string | null;
   candidates: SubstituteCandidate[];
 }
 
@@ -334,10 +342,35 @@ export interface TeacherLoad {
   teaching_periods: number;
   work_periods: number;
   free_periods: number;
+  /** S-68 — hostel evenings she runs. Beside the periods, never added to them. */
+  evening_sessions: number;
   delta_vs_mean: number;
   load_flag: "over" | "under" | "balanced";
   open_tasks: number;
   today: LoadStripCell[];
+}
+
+/** D-21/S-66 — the slack profile. `free` means "free **or** unrecorded", which
+ *  the screen says once: D-23 decided an unfilled period is free, so there is
+ *  no third state to draw. */
+export interface SlackSlot {
+  weekday: number;
+  period_no: number;
+  teaching: number;
+  working: number;
+  free: number;
+}
+
+export interface SlackProfile {
+  week_start: string;
+  /** People who teach at all — including office staff would fake wide-open slots. */
+  teacher_count: number;
+  periods_per_day: number;
+  working_weekdays: number[];
+  slots: SlackSlot[];
+  best_weekday: number | null;
+  best_period_no: number | null;
+  best_free: number;
 }
 
 export interface WorkloadWeek {
@@ -348,8 +381,7 @@ export interface WorkloadWeek {
   mean_teaching: number;
   teachers: TeacherLoad[];
   buckets: WorkBucket[];
-  /** Free periods today with no timesheet entry — the timesheet's adoption number. */
-  unfilled_free_periods: number;
+  slack: SlackProfile | null;
 }
 
 export interface LeaveQueueRow {
@@ -359,10 +391,24 @@ export interface LeaveQueueRow {
   start_date: string;
   end_date: string;
   days: number;
+  is_half_day: boolean;
+  portion: "am" | "pm" | null;
   reason: string;
   /** Policy breaches. Advisory — SF-1 flags over-policy leave, never blocks it. */
   warnings: string[];
   created_at: string;
+  cover_dates: string[];
+}
+
+/** S-81 — an approved future absence nobody has covered yet. Raised when the
+ *  leave is approved, not on the morning it starts. */
+export interface UpcomingCover {
+  date: string;
+  member_id: string;
+  member_name: string;
+  request_id: string | null;
+  periods_due: number;
+  periods_covered: number;
 }
 
 export interface LeavePulse {
@@ -372,6 +418,7 @@ export interface LeavePulse {
   allowed_per_year: number;
   allowed_per_month: number;
   queue: LeaveQueueRow[];
+  upcoming: UpcomingCover[];
 }
 
 export interface StaffBoard {

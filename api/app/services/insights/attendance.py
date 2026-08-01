@@ -44,11 +44,14 @@ from app.models import (
     ClassPeriod,
     ClassSubject,
     Guardian,
+    LessonLog,
     Membership,
     PeriodSubstitution,
+    PlanEntry,
     SchoolClass,
     Student,
     Subject,
+    SyllabusTopic,
     TaskInstance,
     TimesheetEntry,
     TimetableSlot,
@@ -74,7 +77,7 @@ from app.schemas.insights import (
     SubstituteCandidate,
 )
 from app.services.attendance import day_absence_maps, day_matrix, is_day_absent
-from app.services.calendar import event_rows, expand_blocked_dates
+from app.services.calendar import event_rows, expand_blocked_dates, org_working_days
 from app.services.dashboard import DashboardService
 from app.services.insights.actions import ActionService
 from app.services.school_clock import day_periods, marking_period_nos, today_in
@@ -242,7 +245,8 @@ class AttendanceInsights:
         on = on or self._today(m)
         roster = StaffAttendanceService(self.db).roster(m, on)
         absentees = [r for r in roster.roster if not r.present]
-        due = self._periods_due(m.org_id, [r.member_id for r in absentees], on)
+        due = self._periods_due(
+            m, {r.member_id: (r.status, r.portion) for r in absentees}, on)
         covered = defaultdict(int)
         for s in SubstitutionService(self.db).live(m.org_id, on):
             if s.absent_member_id:
@@ -255,24 +259,39 @@ class AttendanceInsights:
                 StaffAbsentee(
                     member_id=r.member_id, name=r.name, role=r.role, on_leave=r.on_leave,
                     reason=r.leave_reason or r.note,
+                    status=r.status, portion=r.portion,
                     periods_due=due.get(r.member_id, 0),
                     periods_covered=covered.get(r.member_id, 0))
                 for r in absentees
             ])
 
-    def _periods_due(self, org_id: uuid.UUID, member_ids: list[uuid.UUID],
+    def _periods_due(self, m: CurrentMember,
+                     members: dict[uuid.UUID, tuple[str, str | None]],
                      on: date) -> dict[uuid.UUID, int]:
-        if not member_ids:
+        """How many periods each away member leaves uncovered today.
+
+        A half-day only costs the periods in the half they missed (D-04/S-31) —
+        counting the whole day would put "9 of 9 uncovered" on the rail for
+        someone who taught the morning.
+        """
+        if not members:
             return {}
         rows = self.db.execute(
-            select(ClassSubject.teacher_member_id, func.count(TimetableSlot.id))
+            select(ClassSubject.teacher_member_id, TimetableSlot.period_no)
             .join(ClassSubject, ClassSubject.id == TimetableSlot.class_subject_id)
-            .where(TimetableSlot.org_id == org_id, TimetableSlot.weekday == on.weekday(),
+            .where(TimetableSlot.org_id == m.org_id, TimetableSlot.weekday == on.weekday(),
                    TimetableSlot.effective_from <= on,
                    or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > on),
-                   ClassSubject.teacher_member_id.in_(member_ids))
-            .group_by(ClassSubject.teacher_member_id)).all()
-        return {mid: int(n) for mid, n in rows}
+                   ClassSubject.teacher_member_id.in_(list(members)))).all()
+        subs = SubstitutionService(self.db)
+        out: dict[uuid.UUID, int] = defaultdict(int)
+        for mid, pno in rows:
+            status, portion = members.get(mid, ("absent", None))
+            if status == "half_day" and int(pno) not in subs.half_periods(
+                    m.org_id, on, portion):
+                continue
+            out[mid] += 1
+        return dict(out)
 
     # ── layer 2: the red list ────────────────────────────────────────────────
     def streaks(self, m: CurrentMember, min_days: int = STREAK_ALERT_DAYS,
@@ -388,6 +407,17 @@ class AttendanceInsights:
         rows.sort(key=lambda r: (-r.streak, r.class_label or "", r.full_name))
         return rows
 
+    def _last_school_day(self, m: CurrentMember, today: date, back: int = 14) -> date:
+        """Today, or the most recent day the school actually ran.
+
+        `org_working_days` is the one implementation (V1-0 §5). Falls back to
+        today when the last fortnight was entirely closed — a school on a long
+        break gets an empty board dated today, which is honest, rather than one
+        dated three weeks ago pretending to be current.
+        """
+        days = org_working_days(self.db, m.org_id, today - timedelta(days=back), today)
+        return days[-1] if days else today
+
     # ── V1-3: the tab's questions (S-08) ─────────────────────────────────────
     def call_board(self, m: CurrentMember, year_id: uuid.UUID | None = None) -> CallBoard:
         """Needs-a-call · drifting · chronic late · left-after-lunch — each a
@@ -488,11 +518,16 @@ class AttendanceInsights:
         lates.sort(key=lambda r: -r.late_days)
         board.chronic_late = self._name_rows(lates[:25])
 
-        # ── today's matrix once: the headline + left-after-lunch ─────────────
+        # ── the last school day's matrix once: headline + left-after-lunch ───
+        # NOT the raw calendar today: on a Sunday or a holiday every list below
+        # would come back empty, and an empty board reads as "nobody was absent"
+        # rather than "the school was shut". The board carries the date it used.
+        on = self._last_school_day(m, today)
+        board.date = on
         class_ids = list(self.db.scalars(select(SchoolClass.id).where(
             SchoolClass.org_id == m.org_id,
             SchoolClass.academic_year_id == year.id)))
-        tmarked, texc = day_matrix(self.db, m.org_id, class_ids, today, today)
+        tmarked, texc = day_matrix(self.db, m.org_id, class_ids, on, on)
 
         if m.org.attendance_mode == "twice_daily":
             marking = marking_period_nos(year.period_times, "twice_daily")
@@ -584,10 +619,18 @@ class AttendanceInsights:
                 .where(Membership.id.in_([s.substitute_member_id for s in subs.values()]))).all()
         } if subs else {}
 
+        # A half-day only loses its own half — the other half she taught, and
+        # offering cover for it would be nonsense (D-04/S-31).
+        if mine is not None and mine.status == "half_day":
+            missing = SubstitutionService(self.db).half_periods(m.org_id, on, mine.portion)
+            due = [row for row in due if int(row[0]) in missing]
+
         out_periods: list[ImpactPeriod] = []
         if due:
+            cs_ids = {cs_id for _p, _c, cs_id, *_ in due}
+            next_topics = self._next_topics(m, cs_ids)
             candidates = self._candidates(m, on, [int(p) for p, *_ in due],
-                                          {cs_id for _p, _c, cs_id, *_ in due}, member_id)
+                                          cs_ids, member_id, next_topics)
             for pno, cid, cs_id, cname, section, sname in due:
                 clock = periods.get(int(pno))
                 sub = subs.get((cid, int(pno)))
@@ -596,6 +639,7 @@ class AttendanceInsights:
                     end=clock.end if clock else None,
                     class_id=cid, class_label=_label(cname, section),
                     class_subject_id=cs_id, subject_name=sname,
+                    next_topic=next_topics.get(cs_id),
                     substitution_id=sub.id if sub else None,
                     covered_by_member_id=sub.substitute_member_id if sub else None,
                     covered_by_name=sub_names.get(sub.substitute_member_id) if sub else None,
@@ -607,14 +651,89 @@ class AttendanceInsights:
             on_leave=bool(mine and mine.on_leave), reason=mine.reason if mine else None,
             periods=out_periods, tasks=tasks)
 
+    def _next_topics(self, m: CurrentMember, cs_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """class-subject → the next planned topic nobody has logged yet (D-29).
+
+        The positive half of `S-79`: a substitute who teaches this subject
+        elsewhere can move the syllabus forward instead of supervising a study
+        period, and that is the strongest reason to prefer a candidate. Two
+        queries for the whole sheet — the plan entries and the logs — never one
+        per period.
+
+        P2 holds: this reads the baseline plan and the actual logs; it writes
+        nothing, and a topic taught by a substitute lands in the class's own
+        lesson log because the period card credits the class-subject.
+        """
+        if not cs_ids:
+            return {}
+        rows = self.db.execute(
+            select(PlanEntry.class_subject_id, PlanEntry.topic_id, PlanEntry.week_start,
+                   SyllabusTopic.title, SyllabusTopic.position)
+            .join(SyllabusTopic, SyllabusTopic.id == PlanEntry.topic_id)
+            .where(PlanEntry.org_id == m.org_id, PlanEntry.class_subject_id.in_(cs_ids))
+            .order_by(PlanEntry.week_start, SyllabusTopic.position)).all()
+        if not rows:
+            return {}
+        taught: set[uuid.UUID] = {
+            tid for tid, in self.db.execute(
+                select(LessonLog.topic_id).where(
+                    LessonLog.org_id == m.org_id,
+                    LessonLog.class_subject_id.in_(cs_ids),
+                    LessonLog.topic_id.is_not(None),
+                    LessonLog.coverage == "full")).all()
+        }
+        out: dict[uuid.UUID, str] = {}
+        for cs_id, topic_id, _week, title, _pos in rows:
+            if cs_id in out or topic_id in taught:
+                continue
+            out[cs_id] = title
+        return out
+
+    def _behind_notes(self, m: CurrentMember) -> dict[uuid.UUID, str]:
+        """teacher → the subjects where she is behind her own plan (D-29/S-79b).
+
+        The negative half: a teacher already behind is the worst person to hand
+        an extra period to. `forecast_org` is the batched computation the
+        dashboard already runs — a second definition of "behind" here would be
+        the exact defect V1-0 existed to remove. Only `red` counts: amber is a
+        pace worth watching, not a reason to protect somebody's period.
+        """
+        year = self._year(m, None)
+        if year is None:
+            return {}
+        from app.services.planner import PlannerService  # noqa: PLC0415
+
+        by_teacher: dict[uuid.UUID, list[str]] = defaultdict(list)
+        teachers = {
+            cs_id: tid for cs_id, tid in self.db.execute(
+                select(ClassSubject.id, ClassSubject.teacher_member_id)
+                .where(ClassSubject.org_id == m.org_id,
+                       ClassSubject.teacher_member_id.is_not(None))).all()
+        }
+        for row in PlannerService(self.db).forecast_org(m, year.id):
+            if row.status != "red":
+                continue
+            tid = teachers.get(row.class_subject_id)
+            if tid is not None:
+                by_teacher[tid].append(f"{row.class_label} {row.subject_name}")
+        return {
+            tid: ("behind in " + ", ".join(subjects[:2])
+                  + (f" +{len(subjects) - 2} more" if len(subjects) > 2 else ""))
+            for tid, subjects in by_teacher.items()
+        }
+
     def _candidates(self, m: CurrentMember, on: date, period_nos: list[int],
                     cs_ids: set[uuid.UUID], absent_member_id: uuid.UUID,
+                    next_topics: dict[uuid.UUID, str] | None = None,
                     ) -> dict[tuple[int, uuid.UUID], list[SubstituteCandidate]]:
         """Who could take each affected period, ranked by who actually knows it.
 
-        Ranking (DASH3 §4.1): teaches the same subject elsewhere > teaches this
-        class for another subject > lightest teaching load today. The rank is a
-        suggestion — the admin still chooses, which is why the reason is shown.
+        Ranking (DASH3 §4.1, extended by `D-29`): can teach the class's next
+        planned topic > teaches the same subject elsewhere > teaches this class
+        for another subject > lightest teaching load today. The rank is a
+        suggestion — the admin still chooses, which is why the reason is shown,
+        and why "she is behind herself" is a warning on a still-assignable row
+        rather than an exclusion.
         """
         staff = list(self.db.execute(
             select(Membership.id, User.name)
@@ -670,10 +789,14 @@ class AttendanceInsights:
                                              TimesheetEntry.date == on))
         }
 
+        next_topics = next_topics or {}
+        behind = self._behind_notes(m) if next_topics else {}
+
         out: dict[tuple[int, uuid.UUID], list[SubstituteCandidate]] = {}
         for pno in period_nos:
             for cs_id in cs_ids:
                 subject_id, class_id = wanted.get(cs_id, (None, None))
+                topic = next_topics.get(cs_id)
                 ranked: list[tuple[int, SubstituteCandidate]] = []
                 for mid, name in staff:
                     if pno in busy[mid] or mid in away:
@@ -681,22 +804,33 @@ class AttendanceInsights:
                     same_subject = subject_id in teaches_subject.get(mid, set())
                     same_class = class_id in teaches_class.get(mid, set())
                     doing = recorded.get((mid, pno))
-                    if same_subject:
-                        tier, reason = 0, "teaches this subject elsewhere"
+                    behind_note = behind.get(mid)
+                    # D-29: knowing the subject AND the class having a next topic
+                    # to move is the strongest tier — that cover is a lesson, not
+                    # supervision.
+                    can_teach_next = bool(same_subject and topic)
+                    if can_teach_next:
+                        tier, reason = 0, f"can teach the next topic — {topic}"
+                    elif same_subject:
+                        tier, reason = 1, "teaches this subject elsewhere"
                     elif same_class:
-                        tier, reason = 1, "teaches this class"
+                        tier, reason = 2, "teaches this class"
                     else:
-                        tier, reason = 2, f"free · {load.get(mid, 0)} periods today"
+                        tier, reason = 3, f"free · {load.get(mid, 0)} periods today"
                     if doing:
                         reason += f" · doing: {doing}"
+                    if behind_note:
+                        reason += f" · {behind_note}"
                     ranked.append((
-                        tier * 100 + load.get(mid, 0) + (10 if doing else 0),
+                        tier * 100 + load.get(mid, 0) + (10 if doing else 0)
+                        + (5 if behind_note else 0),
                         SubstituteCandidate(
                             member_id=mid, name=name, reason=reason, rank=0,
                             teaches_subject_elsewhere=same_subject,
                             teaches_this_class=same_class,
                             teaching_periods_today=load.get(mid, 0),
-                            work_label=doing)))
+                            work_label=doing, can_teach_next_topic=can_teach_next,
+                            behind_note=behind_note)))
                 ranked.sort(key=lambda t: (t[0], t[1].name))
                 picked = []
                 for i, (_score, c) in enumerate(ranked[:6], start=1):

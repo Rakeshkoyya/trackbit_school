@@ -535,6 +535,22 @@ class OverviewService:
                 detail=(f"{leave.pending} {_plural(leave.pending, 'application')} "
                         "waiting on you"),
                 href="/staff/leave"))
+        # S-81: the moment leave is approved the uncovered periods are known, so
+        # the rail says so on the day it was approved rather than waiting for
+        # someone to reopen the leave screen on Friday morning.
+        if leave.upcoming:
+            first = leave.upcoming[0]
+            open_periods = sum(max(0, u.periods_due - u.periods_covered)
+                               for u in leave.upcoming)
+            actions.append(QuickAction(
+                key="cover_ahead", label="Arrange cover", count=open_periods, tone="amber",
+                detail=(f"{first.date:%a %d %b}: {first.member_name} away, "
+                        f"{first.periods_due - first.periods_covered} "
+                        f"{_plural(first.periods_due - first.periods_covered, 'period')} "
+                        "to cover"
+                        + (f" · {len(leave.upcoming) - 1} more {_plural(len(leave.upcoming) - 1, 'day')}"
+                           if len(leave.upcoming) > 1 else "")),
+                href="/staff/leave"))
         if streaks.rows:
             n = len(streaks.rows)
             actions.append(QuickAction(

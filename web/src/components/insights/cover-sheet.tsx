@@ -4,15 +4,30 @@
 //
 // The one screen where a staff absence becomes a decision instead of a fact. For
 // each period the absent teacher was due to take, the candidates are ranked by
-// who actually knows the subject — teaches it elsewhere > teaches this class >
-// lightest load today — and **the reason is always shown**, because the rank is a
-// suggestion and the admin is the one who knows that Priya is covering the trip.
+// who actually knows the subject, and **the reason is always shown**, because the
+// rank is a suggestion and the admin is the one who knows that Priya is covering
+// the trip.
+//
+// V1-4 (`D-26`/`D-29`/`S-78`) made each row a comparison of two things the admin
+// could not see before:
+//   * **what the class gains** — the next planned topic, and whether this person
+//     can actually teach it. That is the difference between a real lesson and a
+//     supervised study period, and it is the strongest reason to prefer someone.
+//   * **what she gives up** — the work she already recorded for that period
+//     (`S-74`), and a warning if she is behind in her own subjects (`S-79b`).
+// Both are shown on a still-assignable row. Neither is a block: covering a class
+// beats checking notebooks on most mornings, and the admin knows which.
+//
+// `D-27`: it also opens for a FUTURE date, from an approved leave, so cover is
+// arranged when the leave is approved rather than on the morning it starts.
 //
 // For an absent admin the blast radius is their work, not their periods, so their
 // due/overdue tasks are listed with Reassign and Extend.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Check, RotateCcw, UserCheck } from "lucide-react";
+import {
+  AlertTriangle, BookOpen, CalendarClock, Check, RotateCcw, UserCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +88,15 @@ function PeriodBlock({
         )}
       </div>
 
+      {/* D-29 — what the class gains. Without it every cover reads the same,
+          and a study period looks as good as a lesson. */}
+      {period.next_topic ? (
+        <p className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <BookOpen className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>Next planned topic: <span className="text-foreground">{period.next_topic}</span></span>
+        </p>
+      ) : null}
+
       {period.substitution_id ? (
         <div className="mt-2">
           <Button size="sm" variant="ghost" disabled={cancel.isPending}
@@ -83,9 +107,21 @@ function PeriodBlock({
       ) : period.candidates.length ? (
         <ul className="mt-2 space-y-1.5">
           {period.candidates.map((c) => (
-            <li key={c.member_id} className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm">
-                {c.name} <span className="text-xs text-muted-foreground">· {c.reason}</span>
+            <li key={c.member_id} className="flex items-start gap-2">
+              <span className="min-w-0 flex-1 text-sm">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  {c.name}
+                  {c.can_teach_next_topic ? (
+                    <Badge tone="success">can teach it</Badge>
+                  ) : null}
+                </span>
+                <span className="block text-xs text-muted-foreground">{c.reason}</span>
+                {/* S-79(b) — don't rob Peter to pay Paul. A warning, never a block. */}
+                {c.behind_note ? (
+                  <span className="mt-0.5 flex items-center gap-1 text-xs text-warning">
+                    <AlertTriangle className="h-3 w-3 shrink-0" /> {c.behind_note}
+                  </span>
+                ) : null}
               </span>
               <Button size="sm" variant="outline" disabled={busy || assign.isPending}
                 onClick={() => assign.mutate(c.member_id)}>
@@ -104,22 +140,25 @@ function PeriodBlock({
 }
 
 export function CoverSheet({
-  memberId, memberName, onClose,
+  memberId, memberName, onDate, onClose,
 }: {
   memberId: string | null;
   memberName?: string;
+  /** D-27 — a future day from an approved leave. Omitted = today. */
+  onDate?: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
-    queryKey: ["insights", "impact", memberId],
-    queryFn: () => insightsApi.staffImpact(memberId!),
+    queryKey: ["insights", "impact", memberId, onDate ?? "today"],
+    queryFn: () => insightsApi.staffImpact(memberId!, onDate),
     enabled: !!memberId,
   });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["insights", "impact", memberId] });
     qc.invalidateQueries({ queryKey: ["insights", "staff"] });
+    qc.invalidateQueries({ queryKey: ["leave"] });
   };
 
   const taskAction = useMutation({
@@ -136,6 +175,10 @@ export function CoverSheet({
         <div className="h-40 animate-pulse rounded-lg bg-muted/60" />
       ) : (
         <div className="space-y-4">
+          <p className="text-xs font-medium text-muted-foreground">
+            {new Date(`${data.date}T00:00:00`).toLocaleDateString("en-IN", {
+              weekday: "long", day: "numeric", month: "long" })}
+          </p>
           {data.reason ? (
             <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               {data.on_leave ? "On approved leave — " : ""}{data.reason}

@@ -10,6 +10,28 @@ out of all that, the one answer the office needs twenty times a week: **who is f
 
 ---
 
+> ## Built — V1-4, 2026-08-02 (migration `b4c5d6e7f8a9`)
+>
+> §10's build order is **done**, in its own order, with one correction to the record: items 1–4
+> (`S-72`, `S-74`, `Q-37`, and the `S-82` clause) had already landed in **V1-0**, which is why
+> the packet found the cover picker already reading the timesheet.
+>
+> Shipped here: `D-26`/`S-78` the two-panel sheet · `D-29`/`S-79` **both** readings of "syllabus
+> pending" — the next planned topic as the top tier, and a behind-warning on a still-assignable
+> row · `D-27`/`S-80`/`S-81` approve → `cover_dates` → one sheet per day → the rail item ·
+> `D-18`/`S-64` month/week/day at three altitudes · `S-75` the pre-selecting picker that writes
+> nothing · `S-70` her counters · `D-19`/`S-69` (already shipped in V1-2) · `D-21`/`S-66` the
+> slack profile · `S-76` the unlogged tile **deleted, not fixed** · `S-68` hostel evenings on the
+> load board, counted beside the periods.
+>
+> **Still open, deliberately:** `S-65`/`Q-32` (admin-assigned non-cover duty) and `S-71` (marking
+> back-filled entries) — both wanted an answer this packet did not have, and neither blocks
+> anything. `S-73`'s out-of-hours line stays out for v1 as recommended.
+>
+> Two §4.7 items turned out to be real and are fixed: `week()` dropped a non-working day even when
+> something had happened on it (a sports Sunday could not be recorded), and the seed's timetable
+> put one teacher in three rooms at once.
+
 ## 1 · Who this is for, and when
 
 | Role | The moment | Device / time budget | The question they arrive with |

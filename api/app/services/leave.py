@@ -24,7 +24,7 @@ days, and any other arithmetic would quietly overcharge the teacher's balance.
 """
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -33,7 +33,6 @@ from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
-    CalendarEvent,
     LeaveRequest,
     LeaveRequestEvent,
     Membership,
@@ -48,11 +47,17 @@ from app.schemas.staff import (
     LeavePolicy,
     LeaveRequestOut,
 )
-from app.services.calendar import event_rows, expand_blocked_dates, teaching_days
+from app.services.calendar import org_working_days
+from app.services.school_clock import today_in
 
 # Statuses that still consume allowance. A rejected or cancelled request frees
 # its days back up immediately.
 LIVE_STATUSES = ("pending", "approved")
+
+
+def _days(value: float) -> str:
+    """"1" not "1.0", "0.5" not "0.50" — the warning is read by a person."""
+    return f"{value:g}"
 
 
 class LeaveService:
@@ -84,18 +89,13 @@ class LeaveService:
     def _working_days(self, org_id: uuid.UUID, start: date, end: date) -> int:
         """Working days in the span, holidays excluded. Never below 1 — a leave
         applied for entirely over a holiday is still an application someone must
-        answer, and returning 0 would make it invisible to the balance."""
-        year = self._active_year(org_id)
-        if year is None:
-            return max(1, (end - start).days + 1)
-        events = list(self.db.scalars(
-            select(CalendarEvent).where(CalendarEvent.org_id == org_id,
-                                        CalendarEvent.academic_year_id == year.id)))
-        # `event_rows` first: the calendar engine is pure and consumes tuples, not
-        # ORM rows. Without it this raises the moment a school has ANY calendar
-        # event — which is every real school, and no test org.
-        blocked = expand_blocked_dates(event_rows(events))
-        return max(1, teaching_days(start, end, year.working_weekdays, blocked))
+        answer, and returning 0 would make it invisible to the balance.
+
+        `org_working_days` is the one org-level implementation (V1-0 §5); this
+        used to load the year and its events itself, which is how four copies of
+        "working days between two dates" came to exist.
+        """
+        return max(1, len(org_working_days(self.db, org_id, start, end)))
 
     def _member_names(self, org_id: uuid.UUID) -> dict[uuid.UUID, str]:
         return {
@@ -119,7 +119,51 @@ class LeaveService:
         return exists
 
     # ── balance ──────────────────────────────────────────────────────────────
+    def prime_balances(self, m: CurrentMember, member_ids: list[uuid.UUID]) -> None:
+        """Fill the memo for many members in ONE query.
+
+        `balance` is memoised per member, which is enough for a leave inbox but
+        not for the month summary, where a 25-person staff would otherwise cost
+        25 round-trips to a remote database for a figure that is one GROUP BY.
+        Same computation, same rows — just gathered once (ux §9).
+        """
+        wanted = [mid for mid in member_ids if mid not in self._balance_memo]
+        if not wanted:
+            return
+        year = self._active_year(m.org_id)
+        window = (
+            (year.start_date, year.end_date) if year
+            else (date(date.today().year, 1, 1), date(date.today().year, 12, 31))
+        )
+        totals: dict[uuid.UUID, dict[str, float]] = {}
+        for mid, status, total in self.db.execute(
+            select(LeaveRequest.member_id, LeaveRequest.status,
+                   func.coalesce(func.sum(LeaveRequest.days), 0))
+            .where(LeaveRequest.org_id == m.org_id, LeaveRequest.member_id.in_(wanted),
+                   LeaveRequest.status.in_(LIVE_STATUSES),
+                   LeaveRequest.start_date >= window[0], LeaveRequest.start_date <= window[1])
+            .group_by(LeaveRequest.member_id, LeaveRequest.status)).all():
+            totals.setdefault(mid, {})[status] = float(total)
+        for mid in wanted:
+            by_status = totals.get(mid, {})
+            approved = by_status.get("approved", 0.0)
+            pending = by_status.get("pending", 0.0)
+            self._balance_memo[mid] = LeaveBalance(
+                member_id=mid, academic_year_id=year.id if year else None,
+                allowed_per_year=m.org.leaves_per_year,
+                allowed_per_month=m.org.leaves_per_month,
+                approved_days=approved, pending_days=pending,
+                remaining=max(0.0, m.org.leaves_per_year - approved - pending))
+
     def balance(self, m: CurrentMember, member_id: uuid.UUID | None = None) -> LeaveBalance:
+        # Memo first, but only for someone allowed to read it: `_resolve_member`
+        # is itself a round-trip for anyone but yourself, and a primed id has
+        # already been proved to be in this org by the query that primed it. The
+        # is_admin/self test is kept explicit rather than inferred from "it must
+        # already be in the memo" — a cache hit must never be an authorisation.
+        if member_id is not None and member_id in self._balance_memo \
+                and (m.is_admin or member_id == m.membership.id):
+            return self._balance_memo[member_id]
         mid = self._resolve_member(m, member_id)
         cached = self._balance_memo.get(mid)
         if cached is not None:
@@ -136,20 +180,22 @@ class LeaveService:
                    LeaveRequest.start_date >= window[0], LeaveRequest.start_date <= window[1])
             .group_by(LeaveRequest.status)
         ).all()
-        by_status = {status: int(total) for status, total in rows}
-        approved = by_status.get("approved", 0)
-        pending = by_status.get("pending", 0)
+        # float(), not int(): `days` is numeric since V1-4 and a half-day is 0.5.
+        # int() here would round every half-day application away to nothing.
+        by_status = {status: float(total) for status, total in rows}
+        approved = by_status.get("approved", 0.0)
+        pending = by_status.get("pending", 0.0)
         out = LeaveBalance(
             member_id=mid, academic_year_id=year.id if year else None,
             allowed_per_year=m.org.leaves_per_year,
             allowed_per_month=m.org.leaves_per_month,
             approved_days=approved, pending_days=pending,
-            remaining=max(0, m.org.leaves_per_year - approved - pending))
+            remaining=max(0.0, m.org.leaves_per_year - approved - pending))
         self._balance_memo[mid] = out
         return out
 
     def _warnings(self, m: CurrentMember, mid: uuid.UUID, start: date, end: date,
-                  days: int, exclude_id: uuid.UUID | None = None) -> list[str]:
+                  days: float, exclude_id: uuid.UUID | None = None) -> list[str]:
         """Policy breaches, phrased for the admin who has to decide."""
         out: list[str] = []
         bal = self.balance(m, mid)
@@ -160,7 +206,7 @@ class LeaveService:
         committed = bal.approved_days + bal.pending_days
         if committed > bal.allowed_per_year:
             out.append(
-                f"Over the yearly allowance — {committed} days committed against "
+                f"Over the yearly allowance — {_days(committed)} days committed against "
                 f"{bal.allowed_per_year}")
         # Monthly cap counts days whose leave STARTS in the same calendar month.
         month_start = start.replace(day=1)
@@ -176,10 +222,10 @@ class LeaveService:
         )
         if exclude_id is not None:
             q = q.where(LeaveRequest.id != exclude_id)
-        used_this_month = int(self.db.scalar(q) or 0)
+        used_this_month = float(self.db.scalar(q) or 0)
         if used_this_month + days > m.org.leaves_per_month:
             out.append(
-                f"Over the monthly limit — {used_this_month + days} day(s) in "
+                f"Over the monthly limit — {_days(used_this_month + days)} day(s) in "
                 f"{start.strftime('%B')} against a limit of {m.org.leaves_per_month}")
         return out
 
@@ -187,6 +233,8 @@ class LeaveService:
     def apply(self, m: CurrentMember, body: LeaveApplyIn) -> LeaveRequestOut:
         if body.end_date < body.start_date:
             raise ValidationError("The end date cannot be before the start date")
+        if body.is_half_day and body.start_date != body.end_date:
+            raise ValidationError("A half-day is one date — pick a single day for it")
         overlap = self.db.scalar(
             select(LeaveRequest.id).where(
                 LeaveRequest.org_id == m.org_id, LeaveRequest.member_id == m.membership.id,
@@ -196,10 +244,16 @@ class LeaveService:
         if overlap is not None:
             raise ConflictError("You already have a leave request covering those dates")
 
-        days = self._working_days(m.org_id, body.start_date, body.end_date)
+        # D-04: half a day costs half a day of the allowance. The AM/PM portion
+        # is not decoration — it is what tells the cover board which periods to
+        # fill, so it defaults to the morning rather than to nothing (S-31).
+        days = (0.5 if body.is_half_day
+                else float(self._working_days(m.org_id, body.start_date, body.end_date)))
         req = LeaveRequest(
             org_id=m.org_id, member_id=m.membership.id, start_date=body.start_date,
-            end_date=body.end_date, days=days, reason=body.reason.strip(), status="pending")
+            end_date=body.end_date, days=days, reason=body.reason.strip(), status="pending",
+            is_half_day=body.is_half_day,
+            portion=(body.portion or "am") if body.is_half_day else None)
         self.db.add(req)
         self.db.flush()
         self.db.add(LeaveRequestEvent(
@@ -228,7 +282,10 @@ class LeaveService:
         self._append(req, body.action, m, body.note)
         req.status = body.action
         self.db.flush()
-        return self._out(m, req)
+        # D-27: an approval hands the admin the cover flow in the same response,
+        # rather than relying on someone reopening the leave screen on Friday
+        # morning — which is the morning nobody has a spare minute.
+        return self._out(m, req, with_cover=True)
 
     def _append(self, req: LeaveRequest, action: str, m: CurrentMember,
                 note: str | None = None) -> None:
@@ -258,8 +315,36 @@ class LeaveService:
             raise ForbiddenError("You can only see your own leave")
         return req
 
+    def cover_dates(self, m: CurrentMember, req: LeaveRequest,
+                    known: set[date] | None = None) -> list[date]:
+        """The working days this approved leave still removes someone from (D-27).
+
+        Today onwards only: cover for a day that has already happened is not a
+        decision, it is history. Weekends and holidays are dropped through the
+        same `org_working_days` the leave was costed with, so the admin is never
+        offered a Sunday to arrange cover for.
+
+        `known` is a pre-computed working-day set for a wider window, so listing
+        twenty approved requests costs one calendar read rather than twenty.
+        """
+        if req.status != "approved":
+            return []
+        today = today_in(m.org.timezone)
+        start = max(req.start_date, today)
+        if start > req.end_date:
+            return []
+        if known is not None:
+            days, d = [], start
+            while d <= req.end_date:
+                if d in known:
+                    days.append(d)
+                d += timedelta(days=1)
+            return days
+        return org_working_days(self.db, m.org_id, start, req.end_date)
+
     def _out(self, m: CurrentMember, req: LeaveRequest,
-             names: dict[uuid.UUID, str] | None = None) -> LeaveRequestOut:
+             names: dict[uuid.UUID, str] | None = None,
+             with_cover: bool = False, known: set[date] | None = None) -> LeaveRequestOut:
         names = names if names is not None else self._member_names(m.org_id)
         warnings = (
             self._warnings(m, req.member_id, req.start_date, req.end_date, req.days,
@@ -270,8 +355,10 @@ class LeaveService:
             id=req.id, member_id=req.member_id,
             member_name=names.get(req.member_id, "—"),
             start_date=req.start_date, end_date=req.end_date, days=req.days,
+            is_half_day=req.is_half_day, portion=req.portion,
             reason=req.reason, status=req.status, created_at=req.created_at,
             warnings=warnings,
+            cover_dates=self.cover_dates(m, req, known) if with_cover else [],
             events=[
                 LeaveEventOut(action=e.action, note=e.note, created_at=e.created_at,
                               actor_name=names.get(e.actor_member_id) if e.actor_member_id else None)
@@ -294,6 +381,16 @@ class LeaveService:
         rows = list(self.db.scalars(q))
         names = self._member_names(m.org_id)
 
+        # One calendar read for the whole list (D-27): every approved row that
+        # still has days ahead of it carries the days needing cover, so the
+        # admin can arrange it from the list without reopening each request.
+        today = today_in(m.org.timezone)
+        ahead = [r for r in rows if r.status == "approved" and r.end_date >= today]
+        known: set[date] | None = None
+        if ahead:
+            known = set(org_working_days(
+                self.db, m.org_id, today, max(r.end_date for r in ahead)))
+
         # Pending count is deliberately computed unfiltered, so a status filter
         # on screen can never make the "N waiting on you" badge lie.
         pending_q = select(func.count(LeaveRequest.id)).where(
@@ -303,7 +400,8 @@ class LeaveService:
         pending = int(self.db.scalar(pending_q) or 0)
 
         return LeaveListOut(
-            requests=[self._out(m, r, names) for r in rows],
+            requests=[self._out(m, r, names, with_cover=known is not None, known=known)
+                      for r in rows],
             pending_count=pending, policy=self.policy(m))
 
     def pending_count(self, m: CurrentMember) -> int:

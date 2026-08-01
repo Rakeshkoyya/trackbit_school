@@ -14,12 +14,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, CalendarDays, Check, Inbox, Loader2, X,
+  AlertTriangle, CalendarClock, CalendarDays, Check, Inbox, Loader2, X,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { CoverSheet } from "@/components/insights/cover-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -60,9 +61,17 @@ function stamp(isoStr: string): string {
   });
 }
 
-function DecisionSheet({ request, onClose }: { request: LeaveRequest | null; onClose: () => void }) {
+function DecisionSheet({ request, onClose, onArrangeCover }: {
+  request: LeaveRequest | null;
+  onClose: () => void;
+  onArrangeCover: (memberId: string, name: string, date: string) => void;
+}) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
+  // D-27 — what the approval just created work for. Held in state because the
+  // request in the list is refetched and we want the days that were returned by
+  // the decision itself.
+  const [coverDates, setCoverDates] = useState<string[]>([]);
 
   const decide = useMutation({
     mutationFn: (action: "approved" | "rejected") =>
@@ -71,24 +80,60 @@ function DecisionSheet({ request, onClose }: { request: LeaveRequest | null; onC
       qc.invalidateQueries({ queryKey: ["leave"] });
       qc.invalidateQueries({ queryKey: ["staff-attendance"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["insights"] });
       toast.success(res.status === "approved" ? "Leave approved" : "Leave declined");
       setNote("");
-      onClose();
+      // Approving hands back the cover flow instead of closing the sheet: the
+      // periods are known NOW, and the alternative is remembering on the
+      // morning it starts, which is the morning nobody has a spare minute.
+      if (res.status === "approved" && res.cover_dates.length) {
+        setCoverDates(res.cover_dates);
+      } else {
+        onClose();
+      }
     },
     onError: (e) => showApiError(e, "Could not record the decision"),
   });
 
+  const close = () => { setNote(""); setCoverDates([]); onClose(); };
+  // An already-approved request reopened from the list carries its own days.
+  const days = coverDates.length ? coverDates : (request?.cover_dates ?? []);
+
   return (
-    <Sheet open={!!request} onOpenChange={(v) => { if (!v) { setNote(""); onClose(); } }}
+    <Sheet open={!!request} onOpenChange={(v) => { if (!v) close(); }}
       title="Leave request">
       {request ? (
         <div className="space-y-4">
           <div>
             <p className="text-base font-semibold">{request.member_name}</p>
             <p className="text-sm text-muted-foreground">
-              {span(request)} · {request.days} day{request.days === 1 ? "" : "s"}
+              {span(request)} · {request.is_half_day
+                ? `half day (${request.portion === "pm" ? "afternoon" : "morning"})`
+                : `${request.days} day${request.days === 1 ? "" : "s"}`}
             </p>
           </div>
+
+          {request.status === "approved" && days.length ? (
+            <div className="rounded-lg border border-warning/40 bg-warning-soft p-3">
+              <p className="text-sm font-medium">
+                Arrange cover for {days.length} day{days.length === 1 ? "" : "s"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                One sheet per day — the classes {request.member_name.split(" ")[0]} would have
+                taken, and who is genuinely free to take them.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {days.map((d) => (
+                  <Button key={d} size="sm" variant="outline"
+                    onClick={() => onArrangeCover(request.member_id, request.member_name, d)}>
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    {new Date(`${d}T00:00:00`).toLocaleDateString("en-IN",
+                      { weekday: "short", day: "numeric", month: "short" })}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="rounded-lg bg-muted/50 px-3 py-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Reason</p>
@@ -158,6 +203,8 @@ function DecisionSheet({ request, onClose }: { request: LeaveRequest | null; onC
 function LeaveInner() {
   const [filter, setFilter] = useState<LeaveStatus | "all">("pending");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [coverFor, setCoverFor] =
+    useState<{ id: string; name: string; date: string } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["leave", "all"],
@@ -213,16 +260,29 @@ function LeaveInner() {
                   ) : null}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {span(r)} · {r.days} day{r.days === 1 ? "" : "s"} · {r.reason}
+                  {span(r)} · {r.is_half_day ? "half day" : `${r.days} day${r.days === 1 ? "" : "s"}`} · {r.reason}
                 </p>
               </div>
+              {/* D-27 — approved leave with days still to cover says so on the
+                  row, so the work is visible without opening anything. */}
+              {r.cover_dates.length ? (
+                <Badge tone="warning">
+                  {r.cover_dates.length} day{r.cover_dates.length === 1 ? "" : "s"} to cover
+                </Badge>
+              ) : null}
               <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Badge>
             </button>
           ))}
         </div>
       )}
 
-      <DecisionSheet request={open} onClose={() => setOpenId(null)} />
+      <DecisionSheet request={open} onClose={() => setOpenId(null)}
+        onArrangeCover={(id, name, date) => {
+          setOpenId(null);
+          setCoverFor({ id, name, date });
+        }} />
+      <CoverSheet memberId={coverFor?.id ?? null} memberName={coverFor?.name}
+        onDate={coverFor?.date} onClose={() => setCoverFor(null)} />
     </div>
   );
 }

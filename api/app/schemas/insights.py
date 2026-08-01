@@ -75,6 +75,10 @@ class StaffAbsentee(BaseModel):
     role: str
     on_leave: bool = False
     reason: str | None = None
+    # absent | half_day (V1-4, D-04). `late` never reaches this list — a late
+    # member is in, and offering to cover their periods would be nonsense.
+    status: str = "absent"
+    portion: str | None = None      # which half, when status is half_day
     periods_due: int = 0            # periods they were on the timetable for today
     periods_covered: int = 0        # of those, how many have a live substitute
 
@@ -199,6 +203,12 @@ class SubstituteCandidate(BaseModel):
     # S-74: what they recorded for that period, if anything — shown, never a
     # block. "Free" and "free but marking Class 10 scripts" are different offers.
     work_label: str | None = None
+    # D-29/S-79(a): this cover can be a real lesson, not a study period — she
+    # teaches the subject, so the class's next planned topic can move forward.
+    can_teach_next_topic: bool = False
+    # D-29/S-79(b): don't rob Peter to pay Paul. Named subjects where this
+    # candidate is behind her own plan. A warning on the row, never a block.
+    behind_note: str | None = None
 
 
 class ImpactPeriod(BaseModel):
@@ -212,6 +222,9 @@ class ImpactPeriod(BaseModel):
     substitution_id: uuid.UUID | None = None
     covered_by_member_id: uuid.UUID | None = None
     covered_by_name: str | None = None
+    # What the class GAINS if the right person takes it (D-29): the next topic
+    # the plan has scheduled and nobody has logged yet.
+    next_topic: str | None = None
     candidates: list[SubstituteCandidate] = []
 
 
@@ -389,10 +402,40 @@ class TeacherLoad(BaseModel):
     teaching_periods: int = 0
     work_periods: int = 0
     free_periods: int = 0
+    # S-68: hostel/evening blocks she runs this week. Reported BESIDE teaching
+    # periods and never folded into them — an evening is not a period, and the
+    # mean would stop being comparable the moment they were added together.
+    evening_sessions: int = 0
     delta_vs_mean: float = 0
     load_flag: str = "balanced"     # over | under | balanced
     open_tasks: int = 0
     today: list[LoadStripCell] = []
+
+
+class SlackSlot(BaseModel):
+    """One (weekday, period) on the slack profile (D-21/S-66).
+
+    `free` legitimately means **free or unrecorded** — `D-23` decided an unfilled
+    period is free, so there is no third state to draw. The screen says so once,
+    in the hint, rather than pretending the number is only genuine slack.
+    """
+    weekday: int
+    period_no: int
+    teaching: int = 0
+    working: int = 0                # recorded a piece of work
+    free: int = 0
+
+
+class SlackProfile(BaseModel):
+    """When the whole staff could meet. Its job is finding slack, not surveillance."""
+    week_start: date_
+    teacher_count: int = 0          # people who teach at all — the denominator
+    periods_per_day: int = 8
+    working_weekdays: list[int] = []
+    slots: list[SlackSlot] = []
+    best_weekday: int | None = None
+    best_period_no: int | None = None
+    best_free: int = 0
 
 
 class WorkloadWeek(BaseModel):
@@ -403,7 +446,8 @@ class WorkloadWeek(BaseModel):
     mean_teaching: float = 0
     teachers: list[TeacherLoad] = []
     buckets: list[WorkBucket] = []
-    unfilled_free_periods: int = 0  # free periods today with no timesheet entry
+    # S-66 — the one genuinely new chart in the module.
+    slack: SlackProfile | None = None
 
 
 class LeaveQueueRow(BaseModel):
@@ -414,19 +458,39 @@ class LeaveQueueRow(BaseModel):
     member_name: str
     start_date: date_
     end_date: date_
-    days: int
+    days: float
+    is_half_day: bool = False
+    portion: str | None = None
     reason: str
     warnings: list[str] = []
     created_at: datetime
+    # D-27: the days this leave still needs cover for (approved rows only), so
+    # "Arrange cover" is a press away from the queue rather than a second visit.
+    cover_dates: list[date_] = []
+
+
+class UpcomingCover(BaseModel):
+    """An approved future absence whose periods nobody has covered yet (S-81).
+
+    The rail's job is to raise this *when the leave is approved*, not on the
+    morning it starts — which is the morning nobody has a spare minute.
+    """
+    date: date_
+    member_id: uuid.UUID
+    member_name: str
+    request_id: uuid.UUID | None = None
+    periods_due: int = 0
+    periods_covered: int = 0
 
 
 class LeavePulse(BaseModel):
     pending: int = 0
     on_leave_today: int = 0
-    approved_days_this_month: int = 0
+    approved_days_this_month: float = 0
     allowed_per_year: int = 0
     allowed_per_month: int = 0
     queue: list[LeaveQueueRow] = []
+    upcoming: list[UpcomingCover] = []
 
 
 class StaffBoard(BaseModel):

@@ -9,7 +9,8 @@ export default function TimesheetLayout({ children }: { children: React.ReactNod
     <div>
       <SubTabs
         tabs={[
-          { label: "My week", href: "/timesheet" },
+          { label: "My time", href: "/timesheet" },
+          { label: "My month", href: "/timesheet/month" },
           { label: "Leave", href: "/timesheet/leave" },
         ]}
       />
