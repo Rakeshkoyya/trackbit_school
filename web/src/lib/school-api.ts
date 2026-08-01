@@ -286,6 +286,27 @@ export const schoolApi = {
     exceptions: { student_id: string; status: "absent" | "late"; late_minutes?: number | null }[];
   }) => api.post<import("@/lib/school-types").AttendanceMarkResult>("/attendance/mark", b),
 
+  // V1-3 — reasons (D-02), informed absence (S-24), My Class (D-03)
+  /** Recorded AFTER capture by admin or teacher; stamps every absent period of
+   *  that student-day. Its presence turns a red row amber (D-86). */
+  setAbsenceReason: (b: {
+    student_id: string; date: string;
+    reason_code?: string | null; note?: string | null;
+  }) => api.put<{ student_id: string; date: string; updated_periods: number }>(
+    "/attendance/absences/reason", b),
+  addAbsenceNote: (b: {
+    student_id: string; from_date: string; to_date: string;
+    reason_code?: string | null; note?: string | null;
+    source?: "parent_call" | "office" | "teacher";
+  }) => api.post<import("@/lib/school-types").AbsenceNote>("/attendance/absences/notes", b),
+  absenceNotes: (studentId: string) =>
+    api.get<import("@/lib/school-types").AbsenceNote[]>(
+      `/attendance/absences/${studentId}/notes`),
+  myClasses: () => api.get<import("@/lib/school-types").MyClassList>("/my-class"),
+  classRegister: (classId: string, month?: string) =>
+    api.get<import("@/lib/school-types").ClassRegister>(
+      `/my-class/${classId}/register${qs({ month })}`),
+
   // daily checks / recommendations (V2-P3, SPRD2 §5.5)
   checks: (classSubjectId: string, onDate?: string) =>
     api.get<import("@/lib/school-types").Checks>(

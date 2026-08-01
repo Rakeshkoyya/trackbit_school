@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ClipboardCheck, Loader2, Moon, NotebookPen } from "lucide-react";
+import { BookOpen, ClipboardCheck, Loader2, Moon, NotebookPen, Phone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { parentApi, type DayStatus, type HomeworkStatus } from "@/lib/parent-api";
@@ -27,6 +27,9 @@ const STATUS_COPY: Record<DayStatus, { label: string; tone: "success" | "warning
   present: { label: "Present today", tone: "success" },
   partial: { label: "Missed some periods", tone: "warning" },
   absent: { label: "Absent today", tone: "danger" },
+  // V1-3 (Q-03): the school marks attendance again after lunch, so "went home
+  // at midday" is its own plain sentence — never buried inside "partial".
+  left_after_lunch: { label: "Went home after lunch", tone: "warning" },
   not_marked: {
     label: "Attendance not marked yet",
     tone: "neutral",
@@ -34,6 +37,35 @@ const STATUS_COPY: Record<DayStatus, { label: string; tone: "success" | "warning
   },
   no_school: { label: "No school periods today", tone: "neutral" },
 };
+
+/** V1-3 (S-11): the month strip — the one chart every parent reads instantly.
+ *  A DAILY status per square, never per-period detail; a day the school never
+ *  marked is neutral, because that is the school's gap, not the child's. */
+const STRIP: Record<string, { cls: string; label: string }> = {
+  present: { cls: "bg-[color:var(--success,#234a37)]/25", label: "present" },
+  partial: { cls: "bg-warning/40", label: "in for part of the day" },
+  left_after_lunch: { cls: "bg-warning/60", label: "went home after lunch" },
+  absent: { cls: "bg-danger/60", label: "absent" },
+  not_marked: { cls: "bg-muted", label: "not marked" },
+};
+
+function MonthStrip({ days }: { days: { date: string; status: string }[] }) {
+  if (!days.length) return null;
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap gap-1">
+        {days.map((d) => (
+          <span
+            key={d.date}
+            title={`${new Date(`${d.date}T00:00:00`).toLocaleDateString("en-IN", {
+              day: "numeric", month: "short" })} — ${STRIP[d.status]?.label ?? d.status}`}
+            className={`h-4 w-4 rounded-[3px] ${STRIP[d.status]?.cls ?? "bg-muted"}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function Section({ icon: Icon, title, children }: {
   icon: React.ElementType; title: string; children: React.ReactNode;
@@ -88,9 +120,34 @@ export default function ParentTodayPage() {
             {status.hint ? (
               <p className="mt-0.5 text-xs text-muted-foreground">{status.hint}</p>
             ) : null}
+            {/* D-02: the reason the school has on record — so a family that
+                already phoned is not asked again. */}
+            {data.absence_reason ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                The school has recorded: <span className="text-foreground">{data.absence_reason}</span>
+              </p>
+            ) : null}
           </div>
           <Badge tone={status.tone} className="shrink-0">{data.date}</Badge>
         </div>
+
+        {/* S-11: the pattern, with its denominator stated (ux §4). */}
+        {data.marked_days > 0 ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Present {data.present_days} of {data.marked_days} school day
+            {data.marked_days === 1 ? "" : "s"} this month.
+          </p>
+        ) : null}
+        <MonthStrip days={data.month ?? []} />
+
+        {/* S-25: the write path is a phone call. Zero parent writes (D-86). */}
+        {data.school_phone && (data.status === "absent" || data.status === "left_after_lunch")
+          && !data.absence_reason ? (
+            <a href={`tel:${data.school_phone}`}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted/40">
+              <Phone className="h-4 w-4" /> Tell the school why
+            </a>
+          ) : null}
       </section>
 
       <Section icon={BookOpen} title="Taught today">

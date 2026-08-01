@@ -151,6 +151,8 @@ class OrgSettingsOut(BaseModel):
     address: str | None = None
     state: str | None = None
     board: str | None = None
+    # V1-3 (S-25): the number behind the parent's "tell the school why" link.
+    phone: str | None = None
     attendance_mode: str = "every_period"  # D-01
     min_attendance_pct: int = 75
     homework_gap_days: int = 3
@@ -166,6 +168,7 @@ class OrgSettingsUpdate(BaseModel):
     address: str | None = Field(default=None, max_length=300)
     state: str | None = Field(default=None, max_length=60)
     board: str | None = Field(default=None, max_length=60)
+    phone: str | None = Field(default=None, max_length=20)
     attendance_mode: str | None = Field(
         default=None, pattern="^(every_period|first_period|twice_daily)$")
     min_attendance_pct: int | None = Field(default=None, ge=0, le=100)

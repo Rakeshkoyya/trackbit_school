@@ -120,9 +120,17 @@ def me(principal=Depends(get_current_principal), db: Session = Depends(get_db)) 
             user=principal.user, org=principal.org, orgs=[],
         )
     member = principal
+    # V1-3 (D-03): the one signal the nav needs to show/hide "My Class".
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models import SchoolClass  # noqa: PLC0415
+    is_ct = db.scalar(select(SchoolClass.id).where(
+        SchoolClass.org_id == member.org_id,
+        SchoolClass.class_teacher_member_id == member.membership.id).limit(1)) is not None
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
         is_super_admin=member.user.is_super_admin,
+        is_class_teacher=is_ct,
         user=member.user, org=member.org,
         orgs=AuthService(db).list_user_orgs(member.user_id),
     )

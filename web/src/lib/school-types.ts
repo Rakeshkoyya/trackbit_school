@@ -227,6 +227,9 @@ export interface MyDayPeriod {
   opened: boolean;
   closed: boolean;
   attendance_marked: boolean;
+  /** V1-3 (D-01): false when the org's mode doesn't take attendance this
+   *  period — the card stays, only the attendance ask moves. */
+  marks_attendance: boolean;
   roster_count: number;
   present_count: number | null;
   absent_count: number | null;
@@ -1331,6 +1334,9 @@ export interface PeriodCard {
   opened: boolean;
   closed: boolean;
   attendance_marked: boolean;
+  /** V1-3 (D-01/Q-02a): the mode may not mark this period; topic/homework/
+   *  checks are unaffected. */
+  marks_attendance: boolean;
   roster: AttendanceRosterRow[];
   roster_count: number;
   present_count: number | null;
@@ -1338,6 +1344,63 @@ export interface PeriodCard {
   late_count: number | null;
   plan: PeriodPlan;
   homework: PeriodHomework[];
+}
+
+// ── My Class — the class teacher's area (V1-3, D-03) ────────────────────────
+export interface MyClassSummary {
+  class_id: string;
+  class_label: string;
+  roster: number;
+  is_mine: boolean;
+}
+
+export interface MyClassList {
+  classes: MyClassSummary[];
+}
+
+/** THE day status, computed server-side (`classify_marked_day`) — paint it,
+ *  never re-derive it. `not_marked` is a gap in the record: neutral, never red. */
+export type DayCellStatus =
+  | "present" | "partial" | "absent" | "left_after_lunch" | "not_marked" | "no_school";
+
+export interface RegisterCell {
+  date: string;
+  status: DayCellStatus;
+  late: boolean;
+  /** A reason on the exception, or a covering informed-absence note (D-86). */
+  has_reason: boolean;
+}
+
+export interface RegisterRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  cells: RegisterCell[];
+  present_days: number;
+  marked_days: number;
+}
+
+export interface ClassRegister {
+  class_id: string;
+  class_label: string;
+  month: string;
+  mode: "every_period" | "first_period" | "twice_daily";
+  days: string[];
+  school_days: number;
+  rows: RegisterRow[];
+}
+
+// ── absence reasons + informed absence (V1-3, D-02/S-24) ────────────────────
+export interface AbsenceNote {
+  id: string;
+  student_id: string;
+  from_date: string;
+  to_date: string;
+  reason_code: string | null;
+  note: string | null;
+  source: "parent_call" | "office" | "teacher";
+  created_by_name: string | null;
+  created_at: string | null;
 }
 
 // â”€â”€ deep log â€” optional lesson observations (exception-only, P1v2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

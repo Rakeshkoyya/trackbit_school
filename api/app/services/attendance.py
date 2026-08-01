@@ -22,13 +22,19 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError
 from app.models import (
+    AcademicYear,
     AttendanceException,
     ClassPeriod,
     Guardian,
     SchoolClass,
     Student,
+    StudentAbsenceNote,
 )
 from app.schemas.attendance import (
+    AbsenceNoteIn,
+    AbsenceNoteOut,
+    AbsenceReasonIn,
+    AbsenceReasonOut,
     AttendanceMarkIn,
     AttendanceMarkOut,
     AttendanceRosterOut,
@@ -41,6 +47,7 @@ from app.services.periods import (
     get_or_create_period,
     today_for,
 )
+from app.services.school_clock import marking_period_nos
 
 # ── THE day-status rule (V1-0d, ux §9) ───────────────────────────────────────
 # "Was this child absent today?" is rendered on six surfaces (admin board,
@@ -48,10 +55,17 @@ from app.services.periods import (
 # computed three different ways. These two pure functions are now the only
 # definition; every consumer renders them, none re-derives.
 
-def classify_day(scheduled: int, marked: int, absent: int) -> str:
-    """One student's day: present | partial | absent | not_marked | no_school.
+def classify_day(scheduled: int, marked: int, absent: int,
+                 am_absent: bool | None = None,
+                 pm_absent: bool | None = None) -> str:
+    """One student's day: present | partial | absent | left_after_lunch |
+    not_marked | no_school.
 
     * absent  = absent in EVERY marked period of the day;
+    * left_after_lunch (V1-3, Q-03/S-05) = present at the morning marking slot,
+      absent at the after-lunch one — twice_daily mode's whole reason to exist.
+      Its own named state, NEVER folded into "partial"; still not day-absent
+      (present in a marked period), so it never extends a streak;
     * partial = absent in some but not all (came late, left early);
     * not_marked = periods were scheduled and nobody marked any — a gap in the
       record, never a judgement (ux §5);
@@ -61,11 +75,36 @@ def classify_day(scheduled: int, marked: int, absent: int) -> str:
         return "no_school"
     if marked == 0:
         return "not_marked"
+    if am_absent is False and pm_absent is True:
+        return "left_after_lunch"
     if absent >= marked:
         return "absent"
     if absent > 0:
         return "partial"
     return "present"
+
+
+def classify_marked_day(marked_periods: list[int], exceptions: dict[int, str],
+                        marking_nos: list[int]) -> tuple[str, bool]:
+    """(day status, was_late) for one student on a day the class marked
+    something. THE per-day classifier behind the class-teacher register and
+    the parent's month strip — both render this, neither re-derives.
+
+    `marked_periods` = period numbers the class marked; `exceptions` = this
+    student's period_no → absent|late; `marking_nos` = the org mode's marking
+    slots (empty = every period marks)."""
+    absent = sum(1 for p in marked_periods if exceptions.get(p) == "absent")
+    late = any(exceptions.get(p) == "late" for p in marked_periods)
+    am_absent = pm_absent = None
+    if len(marking_nos) >= 2:
+        am, pm = marking_nos[0], marking_nos[1]
+        if am in marked_periods:
+            am_absent = exceptions.get(am) == "absent"
+        if pm in marked_periods:
+            pm_absent = exceptions.get(pm) == "absent"
+    status = classify_day(len(marked_periods) or 1, len(marked_periods), absent,
+                          am_absent=am_absent, pm_absent=pm_absent)
+    return status, late
 
 
 def is_day_absent(marked: int, absent: int) -> bool:
@@ -107,6 +146,44 @@ def day_absence_maps(db: Session, org_id: uuid.UUID, since: date, until: date,
     ).all():
         absents.setdefault(sid, {})[d] = int(n)
     return marked, absents
+
+
+def day_matrix(db: Session, org_id: uuid.UUID, class_ids: list[uuid.UUID],
+               since: date, until: date,
+               ) -> tuple[dict[tuple[uuid.UUID, date], list[int]],
+                          dict[tuple[uuid.UUID, date], dict[int, tuple[str, bool]]]]:
+    """The period-level facts behind every day-status render (V1-3):
+
+    (class_id, date) → marked period numbers ·
+    (student_id, date) → {period_no: (status, has_reason)}.
+
+    Two queries for any window and roster size. The class-teacher register, the
+    admin call board and the parent month strip all classify from THIS — the
+    classifier is `classify_marked_day`, and nothing re-derives it.
+    """
+    if not class_ids:
+        return {}, {}
+    marked: dict[tuple[uuid.UUID, date], list[int]] = {}
+    for cid, d, pno in db.execute(
+        select(ClassPeriod.class_id, ClassPeriod.date, ClassPeriod.period_no)
+        .where(ClassPeriod.org_id == org_id, ClassPeriod.class_id.in_(class_ids),
+               ClassPeriod.date >= since, ClassPeriod.date <= until,
+               ClassPeriod.attendance_marked_at.is_not(None))
+    ).all():
+        marked.setdefault((cid, d), []).append(int(pno))
+    exc: dict[tuple[uuid.UUID, date], dict[int, tuple[str, bool]]] = {}
+    for sid, d, pno, status, reason_at in db.execute(
+        select(AttendanceException.student_id, ClassPeriod.date,
+               ClassPeriod.period_no, AttendanceException.status,
+               AttendanceException.reason_at)
+        .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+        .where(AttendanceException.org_id == org_id,
+               ClassPeriod.class_id.in_(class_ids),
+               ClassPeriod.date >= since, ClassPeriod.date <= until,
+               ClassPeriod.attendance_marked_at.is_not(None))
+    ).all():
+        exc.setdefault((sid, d), {})[int(pno)] = (status, reason_at is not None)
+    return marked, exc
 
 
 def _label(klass: SchoolClass) -> str:
@@ -189,7 +266,16 @@ class AttendanceService:
         period.attendance_marked_at = datetime.now(UTC)
         if period.teacher_member_id is None:
             period.teacher_member_id = m.membership.id
-        # Full-replace the exception set (idempotent re-capture).
+        # Full-replace the exception set (idempotent re-capture) — but a reason
+        # someone already recorded on this absence must SURVIVE the re-mark
+        # (V1-3, D-02): correcting a mis-tap is not un-explaining the child.
+        kept_reasons = {
+            e.student_id: (e.reason_code, e.reason_note, e.reason_by_member_id, e.reason_at)
+            for e in self.db.scalars(
+                select(AttendanceException).where(
+                    AttendanceException.period_id == period.id,
+                    AttendanceException.reason_at.is_not(None)))
+        }
         self.db.execute(
             AttendanceException.__table__.delete().where(
                 AttendanceException.period_id == period.id))
@@ -199,9 +285,12 @@ class AttendanceService:
         for e in body.exceptions:
             if e.student_id not in roster_ids:
                 continue  # ignore students not on this class's roster
+            code, note, by, at = kept_reasons.get(e.student_id, (None, None, None, None))
             self.db.add(AttendanceException(
                 org_id=m.org_id, period_id=period.id, student_id=e.student_id,
-                status=e.status, late_minutes=e.late_minutes if e.status == "late" else None))
+                status=e.status, late_minutes=e.late_minutes if e.status == "late" else None,
+                reason_code=code, reason_note=note,
+                reason_by_member_id=by, reason_at=at))
             if e.status == "absent":
                 absent_ids.append(e.student_id)
         self.db.flush()
@@ -211,6 +300,13 @@ class AttendanceService:
             alerted = self._alert_absences(m, klass, absent_ids, d)
             period.alerted_at = datetime.now(UTC)
             self.db.flush()
+        elif not first_of_day and period.alerted_at is None:
+            # V1-3 (Q-03/S-05): in twice_daily mode the after-lunch marking slot
+            # carries its own signal — a child present in the morning and absent
+            # now LEFT AFTER LUNCH, which is the single fact this mode exists to
+            # catch. One message, idempotent through the same alerted_at stamp.
+            alerted = self._maybe_alert_left_after_lunch(
+                m, body.class_id, period, absent_ids, d)
 
         roster_count = len(roster_ids)
         absent_count = len(absent_ids)
@@ -222,9 +318,26 @@ class AttendanceService:
             roster_count=roster_count, present_count=roster_count - absent_count,
             absent_count=absent_count, late_count=late_count, alerted_count=alerted)
 
+    def noted_student_ids(self, org_id: uuid.UUID, student_ids: list[uuid.UUID],
+                          on: date) -> set[uuid.UUID]:
+        """Students whose absence on `on` is covered by an informed-absence note
+        (S-24) — the school already knows, so nothing should alert or turn red."""
+        if not student_ids:
+            return set()
+        return set(self.db.scalars(
+            select(StudentAbsenceNote.student_id).where(
+                StudentAbsenceNote.org_id == org_id,
+                StudentAbsenceNote.student_id.in_(student_ids),
+                StudentAbsenceNote.from_date <= on,
+                StudentAbsenceNote.to_date >= on).distinct()))
+
     def _alert_absences(self, m: CurrentMember, klass: SchoolClass,
                         absent_ids: list[uuid.UUID], d: date) -> int:
-        """Notify each absent student's guardians (§7). Plain text only (P4)."""
+        """Notify each absent student's guardians (§7). Plain text only (P4).
+        S-13: a family that already told the school ("away till Friday") is
+        never messaged about the absence they announced."""
+        absent_ids = [sid for sid in absent_ids
+                      if sid not in self.noted_student_ids(m.org_id, absent_ids, d)]
         if not absent_ids:
             return 0
         sent = 0
@@ -241,6 +354,120 @@ class AttendanceService:
             message = f"{full_name} was marked absent at {m.org.name} today ({d.isoformat()})."
             sent += notify_guardians(recipients, message)
         return sent
+
+    def _maybe_alert_left_after_lunch(self, m: CurrentMember, class_id: uuid.UUID,
+                                      period: ClassPeriod,
+                                      absent_ids: list[uuid.UUID], d: date) -> int:
+        """The after-lunch signal (V1-3, Q-03/S-05) — twice_daily mode only,
+        and only on the PM marking slot. Alerts guardians of students who were
+        PRESENT at the morning slot and are absent now."""
+        if m.org.attendance_mode != "twice_daily" or not absent_ids:
+            return 0
+        year = self.db.scalar(select(AcademicYear).where(
+            AcademicYear.org_id == m.org_id, AcademicYear.is_active.is_(True)))
+        marking = marking_period_nos(year.period_times if year else None, "twice_daily")
+        if len(marking) < 2 or period.period_no != marking[1]:
+            return 0
+        am = self.db.scalar(select(ClassPeriod).where(
+            ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == class_id,
+            ClassPeriod.date == d, ClassPeriod.period_no == marking[0],
+            ClassPeriod.attendance_marked_at.is_not(None)))
+        if am is None:
+            return 0
+        am_absent = set(self.db.scalars(
+            select(AttendanceException.student_id).where(
+                AttendanceException.period_id == am.id,
+                AttendanceException.status == "absent")))
+        left = [sid for sid in absent_ids if sid not in am_absent]
+        left = [sid for sid in left
+                if sid not in self.noted_student_ids(m.org_id, left, d)]
+        if not left:
+            return 0
+        sent = 0
+        rows = self.db.execute(
+            select(Student.full_name, Guardian.phone, Guardian.notify_opt_out)
+            .join(Guardian, Guardian.student_id == Student.id)
+            .where(Student.org_id == m.org_id, Student.id.in_(left))).all()
+        by_student: dict[str, list[tuple[str | None, bool]]] = {}
+        for full_name, phone, opt_out in rows:
+            by_student.setdefault(full_name, []).append((phone, opt_out))
+        for full_name, recipients in by_student.items():
+            message = (f"{full_name} was present this morning at {m.org.name} but was "
+                       f"marked absent after lunch today ({d.isoformat()}).")
+            sent += notify_guardians(recipients, message)
+        period.alerted_at = datetime.now(UTC)
+        self.db.flush()
+        return sent
+
+    # ── reasons + informed absence (V1-3, D-02/S-24) ─────────────────────────
+    def set_absence_reason(self, m: CurrentMember,
+                           body: AbsenceReasonIn) -> AbsenceReasonOut:
+        """Stamp the reason on every absent exception for that student-day.
+        The reason belongs to the absence, not to one period of it (D-02)."""
+        student = self.db.scalar(select(Student).where(
+            Student.id == body.student_id, Student.org_id == m.org_id))
+        if student is None:
+            raise NotFoundError("Student")
+        rows = list(self.db.scalars(
+            select(AttendanceException)
+            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+            .where(AttendanceException.org_id == m.org_id,
+                   AttendanceException.student_id == body.student_id,
+                   AttendanceException.status == "absent",
+                   ClassPeriod.date == body.date)))
+        now = datetime.now(UTC)
+        for r in rows:
+            r.reason_code = body.reason_code
+            r.reason_note = body.note
+            r.reason_by_member_id = m.membership.id
+            r.reason_at = now
+        self.db.flush()
+        return AbsenceReasonOut(
+            student_id=body.student_id, date=body.date,
+            reason_code=body.reason_code, note=body.note,
+            updated_periods=len(rows))
+
+    def add_absence_note(self, m: CurrentMember, body: AbsenceNoteIn) -> AbsenceNoteOut:
+        """Informed/planned absence (S-24) — append-only (law 3)."""
+        student = self.db.scalar(select(Student).where(
+            Student.id == body.student_id, Student.org_id == m.org_id))
+        if student is None:
+            raise NotFoundError("Student")
+        note = StudentAbsenceNote(
+            org_id=m.org_id, student_id=body.student_id,
+            from_date=body.from_date, to_date=body.to_date,
+            reason_code=body.reason_code, note=body.note, source=body.source,
+            created_by_member_id=m.membership.id)
+        self.db.add(note)
+        self.db.flush()
+        return AbsenceNoteOut(
+            id=note.id, student_id=note.student_id, from_date=note.from_date,
+            to_date=note.to_date, reason_code=note.reason_code, note=note.note,
+            source=note.source, created_by_name=m.user.name,
+            created_at=note.created_at)
+
+    def list_absence_notes(self, m: CurrentMember,
+                           student_id: uuid.UUID) -> list[AbsenceNoteOut]:
+        from app.models import Membership, User  # noqa: PLC0415
+
+        rows = list(self.db.scalars(
+            select(StudentAbsenceNote).where(
+                StudentAbsenceNote.org_id == m.org_id,
+                StudentAbsenceNote.student_id == student_id)
+            .order_by(StudentAbsenceNote.from_date.desc()).limit(50)))
+        names = {
+            mid: name for mid, name in self.db.execute(
+                select(Membership.id, User.name)
+                .join(User, User.id == Membership.user_id)
+                .where(Membership.id.in_(
+                    {r.created_by_member_id for r in rows if r.created_by_member_id})))
+        } if rows else {}
+        return [AbsenceNoteOut(
+            id=r.id, student_id=r.student_id, from_date=r.from_date,
+            to_date=r.to_date, reason_code=r.reason_code, note=r.note,
+            source=r.source,
+            created_by_name=names.get(r.created_by_member_id),
+            created_at=r.created_at) for r in rows]
 
     # ── My Day integration: per-period state for a set of classes ────────────
     def roster_sizes(

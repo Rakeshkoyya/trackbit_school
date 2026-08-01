@@ -23,7 +23,7 @@ export function MobileMenu() {
   const { me } = useAuth();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const items = menuNavForRole(me?.org_role, me?.is_super_admin);
+  const items = menuNavForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher);
 
   useEffect(() => {
     if (!open) return;

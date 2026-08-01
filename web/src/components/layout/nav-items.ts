@@ -10,6 +10,7 @@ import {
   Sparkles,
   Sun,
   UserCheck,
+  Users,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +40,9 @@ const platform: NavItem = { label: "Schools", href: "/platform", icon: Building2
 // leave; the teacher records their own periods and applies for it.
 const staff: NavItem = { label: "Staff", href: "/staff", icon: UserCheck };
 const timesheet: NavItem = { label: "My time", href: "/timesheet", icon: Clock };
+// V1-3 (D-03). Only for the teacher who owns a class + section: her children,
+// her register, who to call. Everyone else never sees it.
+const myClass: NavItem = { label: "My Class", href: "/my-class", icon: Users };
 
 // Role-aware primary nav — the full ordered list, used by the DESKTOP sidebar.
 // SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
@@ -48,6 +52,7 @@ const timesheet: NavItem = { label: "My time", href: "/timesheet", icon: Clock }
 export function navForRole(
   role: OrgRole | string | undefined,
   isSuperAdmin = false,
+  isClassTeacher = false,
 ): NavItem[] {
   // The platform operator gets the Schools item on top of whatever role they
   // hold in the org they're currently inside.
@@ -56,7 +61,12 @@ export function navForRole(
     case "admin":
       return [...extra, dashboard, lucy, plan, students, staff, fees, tasks, setup];
     case "teacher":
-      return [...extra, myDay, lucy, sessions, plan, students, timesheet, tasks];
+      // My Class sits right after My Day — the two screens a class teacher
+      // actually lives in (D-03). Absent entirely for a subject teacher.
+      return [
+        ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
+        lucy, sessions, plan, students, timesheet, tasks,
+      ];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent
     default:
@@ -87,9 +97,11 @@ export function bottomNavForRole(role: OrgRole | string | undefined): NavItem[] 
 export function menuNavForRole(
   role: OrgRole | string | undefined,
   isSuperAdmin = false,
+  isClassTeacher = false,
 ): NavItem[] {
   const inBottom = new Set(bottomNavForRole(role).map((i) => i.href));
-  return navForRole(role, isSuperAdmin).filter((i) => !inBottom.has(i.href));
+  return navForRole(role, isSuperAdmin, isClassTeacher)
+    .filter((i) => !inBottom.has(i.href));
 }
 
 // Role-aware landing after login (SPRD2 §3): admin → Dashboard (leads with the

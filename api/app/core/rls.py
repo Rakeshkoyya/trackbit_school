@@ -174,6 +174,11 @@ SCHOOL_INSIGHTS_TABLES = (
     "followup_actions",
 )
 
+# V1-3 absence notes (S-24 informed absence / S-21 outcomes) — engaged in a3b4c5d6e7f8.
+SCHOOL_ABSENCE_TABLES = (
+    "student_absence_notes",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

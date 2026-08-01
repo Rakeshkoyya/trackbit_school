@@ -55,7 +55,16 @@ export interface ParentSessionItem {
   log_note: string | null;
 }
 
-export type DayStatus = "no_school" | "not_marked" | "present" | "partial" | "absent";
+export type DayStatus =
+  | "no_school" | "not_marked" | "present" | "partial" | "absent"
+  /** V1-3 (Q-03): present in the morning, absent after lunch — its own state. */
+  | "left_after_lunch";
+
+/** One school day of the month strip (V1-3, S-11) — a DAILY status only. */
+export interface ParentMonthDay {
+  date: string;
+  status: DayStatus;
+}
 
 export interface ParentToday {
   date: string;
@@ -63,6 +72,14 @@ export interface ParentToday {
   marked_periods: number;
   absent_periods: number;
   late_periods: number;
+  /** S-11: this month's school days, so the parent sees the pattern. */
+  month: ParentMonthDay[];
+  present_days: number;
+  marked_days: number;
+  /** D-02: the reason the school recorded, as one plain sentence. */
+  absence_reason: string | null;
+  /** S-25: the school's number for the "tell the school why" link. */
+  school_phone: string | null;
   taught: ParentTaughtItem[];
   homework: ParentHomeworkItem[];
   sessions: ParentSessionItem[];

@@ -98,6 +98,14 @@ class ClassroomService:
             )
         )
 
+    def _marks_attendance(self, m: CurrentMember, period_no: int) -> bool:
+        """V1-3 (D-01/Q-02a): does the org's mode take attendance this period?"""
+        from app.services.school_clock import marking_period_nos  # noqa: PLC0415
+        year = self._active_year(m.org_id)
+        marking = marking_period_nos(
+            year.period_times if year else None, m.org.attendance_mode)
+        return not marking or period_no in marking
+
     # ── My Day (CL-1) ────────────────────────────────────────────────────────
     def my_day(self, m: CurrentMember, on_date: date | None = None) -> MyDayOut:
         today = on_date or self._today(m)
@@ -215,6 +223,11 @@ class ClassroomService:
              for ts in day_slots},
             logs_by_period)
 
+        # V1-3 (D-01/Q-02a): which periods the org's mode takes attendance in.
+        # The card itself stays for every period — only the attendance ask moves.
+        from app.services.school_clock import marking_period_nos  # noqa: PLC0415
+        marking = set(marking_period_nos(year.period_times, m.org.attendance_mode))
+
         periods: list[MyDayPeriod] = []
         for ts in day_slots:
             state = att.get((ts.class_id, ts.period_no), {})
@@ -228,6 +241,7 @@ class ClassroomService:
                 opened=state.get("period_id") is not None,
                 closed=state.get("closed", False),
                 attendance_marked=state.get("marked", False),
+                marks_attendance=not marking or ts.period_no in marking,
                 roster_count=state.get("roster_count", roster_sizes.get(ts.class_id, 0)),
                 present_count=state.get("present_count"),
                 absent_count=state.get("absent_count"),
@@ -553,7 +567,9 @@ class ClassroomService:
             not_held_reason=period.not_held_reason if period else None,
             opened=period is not None,
             closed=period is not None and period.closed_at is not None,
-            attendance_marked=sheet.marked, roster=sheet.roster,
+            attendance_marked=sheet.marked,
+            marks_attendance=self._marks_attendance(m, period_no),
+            roster=sheet.roster,
             roster_count=len(sheet.roster),
             present_count=sheet.present_count if sheet.marked else None,
             absent_count=sheet.absent_count if sheet.marked else None,

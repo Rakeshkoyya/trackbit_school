@@ -17,8 +17,10 @@ import type { AttendancePulse, HomeworkOverview } from "@/lib/school-types";
 // ── M1 attendance ────────────────────────────────────────────────────────────
 
 /** free = nothing scheduled · pending = scheduled, unmarked · marked ·
- *  not_held = the teacher said the class did not happen (captured, not missing). */
-export type CaptureState = "free" | "pending" | "marked" | "not_held";
+ *  not_held = the teacher said the class did not happen (captured, not missing) ·
+ *  not_expected = scheduled, but the org's attendance mode doesn't mark this
+ *  period (V1-3, D-01) — neutral, out of the denominator. */
+export type CaptureState = "free" | "pending" | "marked" | "not_held" | "not_expected";
 
 export interface CaptureCell {
   period_no: number;
@@ -45,6 +47,8 @@ export interface PeriodCaptureGrid {
   rows: CaptureRow[];
   marked: number;
   expected: number;
+  /** V1-3 (D-01): what the denominator means — state it beside the count. */
+  mode: "every_period" | "first_period" | "twice_daily";
 }
 
 export interface StaffAbsentee {
@@ -98,6 +102,51 @@ export interface StreakBoard {
   min_days: number;
   window_days: number;
   rows: AbsenceStreak[];
+}
+
+// ── V1-3: the attendance tab as questions (S-08, D-02/D-86) ─────────────────
+/** `status` answers "has anybody dealt with this?" (D-86): unexplained = red,
+ *  explained = amber. Computed server-side (S-22) — the UI only paints. */
+export interface CallRow extends AbsenceStreak {
+  status: "explained" | "unexplained";
+  reason_code: string | null;
+  reason_note: string | null;
+}
+
+export interface DriftRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  class_label: string | null;
+  present_days: number;
+  marked_days: number;
+  pct: number;
+}
+
+export interface LateRow {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  late_days: number;
+  window_days: number;
+}
+
+export interface LeftRow {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+}
+
+export interface CallBoard {
+  date: string;
+  roster_considered: number;
+  present_today: number;
+  min_attendance_pct: number;
+  mode: "every_period" | "first_period" | "twice_daily";
+  needs_call: CallRow[];
+  drifting: DriftRow[];
+  chronic_late: LateRow[];
+  left_after_lunch: LeftRow[];
 }
 
 // ── cover for an absent teacher ──────────────────────────────────────────────

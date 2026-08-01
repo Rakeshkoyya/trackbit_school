@@ -10,6 +10,7 @@ import type {
   ActionKind,
   ActionResult,
   AttendanceBoard,
+  CallBoard,
   ExamsBoard,
   FollowupRow,
   HomeworkBoard,
@@ -38,6 +39,10 @@ export const insightsApi = {
     api.get<AttendanceBoard>(`/insights/attendance${qs({ year_id: yearId })}`),
   streaks: (p: { minDays?: number; yearId?: string } = {}) =>
     api.get<StreakBoard>(`/insights/attendance/streaks${qs({ min_days: p.minDays, year_id: p.yearId })}`),
+  /** V1-3 (S-08): needs-a-call (D-86 coloured) · drifting · chronic late ·
+   *  left after lunch. */
+  attendanceCalls: (yearId?: string) =>
+    api.get<CallBoard>(`/insights/attendance/calls${qs({ year_id: yearId })}`),
 
   staff: (weekStart?: string) =>
     api.get<StaffBoard>(`/insights/staff${qs({ week_start: weekStart })}`),

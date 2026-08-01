@@ -52,6 +52,9 @@ class Student(Base, UUIDPKMixin, CreatedAtMixin):
     # (D-56). Nullable — the readiness report counts the gap ("45 parents cannot
     # log in"), the importer parses it tolerantly and NEVER guesses.
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # V1-3 (S-02): attendance denominators start here for a mid-year joiner —
+    # a September admission's % must not be computed over August's registers.
+    enrolled_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("student_categories.id", ondelete="SET NULL"), nullable=True

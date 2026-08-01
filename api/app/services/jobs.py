@@ -397,13 +397,23 @@ def run_teacher_reminder() -> int:
                 ClassPeriod.attendance_marked_at.is_not(None)))}
             logged = set(db.scalars(_select(LessonLog.class_subject_id).where(
                 LessonLog.org_id == org.id, LessonLog.date == d)))
+            # V1-3 (D-01): only the mode's MARKING periods count as unmarked —
+            # a school on first_period must not nag teachers about periods it
+            # never asked them to mark.
+            from app.models import AcademicYear as _AY  # noqa: PLC0415
+            from app.services.school_clock import marking_period_nos  # noqa: PLC0415
+            year = db.scalar(_select(_AY).where(
+                _AY.org_id == org.id, _AY.is_active.is_(True)))
+            marking = set(marking_period_nos(
+                year.period_times if year else None, org.attendance_mode))
             # tally per teacher membership
             pending: dict = {}
             for s in slots:
                 tmid = teacher_of.get(s.class_subject_id)
                 if tmid is None:
                     continue
-                unmarked = (s.class_id, s.period_no) not in marked
+                expects_mark = not marking or s.period_no in marking
+                unmarked = expects_mark and (s.class_id, s.period_no) not in marked
                 unlogged = s.class_subject_id not in logged
                 if unmarked or unlogged:
                     pending[tmid] = pending.get(tmid, 0) + 1

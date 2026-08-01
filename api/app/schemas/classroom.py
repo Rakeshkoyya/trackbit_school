@@ -51,6 +51,8 @@ class MyDayPeriod(BaseModel):
     closed: bool = False
     # Attendance step of the card (capture-by-exception).
     attendance_marked: bool = False
+    # V1-3 (D-01/Q-02a): the org's mode may not take attendance this period.
+    marks_attendance: bool = True
     roster_count: int = 0
     present_count: int | None = None
     absent_count: int | None = None

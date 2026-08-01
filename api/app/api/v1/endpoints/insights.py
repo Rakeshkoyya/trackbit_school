@@ -19,6 +19,7 @@ from app.schemas.insights import (
     ActionIn,
     ActionOut,
     AttendanceBoard,
+    CallBoard,
     ExamsBoard,
     FollowupRow,
     HomeworkBoard,
@@ -66,6 +67,15 @@ def attendance_streaks(min_days: int = Query(STREAK_ALERT_DAYS, ge=1, le=30),
                        m: CurrentMember = Depends(require_admin),
                        db: Session = Depends(get_db)):
     return AttendanceInsights(db).streaks(m, min_days, year_id)
+
+
+@router.get("/attendance/calls", response_model=CallBoard)
+def attendance_calls(year_id: uuid.UUID | None = None,
+                     m: CurrentMember = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    """V1-3 (S-08): the tab's questions — needs a call (D-86 coloured), the
+    drifting band, chronic late, left after lunch."""
+    return AttendanceInsights(db).call_board(m, year_id)
 
 
 # ── M3 staff (presence · leave · live board · load) ──────────────────────────

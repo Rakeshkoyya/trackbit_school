@@ -1,7 +1,7 @@
 """Per-period attendance schemas (V2-M4, SPRD2 §5.4) — capture-by-exception."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -64,5 +64,55 @@ class AttendanceMarkOut(BaseModel):
     present_count: int
     absent_count: int
     late_count: int
-    # Guardians notified because this was the day's first marked period (§7).
+    # Guardians notified because this was the day's first marked period (§7) —
+    # or, in twice_daily mode, because a child present in the morning was absent
+    # after lunch (V1-3, Q-03/S-05).
     alerted_count: int
+
+
+# ── absence reasons + informed absence (V1-3, D-02/D-86/S-24) ────────────────
+# A small shared vocabulary for the chips; free text rides in the note. Stored
+# as plain text — a school's own word is kept, never flattened.
+REASON_CODES = ("sick", "family", "travel", "informed", "other")
+
+
+class AbsenceReasonIn(BaseModel):
+    """Recorded AFTER capture, by admin or teacher (D-02 step 3). Stamps every
+    absent exception for that student on that day — the reason belongs to the
+    absence, not to one period of it."""
+
+    student_id: uuid.UUID
+    date: Date
+    reason_code: str | None = Field(default=None, max_length=30)
+    note: str | None = Field(default=None, max_length=300)
+
+
+class AbsenceReasonOut(BaseModel):
+    student_id: uuid.UUID
+    date: date
+    reason_code: str | None = None
+    note: str | None = None
+    updated_periods: int
+
+
+class AbsenceNoteIn(BaseModel):
+    """Informed/planned absence (S-24): "away 12–15 Aug, family function"."""
+
+    student_id: uuid.UUID
+    from_date: Date
+    to_date: Date
+    reason_code: str | None = Field(default=None, max_length=30)
+    note: str | None = Field(default=None, max_length=500)
+    source: str = Field(default="office", pattern="^(parent_call|office|teacher)$")
+
+
+class AbsenceNoteOut(BaseModel):
+    id: uuid.UUID
+    student_id: uuid.UUID
+    from_date: date
+    to_date: date
+    reason_code: str | None = None
+    note: str | None = None
+    source: str
+    created_by_name: str | None = None
+    created_at: datetime | None = None

@@ -4,12 +4,15 @@
 //
 // The single most useful thing on the attendance tab, because it answers a
 // question no percentage can: **was attendance bad, or was it never taken?**
-// Four states, and keeping them apart is the entire point of the grid:
+// Five states, and keeping them apart is the entire point of the grid:
 //
-//   free      nothing scheduled — the class has no lesson that period
-//   pending   scheduled and NOT marked — the gap the admin is looking for
-//   marked    captured
-//   not_held  the teacher said the class did not happen — captured, not missing
+//   free          nothing scheduled — the class has no lesson that period
+//   pending       scheduled and NOT marked — the gap the admin is looking for
+//   marked        captured
+//   not_held      the teacher said the class did not happen — captured, not missing
+//   not_expected  scheduled, but this school's attendance mode does not mark
+//                 this period (V1-3, D-01) — neutral, and out of the denominator
+//                 so a first-period school never reads "6 of 44" in red
 //
 // Not a sequential heatmap: these are states, not magnitudes, so the cells use
 // the reserved status colours and every cell carries a title + the legend below
@@ -27,6 +30,7 @@ const CELL: Record<CaptureState, { cls: string; label: string }> = {
   marked: { cls: "bg-[color:var(--chart-green)]/70 text-transparent", label: "Marked" },
   pending: { cls: "border border-dashed border-danger/60 bg-danger/8", label: "Not marked" },
   not_held: { cls: "bg-muted-foreground/25", label: "Not held" },
+  not_expected: { cls: "bg-muted/60", label: "Not marked in this mode" },
   free: { cls: "bg-transparent", label: "No lesson" },
 };
 
@@ -40,6 +44,9 @@ function cellTitle(classLabel: string, c: CaptureCell): string {
   }
   if (c.state === "pending") return `${where} — scheduled, not marked yet`;
   if (c.state === "not_held") return `${where} — class not held`;
+  if (c.state === "not_expected") {
+    return `${where} — this school does not take attendance in this period`;
+  }
   return `${where} — no lesson scheduled`;
 }
 

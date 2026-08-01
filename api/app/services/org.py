@@ -59,6 +59,7 @@ class OrgService:
             address=org.address,
             state=org.state,
             board=org.board,
+            phone=org.phone,
             attendance_mode=org.attendance_mode,
             min_attendance_pct=org.min_attendance_pct,
             homework_gap_days=org.homework_gap_days,
@@ -81,7 +82,7 @@ class OrgService:
             org.timezone = req.timezone
         if req.report_card_hour is not None:
             org.report_card_hour = req.report_card_hour
-        for field in ("address", "state", "board", "attendance_mode",
+        for field in ("address", "state", "board", "phone", "attendance_mode",
                       "min_attendance_pct", "homework_gap_days"):
             value = getattr(req, field)
             if value is not None:

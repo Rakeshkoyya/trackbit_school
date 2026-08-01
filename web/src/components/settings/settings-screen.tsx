@@ -30,17 +30,19 @@ function SchoolSection({ s }: { s: OrgSettings }) {
   const [address, setAddress] = useState<string | null>(null);
   const [state, setState] = useState<string | null>(null);
   const [board, setBoard] = useState<string | null>(null);
-  const dirty = address !== null || state !== null || board !== null;
+  const [phone, setPhone] = useState<string | null>(null);
+  const dirty = address !== null || state !== null || board !== null || phone !== null;
 
   const save = useMutation({
     mutationFn: () => appApi.updateSettings({
       ...(address !== null ? { address } : {}),
       ...(state !== null ? { state } : {}),
       ...(board !== null ? { board } : {}),
+      ...(phone !== null ? { phone } : {}),
     }),
     onSuccess: (res) => {
       qc.setQueryData(["settings"], res);
-      setAddress(null); setState(null); setBoard(null);
+      setAddress(null); setState(null); setBoard(null); setPhone(null);
       toast.success("School details saved");
     },
     onError: (e) => showApiError(e, "Could not save"),
@@ -89,6 +91,15 @@ function SchoolSection({ s }: { s: OrgSettings }) {
             <Input id="board" value={board ?? s.board ?? ""}
               onChange={(e) => setBoard(e.target.value)} placeholder="CBSE / State board" />
           </div>
+        </div>
+        <div>
+          <Label htmlFor="school-phone">School phone</Label>
+          <Input id="school-phone" value={phone ?? s.phone ?? ""}
+            onChange={(e) => setPhone(e.target.value)} placeholder="+91…" />
+          <p className="mt-1 text-xs text-muted-foreground">
+            The number behind the parent portal&apos;s “tell the school why” link when a child
+            is marked absent.
+          </p>
         </div>
         <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
           {save.isPending ? "Saving…" : "Save school details"}

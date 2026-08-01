@@ -113,6 +113,9 @@ class PeriodCardOut(BaseModel):
 
     # Attendance
     attendance_marked: bool = False
+    # V1-3 (D-01/Q-02a): False when the org's mode doesn't take attendance in
+    # this period — the card's OTHER sections (topic, homework, checks) stay.
+    marks_attendance: bool = True
     roster: list[AttendanceRosterRow] = []
     roster_count: int = 0
     present_count: int | None = None

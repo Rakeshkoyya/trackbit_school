@@ -40,6 +40,26 @@ function Section({ title, icon, children, aside }: {
 
 // ── 1 · attendance — a tappable row that opens the roll-call page ────────────
 function AttendanceSection({ card }: { card: PeriodCard }) {
+  // V1-3 (D-01/Q-02a): the mode decides WHERE attendance is asked for. A period
+  // it doesn't mark says so in a neutral line and still opens if the teacher
+  // wants to record something anyway — everything else on the card is unchanged.
+  if (!card.marks_attendance && !card.attendance_marked) {
+    return (
+      <Link href={`/my-day/period/${card.class_id}/${card.period_no}/attendance`}
+        className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-card/60 p-4 text-muted-foreground transition-colors hover:bg-muted/30">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-muted">
+          <Users className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">Attendance not taken this period</p>
+          <p className="truncate text-xs">
+            Your school takes it at fixed times of day. Tap if you need to record it anyway.
+          </p>
+        </div>
+        <ChevronRight className="h-4 w-4" />
+      </Link>
+    );
+  }
   return (
     <Link href={`/my-day/period/${card.class_id}/${card.period_no}/attendance`}
       className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]">

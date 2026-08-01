@@ -91,6 +91,45 @@ def day_periods(period_times: list[dict] | None, periods_per_day: int) -> list[D
     return periods_of(period_times) or fallback_periods(periods_per_day)
 
 
+def marking_period_nos(period_times: list[dict] | None, mode: str) -> list[int]:
+    """Which period numbers take attendance under the org's mode (V1-3, D-01).
+
+    * every_period  → all of them (the only behaviour until now);
+    * first_period  → just the day's first period;
+    * twice_daily   → the first period AND the first period after lunch — the
+      mode a school picks precisely to see who left at midday (Q-03/S-05).
+
+    "After lunch" is computable with no extra config: `period_times` already
+    carries breaks as their own entries. Prefer a break whose kind mentions
+    lunch; else the break nearest the middle of the day. With no break at all
+    twice_daily degrades to first_period rather than inventing a slot.
+    """
+    periods = periods_of(period_times)
+    if not periods:
+        # No timings set: first_period/twice_daily still mean "period 1".
+        return [] if mode == "every_period" else [1]
+    if mode == "first_period":
+        return [periods[0].period_no]
+    if mode == "twice_daily":
+        entries = period_times or []
+        break_idxs = [i for i, e in enumerate(entries)
+                      if (e.get("kind") or PERIOD_KIND) != PERIOD_KIND]
+        lunch_idx = next(
+            (i for i in break_idxs if "lunch" in str(entries[i].get("kind", "")).lower()),
+            None)
+        if lunch_idx is None and break_idxs:
+            mid = len(entries) / 2
+            lunch_idx = min(break_idxs, key=lambda i: abs(i - mid))
+        if lunch_idx is None:
+            return [periods[0].period_no]
+        periods_before = sum(
+            1 for e in entries[:lunch_idx]
+            if (e.get("kind") or PERIOD_KIND) == PERIOD_KIND)
+        after = [p.period_no for p in periods if p.period_no > periods_before]
+        return [periods[0].period_no] + after[:1]
+    return [p.period_no for p in periods]  # every_period
+
+
 def current_period_no(
     period_times: list[dict] | None, now: datetime | None = None, tz: str = "Asia/Kolkata",
 ) -> int | None:

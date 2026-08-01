@@ -10,7 +10,10 @@ from pydantic import BaseModel, Field
 class PeriodTime(BaseModel):
     start: str = Field(pattern=r"^\d{2}:\d{2}$")  # "09:00"
     end: str = Field(pattern=r"^\d{2}:\d{2}$")
-    kind: str = Field(default="period", pattern="^(period|break)$")
+    # "period" is the teachable slot; anything else is a named break — the clock
+    # labels it from the kind ("lunch" → Lunch) and V1-3's twice_daily mode
+    # finds the after-lunch marking slot by it, so the name is allowed through.
+    kind: str = Field(default="period", pattern="^[a-z][a-z_ ]{0,23}$")
 
 
 class PeriodConfigOut(BaseModel):

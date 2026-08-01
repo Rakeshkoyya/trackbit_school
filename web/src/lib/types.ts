@@ -53,6 +53,9 @@ export interface Me {
   org_role: OrgRole;
   must_set_password: boolean;
   is_super_admin: boolean;
+  /** V1-3 (D-03): class teacher of at least one class — the nav shows
+   *  "My Class" from this alone. */
+  is_class_teacher: boolean;
   user: User;
   org: Org;
   orgs: OrgSummary[];
@@ -353,6 +356,8 @@ export interface OrgSettings {
   address: string | null;
   state: string | null;
   board: string | null;
+  /** V1-3 (S-25): the parent portal's "tell the school why" number. */
+  phone: string | null;
   attendance_mode: AttendanceMode;
   min_attendance_pct: number;
   homework_gap_days: number;

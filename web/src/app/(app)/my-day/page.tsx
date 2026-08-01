@@ -77,7 +77,9 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
               <Badge tone={p.absent_count ? "warning" : "success"}>
                 <Users className="h-3 w-3" /> {p.present_count}/{p.roster_count}
               </Badge>
-            ) : (
+            ) : p.marks_attendance === false ? null : (
+              /* V1-3 (D-01): a period this school's mode never marks shows no
+                 attendance chip at all — an empty one would read as a chore. */
               <Badge tone="neutral"><Users className="h-3 w-3" /> —</Badge>
             )}
             {p.logged ? <Badge tone="success"><Check className="h-3 w-3" /> topic</Badge> : null}

@@ -30,6 +30,9 @@ function sessionToMe(s: Session): Me {
     org_role: s.org_role,
     must_set_password: s.must_set_password,
     is_super_admin: s.is_super_admin,
+    // The session token doesn't carry it; /auth/me fills it in on the next
+    // load, which is when the My Class nav item appears (V1-3, D-03).
+    is_class_teacher: false,
     user: s.user,
     org: s.org,
     orgs: s.orgs,

@@ -102,6 +102,9 @@ class MeResponse(BaseModel):
     org_role: str
     must_set_password: bool = False
     is_super_admin: bool = False
+    # V1-3 (D-03): this member is class teacher of at least one class — the nav
+    # shows "My Class" from this alone.
+    is_class_teacher: bool = False
     user: UserOut
     org: OrgOut
     orgs: list[OrgMembershipOut] = []

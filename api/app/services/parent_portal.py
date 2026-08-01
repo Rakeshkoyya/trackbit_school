@@ -18,6 +18,7 @@ check in get_current_parent + _assert_child here.
 import uuid
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentParent
@@ -26,6 +27,7 @@ from app.models import Organization, Student
 from app.schemas.parent import (
     ParentHomeworkDay,
     ParentHomeworkItem,
+    ParentMonthDay,
     ParentReportOut,
     ParentReportSubject,
     ParentSessionItem,
@@ -87,11 +89,86 @@ class ParentPortalService:
             for s in t.sessions
         ]
         yesterday, pending = self._homework(p, student_id, t.date)
+        month, present_days, marked_days = self._month_pattern(p, student_id, t.date)
         return ParentTodayOut(
             date=t.date, status=status, marked_periods=t.marked_periods,
             absent_periods=t.absent_periods, late_periods=t.late_periods,
+            month=month, present_days=present_days, marked_days=marked_days,
+            absence_reason=(self._absence_reason(p, student_id, t.date)
+                            if status in ("absent", "left_after_lunch") else None),
+            school_phone=p.org.phone,
             taught=taught, homework=homework, sessions=sessions,
             yesterday=yesterday, pending=pending)
+
+    def _month_pattern(self, p: CurrentParent, student_id: uuid.UUID, today: date,
+                       ) -> tuple[list["ParentMonthDay"], int, int]:
+        """S-11: the month strip — DAILY statuses via the same classifier the
+        register renders (`classify_marked_day`), never per-period detail."""
+        from app.models import AcademicYear, CalendarEvent, SchoolClass  # noqa: PLC0415
+        from app.services.attendance import classify_marked_day, day_matrix  # noqa: PLC0415
+        from app.services.calendar import event_rows, expand_blocked_dates  # noqa: PLC0415
+        from app.services.my_class import PRESENT_STATUSES  # noqa: PLC0415
+        from app.services.school_clock import marking_period_nos  # noqa: PLC0415
+
+        student = self.db.get(Student, student_id)
+        if student is None or student.class_id is None:
+            return [], 0, 0
+        klass = self.db.get(SchoolClass, student.class_id)
+        year = self.db.get(AcademicYear, klass.academic_year_id) if klass else None
+        first = today.replace(day=1)
+        working = set(year.working_weekdays or [0, 1, 2, 3, 4, 5]) if year \
+            else {0, 1, 2, 3, 4, 5}
+        blocked = expand_blocked_dates(event_rows(self.db.scalars(
+            select(CalendarEvent).where(
+                CalendarEvent.org_id == p.org.id,
+                CalendarEvent.end_date >= first,
+                CalendarEvent.start_date <= today)))) if year else set()
+        marking = marking_period_nos(
+            year.period_times if year else None, p.org.attendance_mode)
+        marked, exc = day_matrix(self.db, p.org.id, [student.class_id], first, today)
+
+        out: list[ParentMonthDay] = []
+        present = counted = 0
+        start = max(first, student.enrolled_on) if student.enrolled_on else first
+        for o in range(start.toordinal(), today.toordinal() + 1):
+            d = date.fromordinal(o)
+            if d.weekday() not in working or d in blocked:
+                continue
+            periods = marked.get((student.class_id, d))
+            if not periods:
+                out.append(ParentMonthDay(date=d, status="not_marked"))
+                continue
+            per = exc.get((student_id, d), {})
+            s, _late = classify_marked_day(
+                periods, {pn: st for pn, (st, _r) in per.items()}, marking)
+            counted += 1
+            if s in PRESENT_STATUSES:
+                present += 1
+            out.append(ParentMonthDay(date=d, status=s))
+        return out, present, counted
+
+    def _absence_reason(self, p: CurrentParent, student_id: uuid.UUID,
+                        d: date) -> str | None:
+        """The reason the school recorded — projected as one plain string."""
+        from app.models import AttendanceException, ClassPeriod, StudentAbsenceNote  # noqa: PLC0415
+
+        row = self.db.execute(
+            select(AttendanceException.reason_code, AttendanceException.reason_note)
+            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+            .where(AttendanceException.student_id == student_id,
+                   AttendanceException.reason_at.is_not(None),
+                   ClassPeriod.date == d).limit(1)).first()
+        if row is None:
+            row = self.db.execute(
+                select(StudentAbsenceNote.reason_code, StudentAbsenceNote.note)
+                .where(StudentAbsenceNote.student_id == student_id,
+                       StudentAbsenceNote.from_date <= d,
+                       StudentAbsenceNote.to_date >= d)
+                .order_by(StudentAbsenceNote.created_at.desc()).limit(1)).first()
+        if row is None:
+            return None
+        code, note = row
+        return note or (code.replace("_", " ") if code else None)
 
     # ── homework the parent actually asks about (HW-1) ───────────────────────
     def _homework(self, p: CurrentParent, student_id: uuid.UUID, today: date

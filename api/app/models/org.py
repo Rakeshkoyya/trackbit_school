@@ -35,6 +35,8 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     # board) are what scope the V1-7 observance catalogue to a school — a school
     # is never asked to declare a region or a religion (D-61).
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # V1-3 (S-25): the number behind the parent's "tell the school why" tel: link.
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str | None] = mapped_column(Text, nullable=True)
     board: Mapped[str | None] = mapped_column(Text, nullable=True)
     # V1-2 (D-01): how often attendance is taken. Drives what teachers are asked

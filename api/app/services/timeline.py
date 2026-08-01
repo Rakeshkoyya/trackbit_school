@@ -73,11 +73,28 @@ class StudentTimelineService:
         sessions = self._sessions(m.org_id, student_id, d)
         marked = [p for p in periods if p.attendance != "unmarked"]
         absents = sum(1 for p in marked if p.attendance == "absent")
+        # V1-3 (Q-03): in twice_daily mode, present-AM absent-PM is its own
+        # named state. The marking slots come from the org's timings; the same
+        # classify_day the register and parent strip render.
+        am_absent = pm_absent = None
+        if m.org.attendance_mode == "twice_daily" and klass is not None:
+            from app.models import AcademicYear  # noqa: PLC0415
+            from app.services.school_clock import marking_period_nos  # noqa: PLC0415
+            year = self.db.get(AcademicYear, klass.academic_year_id)
+            marking = marking_period_nos(
+                year.period_times if year else None, "twice_daily")
+            if len(marking) >= 2:
+                by_no = {p.period_no: p.attendance for p in marked}
+                if marking[0] in by_no:
+                    am_absent = by_no[marking[0]] == "absent"
+                if marking[1] in by_no:
+                    pm_absent = by_no[marking[1]] == "absent"
         return StudentTimelineOut(
             student_id=student.id, full_name=student.full_name, class_label=class_label,
             date=d, periods=periods, sessions=sessions,
             followups=self._followups(m, student.id, d),
-            day_status=classify_day(len(periods), len(marked), absents),
+            day_status=classify_day(len(periods), len(marked), absents,
+                                    am_absent=am_absent, pm_absent=pm_absent),
             marked_periods=len(marked), absent_periods=absents,
             late_periods=sum(1 for p in marked if p.attendance == "late"))
 

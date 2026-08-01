@@ -85,13 +85,33 @@ class ParentSessionItem(BaseModel):
     log_note: str | None = None
 
 
+class ParentMonthDay(BaseModel):
+    """One school day of the month strip (V1-3, S-11) — a DAILY status only,
+    never per-period detail. `not_marked` renders neutral, never as absence."""
+
+    date: date
+    # present | partial | absent | left_after_lunch | not_marked
+    status: str
+
+
 class ParentTodayOut(BaseModel):
     date: date
-    # no_school | not_marked | present | partial | absent
+    # no_school | not_marked | present | partial | absent | left_after_lunch
     status: str
     marked_periods: int = 0
     absent_periods: int = 0
     late_periods: int = 0
+    # V1-3 (S-11): the pattern — this month's school days and the sentence's
+    # figures: "present 18 of 21 marked school days".
+    month: list[ParentMonthDay] = []
+    present_days: int = 0
+    marked_days: int = 0
+    # V1-3 (D-02/D-86): the reason the school recorded for TODAY's absence, if
+    # any — plain text, never a band, never who recorded it.
+    absence_reason: str | None = None
+    # V1-3 (S-25): the school's number for the "tell the school why" tel: link.
+    # Zero parent writes — the phone call is the write path (D-86).
+    school_phone: str | None = None
     taught: list[ParentTaughtItem] = []
     homework: list[ParentHomeworkItem] = []
     sessions: list[ParentSessionItem] = []

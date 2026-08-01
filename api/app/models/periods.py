@@ -42,6 +42,7 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -132,10 +133,53 @@ class AttendanceException(Base, UUIDPKMixin):
     )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     late_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # V1-3 (D-02): the reason, added AFTER capture by admin or teacher — never a
+    # step in the marking flow. Its presence is what turns a red row amber (D-86).
+    reason_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
+    )
+    reason_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     period: Mapped["ClassPeriod"] = relationship(back_populates="exceptions")
 
     __table_args__ = (
         UniqueConstraint("period_id", "student_id", name="uq_attendance_exceptions_period_student"),
         CheckConstraint("status IN ('absent', 'late')", name="status_valid"),
+    )
+
+
+class StudentAbsenceNote(Base, UUIDPKMixin):
+    """Informed/planned absence and follow-up outcomes (V1-3, S-24/S-21).
+
+    APPEND-ONLY (law 3): a correction is a new row, never an edit. A note whose
+    window covers a date pre-explains the absence — the guardian alert is
+    suppressed (S-13), the board shows amber with the reason (D-86), and the
+    admin stops re-deciding the same family trip every morning.
+    """
+
+    __tablename__ = "student_absence_notes"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    from_date: Mapped[date] = mapped_column(Date, nullable=False)
+    to_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="office")
+    created_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint("to_date >= from_date", name="ck_absence_notes_range"),
+        CheckConstraint("source IN ('parent_call', 'office', 'teacher')",
+                        name="ck_absence_notes_source"),
     )

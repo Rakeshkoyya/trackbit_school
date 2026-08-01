@@ -38,7 +38,10 @@ class CaptureCell(BaseModel):
     said the class did not happen — captured, not missing).
     """
     period_no: int
-    state: str                      # free | pending | marked | not_held
+    # free | pending | marked | not_held | not_expected — the last is V1-3
+    # (D-01): scheduled, but the org's mode doesn't mark this period; neutral,
+    # out of the denominator.
+    state: str
     class_subject_id: uuid.UUID | None = None
     subject_name: str | None = None
     absent: int = 0
@@ -61,6 +64,9 @@ class PeriodCaptureGrid(BaseModel):
     rows: list[CaptureRow] = []
     marked: int = 0
     expected: int = 0
+    # V1-3 (D-01): what the denominator means — every_period | first_period |
+    # twice_daily. The UI states it beside the count.
+    mode: str = "every_period"
 
 
 class StaffAbsentee(BaseModel):
@@ -120,6 +126,66 @@ class StreakBoard(BaseModel):
     min_days: int
     window_days: int
     rows: list[AbsenceStreak] = []
+
+
+# ── V1-3: the admin tab as questions (S-08, D-02/D-86) ───────────────────────
+class CallRow(AbsenceStreak):
+    """One "needs a call" row. `status` answers "has anybody dealt with this?"
+    (D-86): explained = a reason is on record (amber) · unexplained = nobody has
+    explained this (red, sorts first). Colour is a RENDERING of this status —
+    never logic in a component (S-22)."""
+
+    status: str = "unexplained"  # explained | unexplained
+    reason_code: str | None = None
+    reason_note: str | None = None
+
+
+class DriftRow(BaseModel):
+    """S-07: the slow fade the red list can't see — attendance below the org's
+    threshold over the window, denominated on the class's MARKED days."""
+
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None = None
+    class_label: str | None = None
+    present_days: int
+    marked_days: int
+    pct: float
+
+
+class LateRow(BaseModel):
+    """S-06: chronic lateness — an admin row, never a parent message."""
+
+    student_id: uuid.UUID
+    full_name: str
+    class_label: str | None = None
+    late_days: int
+    window_days: int
+
+
+class LeftRow(BaseModel):
+    """Q-03/S-05: present this morning, absent after lunch — today."""
+
+    student_id: uuid.UUID
+    full_name: str
+    class_label: str | None = None
+
+
+class CallBoard(BaseModel):
+    """The attendance tab's questions, in the order the admin asks them:
+    who needs a call · who is drifting · who is chronically late · who left
+    after lunch. The heatmap ("is the record even complete?") and the charts
+    stay on the existing board read."""
+
+    date: date_
+    roster_considered: int = 0  # students in classes that marked anything today
+    present_today: int = 0
+    min_attendance_pct: int = 75
+    mode: str = "every_period"
+    needs_call: list[CallRow] = []
+    drifting: list[DriftRow] = []
+    chronic_late: list[LateRow] = []
+    left_after_lunch: list[LeftRow] = []
 
 
 class SubstituteCandidate(BaseModel):

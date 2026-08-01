@@ -19,6 +19,7 @@ from app.api.v1.endpoints import (
     lucy,
     marketing,
     me,
+    my_class,
     ops,
     org,
     overview,
@@ -54,6 +55,8 @@ api_router.include_router(planner.router, prefix="/planner", tags=["planner"])
 api_router.include_router(timetable.router, prefix="/timetable", tags=["timetable"])
 api_router.include_router(wizard.router, prefix="/wizard", tags=["wizard"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
+# V1-3 — the class teacher's area (D-03)
+api_router.include_router(my_class.router, prefix="/my-class", tags=["my-class"])
 api_router.include_router(periods.router, prefix="/periods", tags=["periods"])
 api_router.include_router(overview.router, prefix="/overview", tags=["overview"])
 api_router.include_router(checks.router, prefix="/checks", tags=["checks"])

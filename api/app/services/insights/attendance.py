@@ -57,10 +57,15 @@ from app.models import (
 from app.schemas.insights import (
     AbsenceStreak,
     AttendanceBoard,
+    CallBoard,
+    CallRow,
     CaptureCell,
     CaptureRow,
+    DriftRow,
     ImpactPeriod,
     ImpactTask,
+    LateRow,
+    LeftRow,
     PeriodCaptureGrid,
     StaffAbsentee,
     StaffImpact,
@@ -68,11 +73,11 @@ from app.schemas.insights import (
     StreakBoard,
     SubstituteCandidate,
 )
-from app.services.attendance import day_absence_maps, is_day_absent
+from app.services.attendance import day_absence_maps, day_matrix, is_day_absent
 from app.services.calendar import event_rows, expand_blocked_dates
 from app.services.dashboard import DashboardService
 from app.services.insights.actions import ActionService
-from app.services.school_clock import day_periods, today_in
+from app.services.school_clock import day_periods, marking_period_nos, today_in
 from app.services.staff_attendance import StaffAttendanceService
 from app.services.substitution import SubstitutionService
 
@@ -131,9 +136,14 @@ class AttendanceInsights:
         """
         ppd = year.periods_per_day if year else 8
         periods = day_periods(year.period_times if year else [], ppd)
+        # V1-3 (D-01): the denominator is the mode's MARKING periods — a school
+        # on first_period must not read "6 of 44 captured" in red every morning.
+        marking = set(marking_period_nos(
+            year.period_times if year else None, m.org.attendance_mode))
         grid = PeriodCaptureGrid(
             date=on, periods_per_day=len(periods) or ppd,
-            period_times=[p.model_dump() for p in periods])
+            period_times=[p.model_dump() for p in periods],
+            mode=m.org.attendance_mode)
         if year is None:
             return grid
 
@@ -199,8 +209,18 @@ class AttendanceInsights:
                 if sched is None and cap is None:
                     cells.append(CaptureCell(period_no=p.period_no, state="free"))
                     continue
-                expected += 1
                 state, absent, late = cap or ("pending", 0, 0)
+                # A scheduled period the mode does not mark is `not_expected` —
+                # neutral, out of the denominator. A teacher who marked it
+                # anyway still counts: the record is the record.
+                expects = not marking or p.period_no in marking
+                if not expects and state == "pending":
+                    cells.append(CaptureCell(
+                        period_no=p.period_no, state="not_expected",
+                        class_subject_id=sched[0] if sched else None,
+                        subject_name=sched[1] if sched else None))
+                    continue
+                expected += 1
                 if state == "marked":
                     marked += 1
                 cells.append(CaptureCell(
@@ -366,6 +386,164 @@ class AttendanceInsights:
             r.reminded_today = ("guardian_reminded", r.student_id) in done
             r.followup_assigned_today = ("followup_assigned", r.student_id) in done
         rows.sort(key=lambda r: (-r.streak, r.class_label or "", r.full_name))
+        return rows
+
+    # ── V1-3: the tab's questions (S-08) ─────────────────────────────────────
+    def call_board(self, m: CurrentMember, year_id: uuid.UUID | None = None) -> CallBoard:
+        """Needs-a-call · drifting · chronic late · left-after-lunch — each a
+        named list with its denominator, statuses computed HERE (S-22), painted
+        by the UI."""
+        from app.models import StudentAbsenceNote  # noqa: PLC0415
+
+        today = self._today(m)
+        year = self._year(m, year_id)
+        board = CallBoard(date=today, min_attendance_pct=m.org.min_attendance_pct,
+                          mode=m.org.attendance_mode)
+        if year is None:
+            return board
+
+        # ── needs a call: every current absence run, D-86-coloured ───────────
+        streaks = self.streaks(m, min_days=1, year_id=year.id)
+        sids = [r.student_id for r in streaks.rows]
+        # Latest recorded reason per student on a recent absent day…
+        reasons: dict[uuid.UUID, tuple[str | None, str | None]] = {}
+        if sids:
+            for sid, code, note in self.db.execute(
+                select(AttendanceException.student_id,
+                       AttendanceException.reason_code, AttendanceException.reason_note)
+                .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+                .where(AttendanceException.org_id == m.org_id,
+                       AttendanceException.student_id.in_(sids),
+                       AttendanceException.status == "absent",
+                       AttendanceException.reason_at.is_not(None),
+                       ClassPeriod.date >= today - timedelta(days=STREAK_WINDOW_DAYS))
+                .order_by(ClassPeriod.date)
+            ).all():
+                reasons[sid] = (code, note)  # later dates overwrite → latest wins
+            # …or a covering informed-absence note (S-24).
+            for sid, code, note in self.db.execute(
+                select(StudentAbsenceNote.student_id, StudentAbsenceNote.reason_code,
+                       StudentAbsenceNote.note)
+                .where(StudentAbsenceNote.org_id == m.org_id,
+                       StudentAbsenceNote.student_id.in_(sids),
+                       StudentAbsenceNote.from_date <= today,
+                       StudentAbsenceNote.to_date >= today - timedelta(days=7))
+                .order_by(StudentAbsenceNote.created_at)
+            ).all():
+                reasons[sid] = (code, note)
+        calls = []
+        for r in streaks.rows:
+            code, note = reasons.get(r.student_id, (None, None))
+            explained = r.student_id in reasons
+            calls.append(CallRow(
+                **r.model_dump(), status="explained" if explained else "unexplained",
+                reason_code=code, reason_note=note))
+        # D-86: red (unexplained) first, longest run first — no third colour.
+        calls.sort(key=lambda c: (c.status != "unexplained", -c.streak, c.full_name))
+        board.needs_call = calls
+
+        # ── drifting (S-07): below threshold over the window, marked days only ─
+        since = today - timedelta(days=STREAK_WINDOW_DAYS)
+        marked, by_student = day_absence_maps(self.db, m.org_id, since, today)
+        student_class = {
+            sid: cid for sid, cid in self.db.execute(
+                select(Student.id, Student.class_id)
+                .where(Student.org_id == m.org_id, Student.status == "active",
+                       Student.id.in_(by_student.keys()))).all()
+        } if by_student else {}
+        class_marked_days: dict[uuid.UUID, list[date]] = defaultdict(list)
+        for (cid, d), n in marked.items():
+            if n:
+                class_marked_days[cid].append(d)
+        on_call = {c.student_id for c in calls}
+        drift: list[DriftRow] = []
+        for sid, days in by_student.items():
+            cid = student_class.get(sid)
+            if cid is None or sid in on_call:
+                continue
+            mdays = class_marked_days.get(cid, [])
+            if len(mdays) < 8:
+                continue  # too little record to call a trend
+            absent_days = sum(1 for d in mdays
+                              if is_day_absent(marked.get((cid, d), 0), days.get(d, 0)))
+            pct = (len(mdays) - absent_days) / len(mdays) * 100
+            if pct < m.org.min_attendance_pct:
+                drift.append(DriftRow(
+                    student_id=sid, full_name="", present_days=len(mdays) - absent_days,
+                    marked_days=len(mdays), pct=round(pct, 1)))
+        drift.sort(key=lambda r: r.pct)
+        board.drifting = self._name_rows(drift[:25])
+
+        # ── chronic late (S-06): late on 3+ of the last 10 marked days ───────
+        late_rows = self.db.execute(
+            select(AttendanceException.student_id,
+                   func.count(func.distinct(ClassPeriod.date)))
+            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+            .where(AttendanceException.org_id == m.org_id,
+                   AttendanceException.status == "late",
+                   ClassPeriod.date >= today - timedelta(days=14))
+            .group_by(AttendanceException.student_id)).all()
+        lates = [LateRow(student_id=sid, full_name="", late_days=int(n), window_days=14)
+                 for sid, n in late_rows if int(n) >= 3]
+        lates.sort(key=lambda r: -r.late_days)
+        board.chronic_late = self._name_rows(lates[:25])
+
+        # ── today's matrix once: the headline + left-after-lunch ─────────────
+        class_ids = list(self.db.scalars(select(SchoolClass.id).where(
+            SchoolClass.org_id == m.org_id,
+            SchoolClass.academic_year_id == year.id)))
+        tmarked, texc = day_matrix(self.db, m.org_id, class_ids, today, today)
+
+        if m.org.attendance_mode == "twice_daily":
+            marking = marking_period_nos(year.period_times, "twice_daily")
+            if len(marking) >= 2:
+                am, pm = marking[0], marking[1]
+                left = [LeftRow(student_id=sid, full_name="")
+                        for (sid, _d), per in texc.items()
+                        if per.get(pm, ("", False))[0] == "absent"
+                        and per.get(am, ("", False))[0] != "absent"]
+                board.left_after_lunch = self._name_rows(left)
+
+        marked_class_ids = {cid for (cid, _d) in tmarked}
+        if marked_class_ids:
+            roster = int(self.db.scalar(
+                select(func.count(Student.id)).where(
+                    Student.org_id == m.org_id, Student.status == "active",
+                    Student.class_id.in_(marked_class_ids))) or 0)
+            sc_today = dict(self.db.execute(
+                select(Student.id, Student.class_id)
+                .where(Student.id.in_([sid for (sid, _d) in texc]))).all()) if texc else {}
+            absent_today = 0
+            for (sid, _d), per in texc.items():
+                periods = tmarked.get((sc_today.get(sid), today), [])
+                n_absent = sum(1 for p in periods
+                               if per.get(p, ("", False))[0] == "absent")
+                if is_day_absent(len(periods), n_absent):
+                    absent_today += 1
+            board.roster_considered = roster
+            board.present_today = roster - absent_today
+        return board
+
+    def _name_rows(self, rows: list) -> list:
+        """Fill full_name/roll_no/class_label on any row list keyed by
+        student_id — one query however long the list."""
+        ids = [r.student_id for r in rows]
+        if not ids:
+            return rows
+        info = {
+            sid: (name, roll, _label(cname, section) if cname else None)
+            for sid, name, roll, cname, section in self.db.execute(
+                select(Student.id, Student.full_name, Student.roll_no,
+                       SchoolClass.name, SchoolClass.section)
+                .outerjoin(SchoolClass, SchoolClass.id == Student.class_id)
+                .where(Student.id.in_(ids))).all()
+        }
+        for r in rows:
+            name, roll, label = info.get(r.student_id, ("Unknown", None, None))
+            r.full_name = name
+            if hasattr(r, "roll_no"):
+                r.roll_no = roll
+            r.class_label = label
         return rows
 
     # ── layer 3: what one absence breaks ─────────────────────────────────────
