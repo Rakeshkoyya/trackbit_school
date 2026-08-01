@@ -50,7 +50,11 @@ const fmt = (d: string | null) =>
 
 function Coverage({ s }: { s: SubjectRow }) {
   if (!s.topics) return <span className="text-xs text-muted-foreground">no syllabus</span>;
-  const pct = Math.round((s.topics_taught / s.topics) * 100);
+  // V1-6 (`S-51`): the percentage comes from the server, computed by
+  // `core.coverage` against the whole syllabus. This used to divide in the
+  // browser, with a numerator that counted only fully-taught topics — a
+  // different answer from the one the syllabus board gave for the same subject.
+  const pct = Math.round(s.coverage_pct ?? 0);
   return (
     <div className="min-w-32">
       <div className="h-1.5 overflow-hidden rounded-full bg-muted">

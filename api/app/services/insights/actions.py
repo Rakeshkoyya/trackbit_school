@@ -31,11 +31,13 @@ from app.core.timeutil import org_due_at
 from app.models import (
     Board,
     BoardMember,
+    ClassSubject,
     FollowupAction,
     Guardian,
     Membership,
     SchoolClass,
     Student,
+    Subject,
     TaskInstance,
     User,
 )
@@ -143,6 +145,7 @@ class ActionService:
             "task_reassigned": self._reassign_task,
             "task_extended": self._extend_task,
             "nudged": self._nudge,
+            "catchup_requested": self._request_catchup,
         }.get(kind)
         if handler is None:
             raise ValidationError(f"Unknown action '{kind}'.", code="unknown_action")
@@ -283,6 +286,76 @@ class ActionService:
             task_id=task.id,
             message=f"Follow-up created on {board.name}"
                     + (" and assigned." if assignee_user_id else " (unassigned)."))
+
+    def _request_catchup(self, m: CurrentMember, body: ActionIn) -> ActionOut:
+        """`D-16` — *"Ask for a catch-up plan"*: a **meeting request**, not a directive.
+
+        The admin never reschedules a subject from a dashboard (`S-44c` was
+        rejected for exactly this reason): a plan change comes out of a
+        conversation between the teacher and the principal, and `extend_plan`
+        stays in the plan screen where it is used *after* that conversation.
+
+        So this files a task on the subject teacher carrying the gap, the cause
+        (`S-41`) and the exam it threatens — and `S-60`'s consequence is that
+        **the board row clears on the recorded outcome, not on the press.** The
+        row reads the task's own status and outcome (`_catchups` in
+        `insights/syllabus.py`), which is why nothing extra is stored here: the
+        task IS the request, and a parallel record of it would be a second
+        source of truth about one meeting.
+        """
+        if body.class_subject_id is None:
+            raise ValidationError("This action needs a class-subject.")
+        row = self.db.execute(
+            select(ClassSubject.id, ClassSubject.teacher_member_id,
+                   SchoolClass.name, SchoolClass.section, Subject.name)
+            .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .where(ClassSubject.id == body.class_subject_id,
+                   ClassSubject.org_id == m.org_id)).first()
+        if row is None:
+            raise NotFoundError("Class-subject")
+        cs_id, teacher_member_id, cname, section, subject_name = row
+        label = cname + (f"-{section}" if section else "")
+
+        # Still open from last time? Then the meeting has not happened yet, and
+        # a second row in her list is noise rather than urgency (`D-47`).
+        open_task = self.db.scalar(
+            select(TaskInstance).where(
+                TaskInstance.org_id == m.org_id,
+                TaskInstance.subject_type == "class_subject",
+                TaskInstance.subject_id == cs_id,
+                TaskInstance.status == "open").limit(1))
+        if open_task is not None:
+            return ActionOut(
+                kind="catchup_requested", ok=True, already_done=True,
+                subject_type="class_subject", subject_id=cs_id, task_id=open_task.id,
+                message=f"Already asked — waiting on the {label} {subject_name} catch-up.")
+
+        assignee_user_id = self.db.scalar(
+            select(Membership.user_id).where(Membership.id == teacher_member_id)
+        ) if teacher_member_id else None
+
+        board = ensure_followups_board(self.db, m)
+        # A meeting request is phrased as one. "Discuss" is the whole point of
+        # `S-60` — "Fix 6-B Maths" would be the directive `D-16` rejected.
+        title = (body.title or f"Discuss {label} {subject_name} catch-up")[:255]
+        due_at, all_day = (body.due_at, False) if body.due_at is not None else \
+            org_due_at(m.org.timezone, self._today(m) + timedelta(days=3), None)
+        task = TaskService(self.db).create(m, TaskCreateRequest(
+            board_id=board.id, title=title, description=body.note,
+            assignee_id=assignee_user_id, due_at=due_at, all_day=all_day,
+            subject_type="class_subject", subject_id=cs_id))
+        self._append(m, "catchup_requested", "class_subject", cs_id,
+                     target_member_id=teacher_member_id,
+                     detail={"task_id": str(task.id), "title": title,
+                             "class_label": label, "subject_name": subject_name})
+        return ActionOut(
+            kind="catchup_requested", ok=True, subject_type="class_subject",
+            subject_id=cs_id, task_id=task.id,
+            message=(f"Asked for a {label} {subject_name} catch-up plan."
+                     if assignee_user_id else
+                     f"Catch-up request filed for {label} {subject_name} "
+                     "(no teacher is assigned to it)."))
 
     def _assign_substitute(self, m: CurrentMember, body: ActionIn) -> ActionOut:
         if body.substitution is None:

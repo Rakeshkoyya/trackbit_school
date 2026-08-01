@@ -220,6 +220,12 @@ export const schoolApi = {
   forecast: (classId: string) =>
     api.get<import("@/lib/school-types").Forecast[]>(`/planner/plan/forecast${qs({ class_id: classId })}`),
 
+  // V1-6 — S-46 her own subjects; D-15 her own class, every subject.
+  mySubjects: (yearId?: string) =>
+    api.get<import("@/lib/school-types").MySubjects>(`/planner/my-subjects${qs({ year_id: yearId })}`),
+  classSyllabus: (classId: string) =>
+    api.get<import("@/lib/school-types").ClassSyllabus>(`/planner/class-syllabus/${classId}`),
+
   // classroom (M2)
   myDay: () => api.get<import("@/lib/school-types").MyDay>("/classroom/my-day"),
   logLesson: (b: {

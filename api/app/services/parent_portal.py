@@ -247,6 +247,20 @@ class ParentPortalService:
                     homework_assigned=s.homework_assigned,
                     homework_personal=s.homework_personal,
                     scores=s.scores,
+                    # `S-51`/`S-54`: the coverage figure, computed once in
+                    # `core.coverage` and named here deliberately. The basis is
+                    # the WHOLE syllabus — the only denominator that cannot
+                    # fall when the school sizes next term's chapters, which a
+                    # parent would read as the school going backwards.
+                    coverage_taught=s.coverage_taught,
+                    coverage_total=s.coverage_total,
+                    coverage_pct=s.coverage_pct,
+                    # `S-48`: the chapter name, which is what a parent can
+                    # actually ask their child about. Pace, lag and RAG stay out
+                    # of this projection entirely (`D-11`).
+                    latest_chapter=s.latest_chapter,
+                    latest_topic=s.latest_topic,
+                    latest_taught_on=s.latest_taught_on,
                 )
                 for s in g.subjects
             ],

@@ -26,13 +26,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.coverage import SYLLABUS
 from app.core.exceptions import NotFoundError
 from app.models import (
     AcademicYear,
     CalendarEvent,
     ClassSubject,
     ExamPortion,
-    LessonLog,
     Membership,
     Plan,
     SchoolClass,
@@ -52,6 +52,7 @@ from app.schemas.overview import (
     TeacherLoadRow,
     YearFacts,
 )
+from app.services.coverage import coverage_rows
 from app.services.planner import PlannerService
 
 # Severity, worst last. "none" (no plan drafted) outranks green — an unplanned
@@ -103,13 +104,11 @@ class OverviewService:
             .group_by(SyllabusUnit.class_subject_id)).all()
         return {r[0]: (r[1], r[2], int(r[3])) for r in rows}
 
-    def _taught_topics(self, org_id: uuid.UUID) -> dict[uuid.UUID, int]:
-        """class_subject_id → distinct topics with at least one full-coverage log."""
-        return dict(self.db.execute(
-            select(LessonLog.class_subject_id, func.count(func.distinct(LessonLog.topic_id)))
-            .where(LessonLog.org_id == org_id, LessonLog.coverage == "full",
-                   LessonLog.topic_id.is_not(None))
-            .group_by(LessonLog.class_subject_id)).all())
+    # V1-6 removed `_taught_topics` from here. It counted only FULL-coverage logs
+    # — so a partly-taught topic was worth nothing on this screen and half a
+    # topic on the syllabus board, which was the fifth of the five rival
+    # definitions of "covered" that `S-51` set out to remove. The class overview
+    # now reads `services.coverage`, like every other surface.
 
     def _plans(self, org_id: uuid.UUID) -> dict[uuid.UUID, Plan]:
         return {p.class_subject_id: p for p in self.db.scalars(
@@ -200,7 +199,6 @@ class OverviewService:
         year = self.db.get(AcademicYear, k.academic_year_id)
         timetabled = self._timetabled(m.org_id)
         syllabus = self._syllabus_sizes(m.org_id)
-        taught = self._taught_topics(m.org_id)
         plans = self._plans(m.org_id)
         names = self._teacher_names(m.org_id)
         forecasts = {f.class_subject_id: f for f in PlannerService(self.db).forecast(m, class_id)}
@@ -210,6 +208,8 @@ class OverviewService:
             .join(Subject, Subject.id == ClassSubject.subject_id)
             .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
             .order_by(Subject.name)).all()
+        # One shared read for coverage (`S-51`) — three queries for the class.
+        cov = coverage_rows(self.db, m.org_id, [cs.id for cs, _n in rows], year)
 
         subjects: list[SubjectRow] = []
         for cs, subject_name in rows:
@@ -226,7 +226,10 @@ class OverviewService:
                 # The disagreement that silently corrupts every plan date.
                 periods_mismatch=bool(grid) and grid != cs.periods_per_week,
                 chapters=chapters, topics=topics, est_periods=est,
-                topics_taught=taught.get(cs.id, 0),
+                # Weighted by the ONE shared rule: a partly-covered topic is
+                # half, here and on every other screen (`S-51`).
+                topics_taught=cov[cs.id].taught_weighted if cs.id in cov else 0.0,
+                coverage_pct=cov[cs.id].figure(SYLLABUS).pct if cs.id in cov else None,
                 plan_status=plan.status if plan else "none",
                 plan_approved_at=plan.approved_at if plan else None,
                 forecast=f.status if f else "none",

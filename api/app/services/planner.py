@@ -19,7 +19,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
@@ -754,30 +754,91 @@ class PlannerService:
         year = self.db.get(AcademicYear, klass.academic_year_id)
         if year is None:
             raise ValidationError("This class has no academic year.")
+        return self._exam_fit_many(m, year, [class_id])[class_id]
+
+    def exam_fit_org(self, m: CurrentMember, year_id: uuid.UUID) -> list[ExamFitOut]:
+        """Every class in the year, in ONE batch (V1-6, `S-50`).
+
+        `S-50` puts the exam checkpoint in the board's *headline* — "Second
+        Terminal in 24 days · 4 subjects short of portion" — which means it is
+        computed on every load rather than only when its tab is selected. The
+        per-class form ran a units query **per class-subject**, so a 20-class
+        school with 5 subjects each cost ~100 round-trips for one sentence.
+        Identical arithmetic, loop moved inside the query set (the PR-6 move).
+        """
+        year = self.db.scalar(
+            select(AcademicYear).where(AcademicYear.id == year_id,
+                                       AcademicYear.org_id == m.org_id))
+        if year is None:
+            return []
+        class_ids = list(self.db.scalars(
+            select(SchoolClass.id)
+            .where(SchoolClass.org_id == m.org_id,
+                   SchoolClass.academic_year_id == year.id)
+            .order_by(SchoolClass.name, SchoolClass.section)))
+        return list(self._exam_fit_many(m, year, class_ids).values())
+
+    def _exam_fit_many(self, m: CurrentMember, year: AcademicYear,
+                       class_ids: list[uuid.UUID]) -> dict[uuid.UUID, ExamFitOut]:
+        """The shared computation — see `exam_fit`. Five queries, any number of
+        classes; nothing below this line touches the database."""
+        out_by_class = {cid: ExamFitOut(class_id=cid, exams=[]) for cid in class_ids}
+        if not class_ids:
+            return out_by_class
+
         exams = list(self.db.scalars(
             select(CalendarEvent).where(
                 CalendarEvent.org_id == m.org_id,
                 CalendarEvent.academic_year_id == year.id,
                 CalendarEvent.type == "exam_block")
             .order_by(CalendarEvent.start_date)))
-        css = self.db.execute(
+        css_rows = self.db.execute(
             select(ClassSubject, Subject.name)
             .join(Subject, Subject.id == ClassSubject.subject_id)
-            .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
+            .where(ClassSubject.org_id == m.org_id,
+                   ClassSubject.class_id.in_(class_ids))
             .order_by(Subject.name)).all()
-        if not exams or not css:
-            return ExamFitOut(class_id=class_id, exams=[])
+        if not exams or not css_rows:
+            return out_by_class
 
-        blocked, partial = self._calendar(m.org_id, year.id)
-        floor = self._tracking_floor(year)
+        css_by_class: dict[uuid.UUID, list] = {}
+        for cs, sname in css_rows:
+            css_by_class.setdefault(cs.class_id, []).append((cs, sname))
+
+        all_cs_ids = [cs.id for cs, _n in css_rows]
         portions: dict[tuple[uuid.UUID, uuid.UUID], uuid.UUID] = {
             (p.exam_event_id, p.class_subject_id): p.upto_topic_id
             for p in self.db.scalars(select(ExamPortion).where(
                 ExamPortion.org_id == m.org_id,
-                ExamPortion.class_subject_id.in_([cs.id for cs, _n in css])))
+                ExamPortion.class_subject_id.in_(all_cs_ids)))
         }
-        topics_of = {cs.id: self._ordered_topics(self._units(m.org_id, cs.id))
-                     for cs, _n in css}
+        units_by_cs: dict[uuid.UUID, list[SyllabusUnit]] = {}
+        for u in self.db.scalars(
+            select(SyllabusUnit)
+            .where(SyllabusUnit.org_id == m.org_id,
+                   SyllabusUnit.class_subject_id.in_(all_cs_ids))
+            .options(selectinload(SyllabusUnit.topics))
+            .order_by(SyllabusUnit.position)
+        ):
+            units_by_cs.setdefault(u.class_subject_id, []).append(u)
+        topics_of = {cs_id: self._ordered_topics(units_by_cs.get(cs_id, []))
+                     for cs_id in all_cs_ids}
+
+        blocked, partial = self._calendar(m.org_id, year.id)
+        floor = self._tracking_floor(year)
+        for class_id in class_ids:
+            out_by_class[class_id] = ExamFitOut(
+                class_id=class_id,
+                exams=self._exam_fit_rows(
+                    css_by_class.get(class_id, []), exams, portions, topics_of,
+                    year, blocked, partial, floor))
+        return out_by_class
+
+    def _exam_fit_rows(self, css: list, exams: list, portions: dict, topics_of: dict,
+                       year: AcademicYear, blocked: set, partial: dict,
+                       floor: date) -> list[ExamFitExam]:
+        if not css:
+            return []
         today = datetime.now(UTC).date()
 
         out: list[ExamFitExam] = []
@@ -839,7 +900,7 @@ class PlannerService:
                 end_date=ex.end_date, days_to_exam=(ex.start_date - today).days,
                 gap_start=gap_start, gap_end=gap_end, teaching_days_in_gap=days_in_gap,
                 subjects=subjects))
-        return ExamFitOut(class_id=class_id, exams=out)
+        return out
 
     # ── topic progress (V2-P6): plan is baseline, logs are actual (P2) ───────
     def topic_progress(self, m: CurrentMember, cs_id: uuid.UUID) -> list[TopicProgressRow]:
@@ -962,6 +1023,18 @@ class PlannerService:
         ):
             entries_by_cs.setdefault(e.class_subject_id, []).append(e)
 
+        # The evidence behind the rating (V1-6, `S-42`). One grouped query for
+        # the whole batch — it does not enter the pace arithmetic below, it
+        # travels with it so no consumer has to ask again whether anybody
+        # actually recorded a lesson.
+        logged_by_cs = {
+            cs_id: int(n) for cs_id, n in self.db.execute(
+                select(LessonLog.class_subject_id, func.count(LessonLog.id))
+                .where(LessonLog.org_id == m.org_id,
+                       LessonLog.class_subject_id.in_(cs_ids))
+                .group_by(LessonLog.class_subject_id)).all()
+        }
+
         year = self.db.get(AcademicYear, rows[0][2].academic_year_id)
         blocked, partial = self._calendar(m.org_id, year.id) if year else (set(), {})
         floor = self._tracking_floor(year) if year else None
@@ -980,6 +1053,7 @@ class PlannerService:
         out: list[ForecastOut] = []
         for cs, subject_name, klass in rows:
             label = klass.name + (f"-{klass.section}" if klass.section else "")
+            logged = logged_by_cs.get(cs.id, 0)
             units = [u for u in units_by_cs.get(cs.id, [])
                      if u.term_id not in pre_tracking_ids]
             topics = self._ordered_topics(units)
@@ -989,14 +1063,14 @@ class PlannerService:
             if not topics:
                 out.append(ForecastOut(
                     class_subject_id=cs.id, subject_name=subject_name, class_label=label,
-                    status="none", total_topics=0))
+                    status="none", total_topics=0, logged_periods=logged))
                 continue
             if not cs.periods_per_week:
                 # A pace computed from 0 periods/week is fiction — say so instead.
                 out.append(ForecastOut(
                     class_subject_id=cs.id, subject_name=subject_name, class_label=label,
                     status="unallocated", total_topics=len(topics),
-                    unestimated_topics=len(unsized)))
+                    unestimated_topics=len(unsized), logged_periods=logged))
                 continue
 
             planned_ids = {e.topic_id for e in entries}
@@ -1018,7 +1092,7 @@ class PlannerService:
                 out.append(ForecastOut(
                     class_subject_id=cs.id, subject_name=subject_name, class_label=label,
                     status="unplanned", total_topics=len(topics),
-                    unestimated_topics=len(unsized),
+                    unestimated_topics=len(unsized), logged_periods=logged,
                     current_term_unplanned=current_term_unplanned))
                 continue
 
@@ -1039,6 +1113,7 @@ class PlannerService:
                 status=rag, total_topics=len(topics), baseline_finish=baseline_finish,
                 projected_finish=projected_finish, weeks_behind=weeks_behind,
                 unestimated_topics=len(unsized), planned_topics=len(planned),
+                logged_periods=logged,
                 current_term_unplanned=current_term_unplanned))
         return out
 

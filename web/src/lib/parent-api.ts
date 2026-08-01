@@ -131,6 +131,16 @@ export interface ParentReportSubject {
   homework_assigned: number;
   homework_personal: number;
   scores: ParentScore[];
+  /** V1-6 (S-51/S-54): computed server-side against the WHOLE syllabus — the
+   *  only denominator that cannot fall when next term's chapters are sized.
+   *  Never sum the chapters in the browser again. */
+  coverage_taught: number;
+  coverage_total: number;
+  coverage_pct: number | null;
+  /** S-48 — what the class is actually on, which is what a parent can ask about. */
+  latest_chapter: string | null;
+  latest_topic: string | null;
+  latest_taught_on: string | null;
 }
 
 export interface ParentReport {

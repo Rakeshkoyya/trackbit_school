@@ -8,15 +8,18 @@ import { parentApi, type ParentReportSubject } from "@/lib/parent-api";
 
 import { useParentPortal } from "../parent-context";
 
-function coverage(s: ParentReportSubject) {
-  const total = s.chapters.reduce((n, c) => n + c.topics_total, 0);
-  const taught = s.chapters.reduce((n, c) => n + c.topics_taught, 0);
-  const inProgress = s.chapters.reduce((n, c) => n + c.topics_in_progress, 0);
-  return { total, taught, inProgress };
-}
+// V1-6 (`S-51`): the coverage figure is NOT computed here any more. This page
+// used to sum `topics_taught / topics_total` in the browser — a definition of
+// "syllabus covered" that differed from the admin board's in both numerator and
+// denominator, so a parent and a principal could read different percentages for
+// the same subject on the same day, and no test could ever have caught it. The
+// server now sends one figure from `core.coverage`, measured against the WHOLE
+// syllabus, which is the only denominator that cannot go down when the school
+// sizes next term's chapters (`S-54`).
 
 function SubjectCard({ s }: { s: ParentReportSubject }) {
-  const { total, taught, inProgress } = coverage(s);
+  const taught = s.coverage_taught;
+  const total = s.coverage_total;
   const latest = s.scores[s.scores.length - 1];
   return (
     <section className="rounded-xl border border-border bg-card p-4">
@@ -31,18 +34,24 @@ function SubjectCard({ s }: { s: ParentReportSubject }) {
         <div>
           <div className="mb-1 flex justify-between text-xs text-muted-foreground">
             <span>Syllabus covered</span>
-            <span className="tabular-nums">
-              {taught}/{total} topics
-              {inProgress > 0 ? ` · ${inProgress} in progress` : ""}
-            </span>
+            {/* The denominator is stated, always (rule 3). */}
+            <span className="tabular-nums">{taught} of {total} topics</span>
           </div>
           <MeterBar
             parts={[
               { value: taught, color: "var(--chart-green)", label: "Covered" },
-              { value: inProgress, color: "var(--color-muted-foreground)", label: "In progress" },
-              { value: Math.max(0, total - taught - inProgress), color: "var(--muted)", label: "Remaining" },
+              { value: Math.max(0, total - taught), color: "var(--muted)", label: "Still to come" },
             ]}
           />
+          {/* `S-48` — the chapter name beats the percentage for a parent,
+              because it is the thing they can ask their child about at dinner.
+              Still no pace, no lag, no "behind" anywhere near this (`D-11`). */}
+          {s.latest_chapter ? (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Currently on <span className="font-medium text-foreground">{s.latest_chapter}</span>
+              {s.latest_topic ? <> — {s.latest_topic}</> : null}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">

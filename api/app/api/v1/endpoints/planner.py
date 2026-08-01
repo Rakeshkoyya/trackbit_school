@@ -19,6 +19,7 @@ from app.schemas.ingest import (
     SyllabusCommitOut,
     SyllabusTextIn,
 )
+from app.schemas.my_syllabus import ClassSyllabusOut, MySubjectsOut
 from app.schemas.periods import TopicProgressRow
 from app.schemas.planner import (
     ExamFitOut,
@@ -37,11 +38,37 @@ from app.schemas.planner import (
     WeekScheduleOut,
 )
 from app.services import templates
+from app.services.my_syllabus import MySyllabusService
 from app.services.planner import PlannerService
 from app.services.syllabus_import import SyllabusImporter, analyze_file, analyze_text
 from app.services.week_schedule import WeekScheduleService
 
 router = APIRouter()
+
+
+# ── the teacher's own syllabus (V1-6, S-46 / D-15) ───────────────────────────
+@router.get("/my-subjects", response_model=MySubjectsOut)
+def my_subjects(year_id: uuid.UUID | None = None,
+                m: CurrentMember = Depends(require_academic),
+                db: Session = Depends(get_db)):
+    """`S-46` — one row per class-subject she teaches, with what to teach next.
+
+    Scoped to the caller inside the service (`D-15`): the rows are chosen by
+    `teacher_member_id`, never filtered afterwards, so no other teacher's
+    subject is ever loaded in the first place.
+    """
+    return MySyllabusService(db).my_subjects(m, year_id)
+
+
+@router.get("/class-syllabus/{class_id}", response_model=ClassSyllabusOut)
+def class_syllabus(class_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """`D-15` — every subject for ONE class, for that class's teacher or an admin.
+
+    A teacher who is not this class's class teacher gets 403 `not_your_class`;
+    there is no school-wide form of this endpoint by design.
+    """
+    return MySyllabusService(db).class_syllabus(m, class_id)
 
 
 # ── syllabus ─────────────────────────────────────────────────────────────────

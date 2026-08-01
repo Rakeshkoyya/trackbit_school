@@ -55,7 +55,13 @@ class SubjectRow(BaseModel):
     chapters: int
     topics: int
     est_periods: int
-    topics_taught: int
+    # V1-6 (`S-51`): weighted by the one shared rule — a partly-covered topic is
+    # worth half. It was a whole-numbers-only count of FULL logs here and a
+    # weighted figure on the syllabus board, for the same class, on the same day.
+    topics_taught: float
+    # The percentage, computed server-side against the whole syllabus so the
+    # browser stops doing its own division (it was doing it in two places).
+    coverage_pct: float | None = None
 
     plan_status: str  # none | draft | partial | approved
     plan_approved_at: datetime | None = None

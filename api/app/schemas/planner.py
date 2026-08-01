@@ -112,6 +112,15 @@ class ForecastOut(BaseModel):
     # The term running today has chapters but not one of them is scheduled —
     # the one "no plan" state worth an alert.
     current_term_unplanned: bool = False
+    # How many lesson logs exist for this class-subject — the evidence behind
+    # the rating (V1-6, `S-42`). `status` above is plan-against-calendar and is
+    # computed without reading a single log, which is correct arithmetic and
+    # misleading prose: with `logged_periods == 0` nobody has observed anything,
+    # so every screen runs the pair through `core.coverage.rated_status` and
+    # shows **unknown** instead of "3 weeks behind". Carried here rather than
+    # re-queried per surface so the board, the overview, the daily report and
+    # Lucy cannot reach different conclusions about the same subject.
+    logged_periods: int = 0
 
 
 # ── generation pipeline (V2-M2, SPRD2 §5.2) ──────────────────────────────────

@@ -22,8 +22,11 @@ from app.core.visibility import (
 from app.models import (
     Board,
     BoardCategory,
+    ClassSubject,
     Membership,
+    SchoolClass,
     Student,
+    Subject,
     TaskEvent,
     TaskInstance,
     TaskTemplate,
@@ -103,26 +106,38 @@ class TaskService:
     def _subject_map(self, instances: list[TaskInstance]) -> dict[uuid.UUID, TaskSubjectOut]:
         """task_id → resolved subject (D-46), batched — students and members in
         one query each, never one per row."""
-        student_ids = {i.subject_id for i in instances
-                       if i.subject_type == "student" and i.subject_id}
-        member_ids = {i.subject_id for i in instances
-                      if i.subject_type == "member" and i.subject_id}
-        student_names: dict[uuid.UUID, str] = {}
-        member_names: dict[uuid.UUID, str] = {}
-        if student_ids:
-            student_names = dict(self.db.execute(
-                select(Student.id, Student.full_name).where(Student.id.in_(student_ids))).all())
-        if member_ids:
-            member_names = dict(self.db.execute(
+        by_type: dict[str, set[uuid.UUID]] = {}
+        for i in instances:
+            if i.subject_type and i.subject_id:
+                by_type.setdefault(i.subject_type, set()).add(i.subject_id)
+
+        names: dict[str, dict[uuid.UUID, str]] = {}
+        if by_type.get("student"):
+            names["student"] = dict(self.db.execute(
+                select(Student.id, Student.full_name)
+                .where(Student.id.in_(by_type["student"]))).all())
+        if by_type.get("member"):
+            names["member"] = dict(self.db.execute(
                 select(Membership.id, User.name)
                 .join(User, User.id == Membership.user_id)
-                .where(Membership.id.in_(member_ids))).all())
+                .where(Membership.id.in_(by_type["member"]))).all())
+        if by_type.get("class_subject"):
+            # V1-6 `D-16`: a catch-up request is about "6-B Maths", not a person.
+            names["class_subject"] = {
+                cs_id: f"{cname}{'-' + section if section else ''} {sname}"
+                for cs_id, cname, section, sname in self.db.execute(
+                    select(ClassSubject.id, SchoolClass.name, SchoolClass.section,
+                           Subject.name)
+                    .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+                    .join(Subject, Subject.id == ClassSubject.subject_id)
+                    .where(ClassSubject.id.in_(by_type["class_subject"]))).all()
+            }
+
         out: dict[uuid.UUID, TaskSubjectOut] = {}
         for i in instances:
             if not i.subject_type or not i.subject_id:
                 continue
-            name = (student_names if i.subject_type == "student" else member_names).get(
-                i.subject_id)
+            name = names.get(i.subject_type, {}).get(i.subject_id)
             if name:
                 out[i.id] = TaskSubjectOut(type=i.subject_type, id=i.subject_id, name=name)
         return out
@@ -593,7 +608,8 @@ class TaskService:
         # student in another school must not be creatable.
         subject_type, subject_id = req.subject_type, req.subject_id
         if subject_type and subject_id:
-            model = Student if subject_type == "student" else Membership
+            model = {"student": Student, "member": Membership,
+                     "class_subject": ClassSubject}[subject_type]
             if not self.db.scalar(select(model.id).where(
                     model.id == subject_id, model.org_id == member.org_id)):
                 raise NotFoundError("Task subject")

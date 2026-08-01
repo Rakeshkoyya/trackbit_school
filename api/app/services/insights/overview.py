@@ -26,6 +26,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.coverage import rated_status
 from app.schemas.insights import (
     OverviewBoard,
     OverviewMetric,
@@ -255,10 +256,17 @@ class OverviewService:
 
     # ── M2 syllabus ──────────────────────────────────────────────────────────
     def _syllabus(self, rag) -> OverviewSection:
-        rated = [r for r in rag if r.status in ("green", "amber", "red")]
-        on_track = sum(1 for r in rated if r.status == "green")
-        behind = sum(1 for r in rated if r.status == "red")
-        slipping = sum(1 for r in rated if r.status == "amber")
+        # `S-42`: a class-subject nobody has logged a lesson against is
+        # **unknown**, not on track and not behind. Run through the same
+        # `rated_status` the board uses, or the summary and the tab it links to
+        # would count the same subject differently — which is the exact defect
+        # V1-6 exists to remove, reappearing between two of our own screens.
+        status_of = {r.class_subject_id: rated_status(r.status, r.logged_periods > 0)
+                     for r in rag}
+        rated = [r for r in rag if status_of[r.class_subject_id] in ("green", "amber", "red")]
+        on_track = sum(1 for r in rated if status_of[r.class_subject_id] == "green")
+        behind = sum(1 for r in rated if status_of[r.class_subject_id] == "red")
+        slipping = sum(1 for r in rated if status_of[r.class_subject_id] == "amber")
         unplanned = sum(1 for r in rag if r.status == "unplanned")
         unsized = sum(r.unestimated_topics for r in rag)
         pct = round(on_track / len(rated) * 100) if rated else None
@@ -292,13 +300,17 @@ class OverviewService:
                  href="/plan/syllabus")),
         ]
 
-        worst = sorted((r for r in rag if r.weeks_behind > 0),
+        # Only rows we actually observed may be named as behind (`S-42`) — a
+        # teacher who has logged nothing must not be reported to the admin as
+        # three weeks late on evidence that does not exist.
+        worst = sorted((r for r in rated if r.weeks_behind > 0),
                        key=lambda r: -r.weeks_behind)[:MAX_NOTES]
         notes = [
             OverviewNote(
                 text=(f"{r.class_label} {r.subject_name} — {r.weeks_behind} "
                       f"{_plural(r.weeks_behind, 'week')} behind"),
-                tone="red" if r.status == "red" else "amber", href="/dashboard/syllabus")
+                tone="red" if status_of[r.class_subject_id] == "red" else "amber",
+                href="/dashboard/syllabus")
             for r in worst
         ]
         for r in (x for x in rag if x.current_term_unplanned):

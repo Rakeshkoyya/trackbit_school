@@ -69,6 +69,29 @@ class GrowthSubject(BaseModel):
     teacher_name: str | None = None
     attendance: GrowthAttendance
     chapters: list[GrowthChapter] = []
+
+    # ── V1-6, `S-51`/`S-54`/`Q-16` ───────────────────────────────────────────
+    # Coverage computed by `core.coverage`, not by the browser. Two pages used
+    # to sum `topics_taught / topics_total` in JavaScript — a third and fourth
+    # definition of "syllabus covered" that no test could ever have caught.
+    #
+    # The basis is **the whole syllabus**, deliberately (`Q-16`): it is the only
+    # denominator that cannot go down. Coverage against the *plan* falls the day
+    # a school sizes next term's chapters — nothing was un-taught, the
+    # denominator simply grew — and a parent reads that as the school going
+    # backwards (`S-54`). Staff surfaces get both bases; this one gets the safe
+    # one, and `coverage_basis` says which so no screen has to guess.
+    coverage_taught: float = 0
+    coverage_total: int = 0
+    coverage_pct: float | None = None
+    coverage_basis: str = "syllabus"
+
+    # `S-48` — *"This week in Maths: Fractions — addition and subtraction"*.
+    # A chapter name beats a percentage for a parent, because it is the thing
+    # they can ask their child about at dinner. Derived from lesson logs.
+    latest_chapter: str | None = None
+    latest_topic: str | None = None
+    latest_taught_on: date | None = None
     homework_assigned: int = 0
     homework_personal: int = 0  # per-student additions targeted at this student
     # This student's own record on that homework (HW-1). `homework_not_checked`

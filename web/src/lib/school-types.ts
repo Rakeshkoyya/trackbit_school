@@ -1265,7 +1265,10 @@ export interface SubjectRow {
   chapters: number;
   topics: number;
   est_periods: number;
+  /** V1-6 (S-51): weighted — a partly-covered topic is half, everywhere. */
   topics_taught: number;
+  /** Computed server-side against the whole syllabus. Do not divide in the browser. */
+  coverage_pct: number | null;
   plan_status: "none" | "draft" | "partial" | "approved";
   plan_approved_at: string | null;
   forecast: Rag;
@@ -1831,4 +1834,49 @@ export interface StudentHomeworkHistory {
   completion: number | null;
   streak: number;
   items: StudentHomeworkItem[];
+}
+
+// ── V1-6: the teacher's own syllabus (S-46, D-15) ───────────────────────────
+export interface SubjectPaceRow {
+  class_subject_id: string;
+  class_id: string;
+  class_label: string;
+  subject_id: string | null;
+  subject_name: string;
+  /** Already through the shared classifier — `unknown` means nobody logged
+   *  anything, and must never render as a pace colour (S-42). */
+  status: string;
+  taught_topics: number;
+  planned_topics: number;
+  total_topics: number;
+  coverage_pct: number | null;
+  syllabus_pct: number | null;
+  due_topics: number;
+  behind_topics: number;
+  weeks_behind: number;
+  unestimated_topics: number;
+  logged_periods: number;
+  /** The reason she opened the screen at all (S-46). */
+  next_topic_title: string | null;
+  next_chapter_title: string | null;
+  last_taught_on: string | null;
+  /** Class-teacher view only (D-15) — never a rank, never school-wide. */
+  teacher_name: string | null;
+  cause: string | null;
+  cause_detail: string | null;
+}
+
+export interface MySubjects {
+  academic_year_id: string | null;
+  as_of: string;
+  headline: string;
+  rows: SubjectPaceRow[];
+}
+
+export interface ClassSyllabus {
+  class_id: string;
+  class_label: string;
+  as_of: string;
+  headline: string;
+  rows: SubjectPaceRow[];
 }

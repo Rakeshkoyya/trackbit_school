@@ -20,8 +20,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.coverage import SYLLABUS
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
+    AcademicYear,
     AssessmentCycle,
     AssessmentScore,
     AttendanceException,
@@ -55,6 +57,7 @@ from app.schemas.growth import (
     GrowthTopic,
     StudentGrowthOut,
 )
+from app.services.coverage import coverage_rows
 
 _LOW_ATTENDANCE_PCT = 85.0
 _LOW_SCORE_PCT = 40.0
@@ -283,11 +286,27 @@ class GrowthService:
                 cycle_name=cyc_name, date=cyc_date,
                 score=float(score.score), max_score=float(score.max_score)))
 
+        # `S-51`: the coverage FIGURE comes from the shared computation, not from
+        # this module's per-topic walk and not from the browser. The walk above
+        # still produces the chapter drill-down — that is a different shape of
+        # the same facts — but the number a parent reads is now the same
+        # arithmetic the admin board runs, on the whole-syllabus basis (`S-54`).
+        year = self.db.get(AcademicYear, klass.academic_year_id) if klass else None
+        cov = coverage_rows(self.db, m.org_id, cs_ids, year) if cs_ids else {}
+
         for cs, subject_name, teacher_name in cs_rows:
+            c = cov.get(cs.id)
+            figure = c.figure(SYLLABUS) if c else None
             out.subjects.append(GrowthSubject(
                 class_subject_id=cs.id, subject_name=subject_name, teacher_name=teacher_name,
                 attendance=att_for(periods_by_cs.get(cs.id, [])),
                 chapters=chapters_by_cs.get(cs.id, []),
+                coverage_taught=figure.taught if figure else 0.0,
+                coverage_total=figure.total if figure else 0,
+                coverage_pct=figure.pct if figure else None,
+                latest_chapter=c.last_chapter_title if c else None,
+                latest_topic=c.last_topic_title if c else None,
+                latest_taught_on=c.last_taught_on if c else None,
                 homework_assigned=hw_assigned.get(cs.id, 0),
                 homework_personal=hw_personal.get(cs.id, 0),
                 homework_done=hw_done.get(cs.id, 0),

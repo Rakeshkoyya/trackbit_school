@@ -29,6 +29,10 @@ export type NavItem = {
 const myDay: NavItem = { label: "My Day", href: "/my-day", icon: Sun };
 const sessions: NavItem = { label: "Sessions", href: "/sessions", icon: CalendarClock };
 const plan: NavItem = { label: "Plan", href: "/plan", icon: CalendarRange };
+// V1-6 (`S-46`). Same area, different door: the rest of Plan is admin-shaped
+// (pick a year, pick a class, pick a subject), so a teacher lands on the list of
+// the class-subjects she actually owns instead of picking her way to each one.
+const planForTeacher: NavItem = { ...plan, href: "/plan/my-subjects" };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
 const tasks: NavItem = { label: "Tasks", href: "/tasks", icon: CheckSquare, tour: "nav-boards" };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
@@ -65,7 +69,7 @@ export function navForRole(
       // actually lives in (D-03). Absent entirely for a subject teacher.
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
-        lucy, sessions, plan, students, timesheet, tasks,
+        lucy, sessions, planForTeacher, students, timesheet, tasks,
       ];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent

@@ -12,10 +12,11 @@ class AssigneeOut(BaseModel):
 
 
 class TaskSubjectOut(BaseModel):
-    """What the task is about (D-46): a student or a member, resolved to a name
-    so the row reads "Kabir Shah — absent 4 days" instead of a bare title."""
+    """What the task is about (D-46): a student, a member, or — since V1-6's
+    `D-16` — a class-subject, resolved to a name so the row reads "Kabir Shah —
+    absent 4 days" or "6-B Maths" instead of a bare title."""
 
-    type: str  # student | member
+    type: str  # student | member | class_subject
     id: uuid.UUID
     name: str
 
@@ -68,7 +69,11 @@ class TaskCreateRequest(BaseModel):
     all_day: bool = False
     is_critical: bool = False
     # D-46: what the task is about. Set by the action rail; validated org-scoped.
-    subject_type: str | None = Field(default=None, pattern="^(student|member)$")
+    # V1-6 adds `class_subject` for `D-16`'s catch-up request, which is a task
+    # about a subject in a class rather than about a person — and which is what
+    # lets the syllabus board read back whether the meeting has happened yet.
+    subject_type: str | None = Field(
+        default=None, pattern="^(student|member|class_subject)$")
     subject_id: uuid.UUID | None = None
 
 

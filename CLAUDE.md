@@ -572,6 +572,43 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     `components/staff/month-summary.tsx`), the four-state staff roster, half-day leave apply,
     Arrange-cover from an approval, the slack chart, and `/staff/today` finally naming who is
     covering **for whom**.
+- **V1-6 (syllabus, planning & the mid-year proof, 2026-08-02)** — **no migration.** `S-51`: the
+  phrase *"syllabus covered"* was computed in **five** places with no two alike — the admin board
+  (planned denominator, partial=0.5), the growth report (whole syllabus, partial=0), the class
+  overview (whole syllabus, full logs only), and **two `.reduce()` calls in React** (parent
+  progress, plan→classes). A parent and a principal could read different percentages for the same
+  subject on the same day, and no test could have caught the browser ones.
+  - **`core/coverage.py` is now the whole vocabulary**, not just `PARTIAL_WEIGHT`: `taught_weight` ·
+    `better_coverage` (best log wins per topic — a topic taught across two periods is taught
+    *once*) · `coverage_pct` · `CoverageFigure` (carries its denominator, so no screen can quote a
+    bare percentage) · the three named bases **`SYLLABUS` / `PLANNED` / `PLANNED_TO_DATE`** ·
+    `rated_status` (`S-42`) · `attribute_cause` (`S-41`). **Import it — never compute coverage
+    again**, in Python or in the browser.
+  - **`services/coverage.py::CoverageReader`** — the batched read: **3 queries for any number of
+    class-subjects**, pre-tracking terms excluded from numerator *and* denominator (plan §5,
+    pinned by `test_midyear.py`). `snapshot()` also hands back the per-topic detail, so `S-40`'s
+    weekly series costs no extra query.
+  - **`Q-16`/`S-54`**: the parent's denominator is the **whole syllabus** — the only one that
+    cannot fall when the school sizes next term's chapters. The admin sees both, side by side.
+  - **`S-42`**: `ForecastOut.logged_periods` rides along with the pace, and every *screen* runs the
+    pair through `rated_status` → **`unknown`**. The forecast still returns green/amber/red (its
+    arithmetic is plan-against-calendar and is valid with zero logs); `unknown` is a **rendering**
+    decision, applied on the board *and* the overview so the summary and the tab agree.
+  - **`S-41`** every behind row says why — `not_logged` · `periods_lost` · `never_sized` ·
+    `slower`, in that test order, because "nobody recorded anything" invalidates the rest and
+    "periods were lost" is nobody's fault while "slower" is a conversation about a person.
+  - **`S-45`** `rank_reason` replaces the unexplainable `on_track_share×60 + coverage×40` ·
+    **`S-50`** the exam leads the page, which needed the new batched **`PlannerService.exam_fit_org`**
+    (the per-class form ran a units query *per class-subject*) · **`S-40`** coverage-over-time vs
+    the baseline · **`S-43`** section compare (6-A vs 6-B).
+  - **`D-16`/`S-60`** `catchup_requested` — a **meeting request, not a directive**: a task on the
+    subject teacher carrying the gap and the cause, which the board reads back and which clears on
+    the recorded **outcome**, never on the press. `task_instances.subject_type` accepts
+    `class_subject` (free-text column, no migration) and resolves to "6-B Maths".
+  - **`S-46`/`D-15`** `/planner/my-subjects` (scoped on `teacher_member_id` — blocked, not
+    filtered) + `/planner/class-syllabus/{id}` (class teacher or admin, 403 `not_your_class`).
+    Web: `/plan/my-subjects` (a teacher's Plan nav points here), `components/school/subject-pace-list.tsx`
+    shared with My Class's new syllabus block. `test_syllabus_v1_6.py` (12).
 
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,

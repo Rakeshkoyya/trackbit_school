@@ -224,6 +224,53 @@ export interface SyllabusRow {
   unestimated_topics: number;
   current_term_unplanned: boolean;
   logged_periods: number;
+
+  // ── V1-6 ───────────────────────────────────────────────────────────────────
+  /** Coverage of the WHOLE syllabus — the denominator that can only grow (S-54).
+   *  `coverage_pct` above is coverage of the PLAN. Both are shown, side by side,
+   *  because they answer different questions (S-51). */
+  syllabus_pct: number | null;
+  syllabus_taught: number;
+  /** Pace a person can check by hand: topics whose planned week has arrived,
+   *  and how many are still untaught (S-45). */
+  due_topics: number;
+  taught_due: number;
+  behind_topics: number;
+  /** Why it is behind (S-41). Absent on a row that is not behind. */
+  cause: "not_logged" | "periods_lost" | "never_sized" | "slower" | null;
+  cause_detail: string | null;
+  periods_not_held: number;
+  next_topic_title: string | null;
+  next_chapter_title: string | null;
+  /** D-16/S-60 — set while a catch-up request is open; `catchup_outcome` fills
+   *  in when the meeting happened. The row clears on the OUTCOME, not the press. */
+  catchup_task_id: string | null;
+  catchup_requested_on: string | null;
+  catchup_outcome: string | null;
+}
+
+export interface SyllabusTrendPoint {
+  week_start: string;
+  actual: number;
+  baseline: number;
+}
+
+export interface SectionCompareRow {
+  class_subject_id: string;
+  class_label: string;
+  teacher_name: string | null;
+  status: string;
+  coverage_pct: number | null;
+  taught_topics: number;
+  planned_topics: number;
+  behind_topics: number;
+}
+
+export interface SectionCompare {
+  grade: string;
+  subject_name: string;
+  spread_pct: number | null;
+  rows: SectionCompareRow[];
 }
 
 export interface SyllabusNode {
@@ -237,15 +284,22 @@ export interface SyllabusNode {
   behind: number;
   unplanned: number;
   unallocated: number;
+  /** Has a plan, but nobody has logged a lesson against it (S-42). Its own
+   *  bucket: not on track, not behind — a third thing. */
+  unknown: number;
   planned_topics: number;
   taught_topics: number;
   coverage_pct: number | null;
+  total_topics: number;
+  syllabus_pct: number | null;
   weeks_behind_max: number;
   unestimated_topics: number;
   logged_periods: number;
   /** False = below the minimum sample. Render "not enough data yet", never a rank. */
   rank_eligible: boolean;
   score: number | null;
+  /** The sentence the ordering rests on — show THIS, never the raw score (S-45). */
+  rank_reason: string | null;
 }
 
 export interface ExamCheckpointSubject {
@@ -289,6 +343,12 @@ export interface SyllabusBoard {
   needs_support: SyllabusNode[];
   min_class_subjects: number;
   min_logged_periods: number;
+  /** S-50 — the nearest exam, computed on every load, whatever tab is selected. */
+  next_exam: ExamCheckpoint | null;
+  /** The sentence the page opens with (rule 3). */
+  headline: string | null;
+  trend: SyllabusTrendPoint[];
+  sections: SectionCompare[];
 }
 
 // ── M3 staff ─────────────────────────────────────────────────────────────────
@@ -571,7 +631,9 @@ export type ActionKind =
   | "substitute_assigned"
   | "task_reassigned"
   | "task_extended"
-  | "nudged";
+  | "nudged"
+  /** D-16 — a meeting request, not a directive. Clears on the OUTCOME. */
+  | "catchup_requested";
 
 export interface SubstitutionIn {
   date: string;
@@ -610,6 +672,8 @@ export interface ActionIn {
   note?: string;
   due_at?: string;
   substitution?: SubstitutionIn;
+  /** D-16 — the class-subject a catch-up plan is being asked about. */
+  class_subject_id?: string;
 }
 
 export interface ActionResult {

@@ -145,6 +145,19 @@ class ParentReportSubject(BaseModel):
     homework_personal: int = 0
     scores: list[GrowthScore] = []
 
+    # V1-6 — the coverage figure, computed server-side by `core.coverage` and
+    # measured against the WHOLE syllabus (`S-54`, `Q-16`). Both parent pages
+    # used to sum this in the browser, which is how the product ended up with
+    # four different answers to "how much of the syllabus is covered".
+    coverage_taught: float = 0
+    coverage_total: int = 0
+    coverage_pct: float | None = None
+    # `S-48` — the chapter and topic most recently taught. Still no pace, no
+    # lag, no RAG and no "missed": `D-11` is unchanged by this.
+    latest_chapter: str | None = None
+    latest_topic: str | None = None
+    latest_taught_on: date | None = None
+
 
 class ParentReportOut(BaseModel):
     student_id: uuid.UUID

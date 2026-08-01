@@ -280,6 +280,78 @@ class SyllabusRow(BaseModel):
     # ranking, shown so a rank can always be checked against how much it rests on.
     logged_periods: int = 0
 
+    # ── V1-6 ─────────────────────────────────────────────────────────────────
+    # `S-51`: both denominators, side by side, because they answer different
+    # questions. `coverage_pct` above stays coverage of the PLAN ("are we on
+    # pace?"); this is coverage of the whole portion ("will we finish?") and is
+    # the only one a parent may ever see, because it cannot go down (`S-54`).
+    syllabus_pct: float | None = None
+    syllabus_taught: float = 0
+
+    # `S-45`/`S-41`: pace a person can check by hand. Topics whose planned week
+    # has arrived, and how many of them are still untaught. This — not a
+    # composite score — is what "behind" means on this board now.
+    due_topics: int = 0
+    taught_due: float = 0
+    behind_topics: float = 0
+
+    # `S-41`: *why*. One of never_sized · not_logged · periods_lost · slower,
+    # with the sentence that makes it a different conversation. Absent when the
+    # row is not behind — a green row needs no excuse.
+    cause: str | None = None
+    cause_detail: str | None = None
+    periods_not_held: int = 0
+
+    # `S-46`: what to teach next, so the board and her own screen agree.
+    next_topic_title: str | None = None
+    next_chapter_title: str | None = None
+
+    # `D-16`/`S-60`: a catch-up plan was asked for. The row clears on the
+    # recorded OUTCOME, never on the press — so this stays set while the task is
+    # open and carries the outcome once the meeting has happened.
+    catchup_task_id: uuid.UUID | None = None
+    catchup_requested_on: date_ | None = None
+    catchup_outcome: str | None = None
+
+
+class SyllabusTrendPoint(BaseModel):
+    """One week of `S-40`'s coverage-over-time chart.
+
+    `actual` is cumulative taught weight; `baseline` is the cumulative topics
+    the approved plan had scheduled by that week. The gap between the two lines
+    IS the story — a widening band is slipping, a closing one is catching up —
+    which no snapshot on this board could show.
+    """
+    week_start: date_
+    actual: float = 0
+    baseline: int = 0
+
+
+class SectionCompareRow(BaseModel):
+    class_subject_id: uuid.UUID
+    class_label: str
+    teacher_name: str | None = None
+    status: str
+    coverage_pct: float | None = None
+    taught_topics: float = 0
+    planned_topics: int = 0
+    behind_topics: float = 0
+
+
+class SectionCompare(BaseModel):
+    """`S-43` — 6-A Maths against 6-B Maths.
+
+    The fairest comparison in a school: same syllabus, same weeks, same exam,
+    different teacher. Only emitted where a grade genuinely has more than one
+    section teaching that subject, and it carries the same honesty guard as
+    everything else here — a section with no logs is `unknown` and is not the
+    one "behind".
+    """
+    grade: str
+    subject_name: str
+    spread_pct: float | None = None     # best minus worst, in points
+    rows: list[SectionCompareRow] = []
+
 
 class SyllabusNode(BaseModel):
     """A scope roll-up — a class, a subject, or a teacher.
@@ -298,14 +370,25 @@ class SyllabusNode(BaseModel):
     behind: int = 0
     unplanned: int = 0
     unallocated: int = 0
+    # `S-42`: has a plan, but nobody has logged a lesson against it. Counted
+    # apart from every RAG bucket and apart from `unplanned`, because "we don't
+    # know" is a third thing and folding it into either one loses the finding.
+    unknown: int = 0
     planned_topics: int = 0
     taught_topics: float = 0
     coverage_pct: float | None = None
+    total_topics: int = 0
+    syllabus_pct: float | None = None
     weeks_behind_max: int = 0
     unestimated_topics: int = 0
     logged_periods: int = 0
     rank_eligible: bool = False
     score: float | None = None
+    # `S-45`: the sentence the ordering rests on — *"3 of 4 on track · 68%
+    # covered"*. A rank that cannot be explained to the person it is about has
+    # no business being on the screen, and `score` alone could not be
+    # reconstructed by anybody who read it.
+    rank_reason: str | None = None
 
 
 class ExamCheckpointSubject(BaseModel):
@@ -346,6 +429,17 @@ class SyllabusBoard(BaseModel):
     needs_support: list[SyllabusNode] = []
     min_class_subjects: int = 3
     min_logged_periods: int = 10
+
+    # ── V1-6 ─────────────────────────────────────────────────────────────────
+    # `S-50`: schools manage against exams, not against April-to-March, so the
+    # nearest one leads the page whatever checkpoint is selected. Always
+    # computed now (batched via `exam_fit_org`), not only on the exam tab.
+    next_exam: ExamCheckpoint | None = None
+    # The sentence the page opens with (rule 3). Composed here so the board and
+    # the overview cannot describe the same day differently.
+    headline: str | None = None
+    trend: list[SyllabusTrendPoint] = []
+    sections: list[SectionCompare] = []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -692,6 +786,8 @@ class ActionIn(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
     due_at: datetime | None = None
     substitution: SubstitutionIn | None = None
+    # `D-16` — the class-subject a catch-up plan is being asked about.
+    class_subject_id: uuid.UUID | None = None
 
 
 class ActionOut(BaseModel):

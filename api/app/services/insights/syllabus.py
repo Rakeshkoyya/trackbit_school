@@ -1,70 +1,91 @@
-"""M2 — is the year's teaching where the plan said it would be (DASH3 §4.2).
+"""M2 — is the year's teaching where the plan said it would be (DASH3 §4.2,
+reworked by V1-6).
 
 Two axes, and the tab is laid out as a matrix of them.
 
 **Checkpoint (vertical):** whole year · term · per exam. The exam checkpoint is
 the one schools actually manage against — `PlannerService.exam_fit` already
 computes, per exam, the syllabus each subject must newly cover against the
-teaching periods in the gap. This surfaces it school-wide instead of per class.
+teaching periods in the gap. `S-50` promotes it from a tab nobody pressed to the
+sentence the page opens with, which is why `exam_fit_org` had to be batched.
 
 **Scope (horizontal):** school → class → subject → teacher. Note the shape: one
 subject may have several teachers across classes, so **teacher is not a child of
-subject** — it is a re-pivot of the same class-subject rows. The UI is a scope
-switcher, not a nested tree, and this service returns whichever pivot was asked
-for over one identical row set.
+subject** — it is a re-pivot of the same class-subject rows, and `S-43` adds a
+fourth re-pivot of those same rows: sections of one grade against each other.
 
-Two things this module refuses to do, both deliberate:
+Three things this module refuses to do, all deliberate:
 
-  * **It never renders a state as a colour.** `unplanned`, `unallocated` and
-    `unestimated` mean "nothing is scheduled", "no periods per week" and "not
-    sized yet" — none of them is a pace, and V2-P11 exists because treating them
-    as green made an unplanned year look healthy.
-  * **It never ranks a node with too little data.** A class needs ≥3 planned
-    class-subjects and a teacher ≥3 plus ≥10 logged periods, or the node reads
-    "not enough data yet". A pace number carries timetable disruption and class
-    composition at least as much as teaching, so the framing is *needs support /
-    ahead of plan*, with the underlying numbers always beside it — never a league
-    table of people.
+  * **It never renders a state as a colour.** `unplanned`, `unallocated`,
+    `unestimated` and now `unknown` mean "nothing is scheduled", "no periods per
+    week", "not sized yet" and "nobody recorded anything" — none of them is a
+    pace, and V2-P11 exists because treating them as green made an unplanned
+    year look healthy.
+  * **It never calls a subject behind on no evidence** (`S-42`). The forecast
+    can rate a class-subject whose teacher has never written a lesson log — its
+    arithmetic is plan against calendar — but saying "3 weeks behind" to a human
+    about a class nobody observed states as fact something we never saw. Those
+    rows are `unknown`, are excluded from every RAG count and worst list, and
+    carry the cause that actually applies: *nothing has been logged*.
+  * **It never ranks a node with too little data, and never with a number
+    nobody can reconstruct.** The sample guard is unchanged; `S-45` replaces the
+    old `on_track_share × 60 + coverage × 40` composite — which could not be
+    explained to the teacher it was about — with the sentence it rested on.
+
+And the thing it now always does: **every behind row says why** (`S-41`). Lost
+periods, nothing logged, chapters never sized, or genuinely slower. Those are
+four different conversations, and only the last one is about teaching.
 """
 
 import uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
-from app.core.coverage import taught_weight
+from app.core.coverage import (
+    PLANNED,
+    SYLLABUS,
+    UNKNOWN,
+    attribute_cause,
+    rated_status,
+)
 from app.models import (
     AcademicYear,
+    ClassPeriod,
     ClassSubject,
-    LessonLog,
     Membership,
-    PlanEntry,
     SchoolClass,
     Subject,
-    SyllabusTopic,
-    SyllabusUnit,
+    TaskInstance,
     Term,
     User,
 )
 from app.schemas.insights import (
     ExamCheckpoint,
     ExamCheckpointSubject,
+    SectionCompare,
+    SectionCompareRow,
     SyllabusBoard,
     SyllabusNode,
     SyllabusRow,
+    SyllabusTrendPoint,
 )
+from app.services.coverage import CoverageReader
 from app.services.planner import PlannerService
 from app.services.school_clock import today_in
 
 MIN_CLASS_SUBJECTS = 3
 MIN_LOGGED_PERIODS = 10
 
-
 def _label(name: str, section: str | None) -> str:
     return name + (f"-{section}" if section else "")
+
+
+def _plural(n: float, word: str) -> str:
+    return word if n == 1 else word + "s"
 
 
 class SyllabusInsights:
@@ -91,10 +112,13 @@ class SyllabusInsights:
             academic_year_id=year.id if year else None, term_id=term_id,
             min_class_subjects=MIN_CLASS_SUBJECTS, min_logged_periods=MIN_LOGGED_PERIODS)
         if year is None:
+            board.headline = "No academic year is set up yet."
             return board
 
-        rows = self._rows(m, year, term_id if checkpoint == "term" else None)
+        scoped_term = term_id if checkpoint == "term" else None
+        rows, trend = self._rows(m, year, scoped_term, today)
         board.rows = rows
+        board.trend = trend
         if term_id is not None:
             board.term_label = self.db.scalar(
                 select(Term.name).where(Term.id == term_id, Term.org_id == m.org_id))
@@ -102,25 +126,40 @@ class SyllabusInsights:
         board.school = self._node("school", None, m.org.name, "whole school", rows,
                                   min_cs=1, min_logged=0)
         board.nodes = self._pivot(scope, rows)
+        board.sections = self._sections(rows)
+
+        # Ranked on a number, ordered by a sentence: `score` still sorts, but
+        # `rank_reason` is what the screen shows, so nothing appears in a list
+        # about a person that they could not reconstruct themselves (`S-45`).
         ranked = [n for n in board.nodes if n.rank_eligible and n.score is not None]
         ranked.sort(key=lambda n: n.score or 0, reverse=True)
         board.ahead = ranked[:3]
         board.needs_support = list(reversed(ranked[-3:])) if len(ranked) > 3 else []
 
+        exams = self._exam_checkpoints(m, year, today)
+        board.next_exam = next((e for e in exams if e.days_to_exam >= 0), None)
         if checkpoint == "exam":
-            board.exams = self._exam_checkpoints(m, year)
+            board.exams = exams
+        board.headline = self._headline(board, today)
         return board
 
     # ── the row set (one batch, reused by every pivot) ───────────────────────
-    def _rows(self, m: CurrentMember, year: AcademicYear,
-              term_id: uuid.UUID | None) -> list[SyllabusRow]:
-        """Every class-subject in the year: its forecast, plus what was actually
-        taught. `forecast_org` is one batched pass (PR-6); the taught counts are
-        two more grouped queries. Nothing loops per class."""
+    def _rows(self, m: CurrentMember, year: AcademicYear, term_id: uuid.UUID | None,
+              today: date) -> tuple[list[SyllabusRow], list[SyllabusTrendPoint]]:
+        """Every class-subject in the year: its forecast, what was actually
+        taught, why it is behind, and whether a catch-up has been asked for.
+
+        `forecast_org` is one batched pass (PR-6) and `CoverageReader` is three
+        more queries for any number of classes; the causes and the catch-up
+        state are one grouped query each. **Nothing loops per class** — that was
+        the defect PR-6 existed to remove and it would cost more now that four
+        screens share this read.
+        """
         forecasts = {f.class_subject_id: f
                      for f in PlannerService(self.db).forecast_org(m, year.id)}
         if not forecasts:
-            return []
+            return [], []
+        cs_ids = list(forecasts)
 
         meta = self.db.execute(
             select(ClassSubject.id, ClassSubject.class_id, ClassSubject.subject_id,
@@ -128,7 +167,7 @@ class SyllabusInsights:
                    ClassSubject.teacher_member_id)
             .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
             .join(Subject, Subject.id == ClassSubject.subject_id)
-            .where(ClassSubject.id.in_(forecasts.keys()))).all()
+            .where(ClassSubject.id.in_(cs_ids))).all()
         teacher_ids = {t for *_rest, t in meta if t}
         teachers = {
             mid: name for mid, name in self.db.execute(
@@ -136,67 +175,181 @@ class SyllabusInsights:
                 .where(Membership.id.in_(teacher_ids))).all()
         } if teacher_ids else {}
 
-        # Topics actually taught: distinct topics with a lesson log, weighted by
-        # coverage. Restricted to the term's chapters when a term is in scope.
-        term_topics: set[uuid.UUID] | None = None
-        if term_id is not None:
-            term_topics = set(self.db.scalars(
-                select(SyllabusTopic.id)
-                .join(SyllabusUnit, SyllabusUnit.id == SyllabusTopic.unit_id)
-                .where(SyllabusUnit.org_id == m.org_id, SyllabusUnit.term_id == term_id)))
-
-        taught: dict[uuid.UUID, float] = defaultdict(float)
-        best: dict[tuple[uuid.UUID, uuid.UUID], str] = {}
-        for cs_id, topic_id, coverage in self.db.execute(
-            select(LessonLog.class_subject_id, LessonLog.topic_id, LessonLog.coverage)
-            .where(LessonLog.org_id == m.org_id,
-                   LessonLog.class_subject_id.in_(forecasts.keys()),
-                   LessonLog.topic_id.is_not(None))).all():
-            if term_topics is not None and topic_id not in term_topics:
-                continue
-            key = (cs_id, topic_id)
-            if best.get(key) != "full":
-                best[key] = coverage
-        for (cs_id, _topic_id), coverage in best.items():
-            taught[cs_id] += taught_weight(coverage)
-
-        logged = {
-            cs_id: int(n) for cs_id, n in self.db.execute(
-                select(LessonLog.class_subject_id, func.count(LessonLog.id))
-                .where(LessonLog.org_id == m.org_id,
-                       LessonLog.class_subject_id.in_(forecasts.keys()))
-                .group_by(LessonLog.class_subject_id)).all()
-        }
-        term_planned: dict[uuid.UUID, int] = {}
-        if term_topics is not None:
-            term_planned = {
-                cs_id: int(n) for cs_id, n in self.db.execute(
-                    select(PlanEntry.class_subject_id, func.count(PlanEntry.id))
-                    .where(PlanEntry.org_id == m.org_id,
-                           PlanEntry.class_subject_id.in_(forecasts.keys()),
-                           PlanEntry.topic_id.in_(term_topics or [uuid.uuid4()]))
-                    .group_by(PlanEntry.class_subject_id)).all()
-            }
+        snap = CoverageReader(self.db).snapshot(
+            m.org_id, cs_ids, year, today=today, term_id=term_id)
+        not_held = self._not_held(m, cs_ids)
+        catchups = self._catchups(m, cs_ids)
 
         out: list[SyllabusRow] = []
         for cs_id, class_id, subject_id, cname, section, sname, teacher_id in meta:
             f = forecasts[cs_id]
-            planned = term_planned.get(cs_id, f.planned_topics) if term_topics is not None \
-                else f.planned_topics
-            done = round(taught.get(cs_id, 0.0), 1)
-            out.append(SyllabusRow(
+            cov = snap.rows.get(cs_id)
+            # `S-42`: the pace is only shown where somebody recorded something.
+            status = rated_status(f.status, bool(cov and cov.has_evidence))
+            planned = cov.planned_topics if cov else f.planned_topics
+            row = SyllabusRow(
                 class_subject_id=cs_id, class_id=class_id, class_label=_label(cname, section),
                 subject_id=subject_id, subject_name=sname,
                 teacher_member_id=teacher_id, teacher_name=teachers.get(teacher_id),
-                status=f.status, total_topics=f.total_topics, planned_topics=planned,
-                taught_topics=done,
-                coverage_pct=round(done / planned * 100, 1) if planned else None,
+                status=status, total_topics=cov.total_topics if cov else f.total_topics,
+                planned_topics=planned,
+                taught_topics=cov.taught_weighted if cov else 0.0,
+                coverage_pct=cov.figure(PLANNED).pct if cov else None,
+                syllabus_pct=cov.figure(SYLLABUS).pct if cov else None,
+                syllabus_taught=cov.taught_weighted if cov else 0.0,
+                due_topics=cov.due_topics if cov else 0,
+                taught_due=cov.taught_due if cov else 0.0,
+                behind_topics=cov.behind_topics if cov else 0.0,
                 weeks_behind=f.weeks_behind or 0,
                 baseline_finish=f.baseline_finish, projected_finish=f.projected_finish,
                 unestimated_topics=f.unestimated_topics or 0,
                 current_term_unplanned=bool(f.current_term_unplanned),
-                logged_periods=logged.get(cs_id, 0)))
+                logged_periods=f.logged_periods,
+                periods_not_held=not_held.get(cs_id, 0),
+                next_topic_title=cov.next_topic_title if cov else None,
+                next_chapter_title=cov.next_chapter_title if cov else None)
+            self._attribute(row)
+            got = catchups.get(cs_id)
+            if got is not None:
+                row.catchup_task_id, row.catchup_requested_on, row.catchup_outcome = got
+            out.append(row)
         out.sort(key=lambda r: (r.class_label, r.subject_name))
+        return out, self._trend(snap, out, year, today)
+
+    # ── S-41: why ────────────────────────────────────────────────────────────
+    def _not_held(self, m: CurrentMember, cs_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """Periods this class-subject was scheduled for and did not happen.
+
+        `class_periods` only exists once a teacher touched the period, so this
+        counts periods somebody explicitly called off — an exam week, a function,
+        a day the class was out. It is deliberately not "scheduled minus held":
+        a period nobody opened is *not captured*, which is a different finding
+        and must never be laundered into "we lost it" (rule 2).
+        """
+        return {
+            cs_id: int(n) for cs_id, n in self.db.execute(
+                select(ClassPeriod.class_subject_id, func.count(ClassPeriod.id))
+                .where(ClassPeriod.org_id == m.org_id,
+                       ClassPeriod.class_subject_id.in_(cs_ids),
+                       ClassPeriod.status == "not_held")
+                .group_by(ClassPeriod.class_subject_id)).all()
+        }
+
+    def _attribute(self, row: SyllabusRow) -> None:
+        """Give a struggling row its cause and the sentence that goes with it.
+
+        The reasoning lives in `core.coverage.attribute_cause` because the class
+        teacher's block asks the same question about the same subject, and two
+        implementations of "why is this behind" would drift into two different
+        answers about the same teacher on the same day.
+        """
+        row.cause, row.cause_detail = attribute_cause(
+            status=row.status, behind_topics=row.behind_topics,
+            weeks_behind=row.weeks_behind, unestimated_topics=row.unestimated_topics,
+            planned_topics=row.planned_topics, periods_not_held=row.periods_not_held)
+
+    # ── D-16 / S-60: has a catch-up been asked for? ──────────────────────────
+    def _catchups(self, m: CurrentMember,
+                  cs_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple]:
+        """The newest catch-up request per class-subject, in one query.
+
+        `S-60`: the row clears on the recorded **outcome**, not on the press —
+        so a request whose task is still open keeps showing, and one whose task
+        was completed carries what was decided. Reads `task_instances` directly
+        because the task IS the request; a parallel store would be a second
+        source of truth about the same meeting.
+        """
+        rows = self.db.execute(
+            select(TaskInstance.subject_id, TaskInstance.id, TaskInstance.created_at,
+                   TaskInstance.status, TaskInstance.outcome)
+            .where(TaskInstance.org_id == m.org_id,
+                   TaskInstance.subject_type == "class_subject",
+                   TaskInstance.subject_id.in_(cs_ids))
+            .order_by(TaskInstance.created_at.desc())).all()
+        out: dict[uuid.UUID, tuple] = {}
+        for cs_id, task_id, created, status, outcome in rows:
+            if cs_id in out:
+                continue           # ordered newest-first, so the first wins
+            done = status != "open"
+            out[cs_id] = (task_id, created.date() if created else None,
+                          outcome if done else None)
+        return out
+
+    # ── S-40: coverage over time ─────────────────────────────────────────────
+    def _trend(self, snap, rows: list[SyllabusRow], year: AcademicYear,
+               today: date) -> list[SyllabusTrendPoint]:
+        """Cumulative taught weight against the plan's cumulative baseline.
+
+        Every other chart on this board is a snapshot, which cannot tell a
+        subject that has been slipping for a month from one that had a bad week.
+        Built entirely from the snapshot already in memory — no per-week query,
+        which is the cost trap `forecast_org` was batched to avoid.
+        """
+        weekly = snap.weekly()
+        in_scope = {r.class_subject_id for r in rows}
+        by_week: dict[date, list[float]] = defaultdict(lambda: [0.0, 0.0])
+        for cs_id, points in weekly.items():
+            if cs_id not in in_scope:
+                continue
+            for week, taught, planned in points:
+                bucket = by_week[week]
+                bucket[0] += taught
+                bucket[1] += planned
+        if not by_week:
+            return []
+
+        start = min(by_week)
+        end = min(max(max(by_week), today), year.end_date)
+        out: list[SyllabusTrendPoint] = []
+        actual = baseline = 0.0
+        cur = start
+        guard = 0
+        while cur <= end and guard < 80:
+            taught, planned = by_week.get(cur, [0.0, 0.0])
+            actual += taught
+            baseline += planned
+            out.append(SyllabusTrendPoint(
+                week_start=cur, actual=round(actual, 1), baseline=int(baseline)))
+            cur += timedelta(days=7)
+            guard += 1
+        return out
+
+    # ── S-43: sections of one grade, against each other ──────────────────────
+    def _sections(self, rows: list[SyllabusRow]) -> list[SectionCompare]:
+        """6-A Maths against 6-B Maths — same syllabus, same weeks, same exam.
+
+        A pure re-pivot of the rows already computed, so it costs nothing. Only
+        grades that genuinely have more than one section teaching the subject
+        appear: a comparison of one thing is not a comparison.
+        """
+        buckets: dict[tuple[str, str], list[SyllabusRow]] = defaultdict(list)
+        for r in rows:
+            # The label is "<class name>-<section>" and a class name may itself
+            # contain a hyphen ("Grade-6"), so split from the RIGHT and only for
+            # classes that actually have a section. A sectionless class has no
+            # sibling to be compared against, which is the point of the block.
+            if "-" not in r.class_label:
+                continue
+            grade = r.class_label.rsplit("-", 1)[0]
+            buckets[(grade, r.subject_name)].append(r)
+
+        out: list[SectionCompare] = []
+        for (grade, subject), group in buckets.items():
+            if len(group) < 2:
+                continue
+            pcts = [r.coverage_pct for r in group if r.coverage_pct is not None
+                    and r.status != UNKNOWN]
+            out.append(SectionCompare(
+                grade=grade, subject_name=subject,
+                spread_pct=round(max(pcts) - min(pcts), 1) if len(pcts) > 1 else None,
+                rows=[SectionCompareRow(
+                    class_subject_id=r.class_subject_id, class_label=r.class_label,
+                    teacher_name=r.teacher_name, status=r.status,
+                    coverage_pct=r.coverage_pct, taught_topics=r.taught_topics,
+                    planned_topics=r.planned_topics, behind_topics=r.behind_topics)
+                    for r in sorted(group, key=lambda x: x.class_label)]))
+        # Widest spread first — that is the pair worth looking at.
+        out.sort(key=lambda s: (-(s.spread_pct or 0), s.grade, s.subject_name))
         return out
 
     # ── pivots ───────────────────────────────────────────────────────────────
@@ -230,6 +383,7 @@ class SyllabusInsights:
               rows: list[SyllabusRow], *, min_cs: int, min_logged: int) -> SyllabusNode:
         logged_periods = sum(r.logged_periods for r in rows)
         planned = sum(r.planned_topics for r in rows)
+        total = sum(r.total_topics for r in rows)
         taught = round(sum(r.taught_topics for r in rows), 1)
         rated = [r for r in rows if r.status in ("green", "amber", "red")]
         node = SyllabusNode(
@@ -240,9 +394,11 @@ class SyllabusInsights:
             behind=sum(1 for r in rows if r.status == "red"),
             unplanned=sum(1 for r in rows if r.status == "unplanned"),
             unallocated=sum(1 for r in rows if r.status in ("unallocated", "none")),
-            planned_topics=planned, taught_topics=taught,
+            unknown=sum(1 for r in rows if r.status == UNKNOWN),
+            planned_topics=planned, taught_topics=taught, total_topics=total,
             coverage_pct=round(taught / planned * 100, 1) if planned else None,
-            weeks_behind_max=max((r.weeks_behind for r in rows), default=0),
+            syllabus_pct=round(taught / total * 100, 1) if total else None,
+            weeks_behind_max=max((r.weeks_behind for r in rated), default=0),
             unestimated_topics=sum(r.unestimated_topics for r in rows),
             logged_periods=logged_periods)
         # The guard: below the minimum sample the node carries its numbers but is
@@ -252,24 +408,65 @@ class SyllabusInsights:
             on_track_share = len([r for r in rated if r.status == "green"]) / len(rated)
             coverage = (node.coverage_pct or 0) / 100
             node.score = round(on_track_share * 60 + min(coverage, 1.0) * 40, 1)
+            # `S-45`: `score` orders the list; THIS is what the list shows.
+            node.rank_reason = (
+                f"{len([r for r in rated if r.status == 'green'])} of {len(rated)} "
+                f"on track · {node.coverage_pct:g}% of the plan covered"
+                if node.coverage_pct is not None else
+                f"{len([r for r in rated if r.status == 'green'])} of {len(rated)} on track")
         return node
 
+    # ── the headline (S-50, rule 3) ──────────────────────────────────────────
+    def _headline(self, board: SyllabusBoard, today: date) -> str:
+        """Lead with the exam, because that is what a school manages against.
+
+        Falls back through what is actually knowable: an exam, then pace, then
+        the honest statement that nothing has been recorded — never a
+        percentage standing on its own with nothing to compare it to.
+        """
+        ex = board.next_exam
+        if ex is not None and ex.short:
+            return (f"{ex.title} in {ex.days_to_exam} days · {ex.short} "
+                    f"{_plural(ex.short, 'subject')} short of portion.")
+        rows = board.rows
+        if not rows:
+            return "No class-subject has a syllabus yet."
+        behind = [r for r in rows if r.status == "red"]
+        slipping = [r for r in rows if r.status == "amber"]
+        unknown = [r for r in rows if r.status == UNKNOWN]
+        rated = len(behind) + len(slipping) + len([r for r in rows if r.status == "green"])
+
+        if behind:
+            worst = max(behind, key=lambda r: r.weeks_behind)
+            return (f"{len(behind)} of {rated} class-{_plural(rated, 'subject')} "
+                    f"{'is' if len(behind) == 1 else 'are'} a week or more behind — "
+                    f"worst is {worst.class_label} {worst.subject_name}.")
+        if ex is not None:
+            return (f"{ex.title} in {ex.days_to_exam} days · "
+                    f"every subject is on course for its portion.")
+        if not rated and unknown:
+            return (f"{len(unknown)} class-{_plural(len(unknown), 'subject')} "
+                    f"{'has' if len(unknown) == 1 else 'have'} a plan but no lesson logs yet.")
+        if not rated:
+            return "No plan has been approved yet."
+        return f"Every rated class-subject is on track ({rated} of {len(rows)})."
+
     # ── the exam checkpoint, school-wide ─────────────────────────────────────
-    def _exam_checkpoints(self, m: CurrentMember, year: AcademicYear) -> list[ExamCheckpoint]:
-        """`exam_fit` is per class; this runs it for every class and merges by
-        exam. It is the one place the module accepts a per-class loop — exam fit
-        walks each class's own syllabus ordering and cannot be expressed as a
-        single grouped query — so the result is capped to the classes of one year
-        and only computed when the exam checkpoint is actually selected."""
-        classes = self.db.execute(
-            select(SchoolClass.id, SchoolClass.name, SchoolClass.section)
-            .where(SchoolClass.org_id == m.org_id, SchoolClass.academic_year_id == year.id)
-            .order_by(SchoolClass.name, SchoolClass.section)).all()
-        planner = PlannerService(self.db)
+    def _exam_checkpoints(self, m: CurrentMember, year: AcademicYear,
+                          today: date) -> list[ExamCheckpoint]:
+        """`exam_fit_org` walks every class in the year in one batched pass and
+        this merges the result by exam. It used to be a per-class loop, which
+        was tolerable only because it ran on one tab; `S-50` puts the nearest
+        exam in the headline on every load, so it had to stop being one."""
+        classes = {
+            cid: _label(name, section) for cid, name, section in self.db.execute(
+                select(SchoolClass.id, SchoolClass.name, SchoolClass.section)
+                .where(SchoolClass.org_id == m.org_id,
+                       SchoolClass.academic_year_id == year.id)).all()
+        }
         merged: dict[uuid.UUID, ExamCheckpoint] = {}
-        for cid, cname, section in classes:
-            label = _label(cname, section)
-            fit = planner.exam_fit(m, cid)
+        for fit in PlannerService(self.db).exam_fit_org(m, year.id):
+            label = classes.get(fit.class_id, "—")
             for ex in fit.exams:
                 node = merged.get(ex.exam_event_id)
                 if node is None:
