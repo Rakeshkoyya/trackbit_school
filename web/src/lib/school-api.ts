@@ -7,7 +7,6 @@ import type {
   FeeStructure,
   FeeSummary,
   Guardian,
-  HomeworkOverview,
   HomeworkSheet,
   LeaveBalance,
   LeaveList,
@@ -242,10 +241,20 @@ export const schoolApi = {
   // HW-1: capture-by-exception. An empty `results` list means everyone did it.
   homeworkSheet: (id: string) =>
     api.get<HomeworkSheet>(`/classroom/homework/${id}/sheet`),
-  checkHomework: (id: string, b: { results: { student_id: string; status: "not_done" | "partial"; note?: string | null }[] }) =>
+  // V1-5: the full verdict vocabulary — late/carried/waived joined not_done and
+  // partial. `done` is still the ABSENCE of a row, so it is not in the union.
+  checkHomework: (id: string, b: { results: { student_id: string; status: string; note?: string | null }[] }) =>
     api.post<HomeworkSheet>(`/classroom/homework/${id}/check`, b),
-  homeworkOverview: (windowDays?: number) =>
-    api.get<HomeworkOverview>(`/homework/overview${qs({ window_days: windowDays ? String(windowDays) : undefined })}`),
+  // V1-5 (D-36/S-100): the backlog and its count, and D-37's per-class evening.
+  homeworkQueue: (p: { windowDays?: number; classSubjectId?: string } = {}) =>
+    api.get<import("@/lib/school-types").HomeworkQueue>(
+      `/homework/queue${qs({
+        window_days: p.windowDays ? String(p.windowDays) : undefined,
+        class_subject_id: p.classSubjectId,
+      })}`),
+  homeworkLoad: (p: { classId?: string; days?: number } = {}) =>
+    api.get<import("@/lib/school-types").HomeworkLoad>(
+      `/homework/load${qs({ class_id: p.classId, days: p.days ? String(p.days) : undefined })}`),
   studentHomework: (studentId: string, windowDays?: number) =>
     api.get<StudentHomeworkHistory>(
       `/homework/student/${studentId}${qs({ window_days: windowDays ? String(windowDays) : undefined })}`),

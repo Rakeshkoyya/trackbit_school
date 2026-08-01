@@ -13,8 +13,16 @@ import { useParentPortal } from "./parent-context";
  *  to do. */
 const HW_STATUS: Record<HomeworkStatus, { label: string; tone: "success" | "warning" | "danger" | "neutral" }> = {
   done: { label: "done", tone: "success" },
+  // S-99: handed in late IS done. Saying so, and not colouring it as a failure,
+  // is the difference between a record and an accusation.
+  late: { label: "done, a bit late", tone: "success" },
   not_done: { label: "not done", tone: "danger" },
   partial: { label: "partly done", tone: "warning" },
+  // D-35/D-34: their child was ABSENT when this was set. Yellow, never red —
+  // a child off sick did not refuse the work, and a parent must never be shown
+  // an absence as a miss.
+  carried: { label: "was away — still to do", tone: "warning" },
+  waived: { label: "not needed", tone: "neutral" },
   not_checked: { label: "not checked yet", tone: "neutral" },
 };
 

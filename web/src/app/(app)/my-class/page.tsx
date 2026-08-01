@@ -43,6 +43,54 @@ function ClassSyllabusBlock({ classId }: { classId: string }) {
   );
 }
 
+/**
+ * `D-37` / `S-87` — tonight's homework load for her class.
+ *
+ * Six teachers each made a reasonable decision and **no screen in any school
+ * product adds them up**; she is the one person responsible for that child's
+ * evening. Needs no new capture — it is `homework_assignments` grouped by class
+ * and date.
+ *
+ * **Informational, never a cap.** A limit turns into "whose turn is it to set
+ * homework", which is a worse problem than the one it solves. And `D-37` scopes
+ * it deliberately: the admin and the CLASS teacher see it, a subject teacher
+ * never does — the number exists for the staff room, not to make one teacher
+ * feel they should have set less.
+ */
+function HomeworkLoadBlock({ classId }: { classId: string }) {
+  const { data } = useQuery({
+    queryKey: ["homework-load", classId],
+    queryFn: () => schoolApi.homeworkLoad({ classId }),
+  });
+  if (!data || !data.cells.length) return null;
+  const recent = data.cells.slice(-10);
+  const busiest = Math.max(...recent.map((c) => c.subjects), 1);
+  return (
+    <Section title="Their evenings"
+      hint="How many subjects set homework each day. A picture of the load nobody else sees — not a limit.">
+      {data.busiest_date ? (
+        <p className="mb-3 text-sm">
+          Heaviest recently: <span className="font-medium">{data.busiest_subjects} subjects</span>
+          {" "}on {new Date(`${data.busiest_date}T00:00:00`).toLocaleDateString("en-IN",
+            { weekday: "long", day: "numeric", month: "short" })}.
+        </p>
+      ) : null}
+      <div className="flex items-end gap-1.5">
+        {recent.map((c) => (
+          <div key={c.date} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+            <div className="flex h-16 w-full items-end">
+              <div className="w-full rounded-t bg-primary/70"
+                style={{ height: `${(c.subjects / busiest) * 100}%` }}
+                title={`${c.subjects} subjects · ${c.assignments} assignments`} />
+            </div>
+            <span className="text-[10px] tabular-nums text-muted-foreground">{c.date.slice(8)}</span>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function MyClassInner() {
   const { data, isLoading } = useQuery({
     queryKey: ["my-classes"],
@@ -91,6 +139,7 @@ function MyClassInner() {
       {/* Order is deliberate (screens/teacher.md): the people who need something
           today, then the record, then the class's academic position. */}
       <ClassSyllabusBlock classId={active.class_id} />
+      <HomeworkLoadBlock classId={active.class_id} />
     </div>
   );
 }

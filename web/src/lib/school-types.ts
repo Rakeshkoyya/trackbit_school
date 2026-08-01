@@ -1725,16 +1725,83 @@ export interface LeaveList {
 
 // ── HW-1: per-student homework capture + analytics ───────────────────────────
 
-/** `not_checked` is the teacher not having gone through it — a gap in the
- *  record, never a mark against the student. No surface may render it as a miss. */
-export type HomeworkStatus = "done" | "not_done" | "partial" | "not_checked";
+/** The V1-5 vocabulary — mirrors `core/homework_verdict.py`. Import that table
+ *  mentally before touching any of it:
+ *    done/late  worth 1 · partial worth 0.5 · not_done worth 0 — all graded
+ *    carried    absent when it was set. NOT a miss, NOT in the denominator (D-34)
+ *    waived     the teacher let it go, so the yellow can clear (S-98)
+ *    not_checked  the TEACHER has not gone through it — a gap in the record,
+ *                 never a mark against the student. No surface may render it as
+ *                 a miss, parent-facing ones included. */
+export type HomeworkStatus =
+  | "done" | "not_done" | "partial" | "late" | "carried" | "waived" | "not_checked";
+
+/** What the teacher may set on the sheet. `done` is the absence of a row. */
+export type HomeworkVerdict = "done" | "not_done" | "partial" | "late" | "carried" | "waived";
 
 export interface HomeworkSheetRow {
   student_id: string;
   full_name: string;
   roll_no: string | null;
-  status: "done" | "not_done" | "partial";
+  status: HomeworkVerdict;
   note: string | null;
+  /** S-85: absent the day it was set. **Shown, never preselected** — a friend
+   *  may have passed it on, and a hard exclusion cannot be overridden. */
+  absent_when_set: boolean;
+  /** S-97: items still carried from while they were away. */
+  carried_pending: number;
+  /** S-89: the streak, at the moment she is holding the child's book — the
+   *  cheapest intervention point in the product. */
+  miss_streak: number;
+}
+
+// ── V1-5: the teacher's homework screen (D-36 / S-100 / S-101) ──────────────
+
+export interface HomeworkQueueItem {
+  assignment_id: string;
+  class_subject_id: string;
+  class_label: string;
+  subject_name: string | null;
+  date: string;
+  due_date: string | null;
+  text: string;
+  /** Set = a personal homework, so its roster is one child. */
+  student_id: string | null;
+  student_name: string | null;
+  checked: boolean;
+  checked_at: string | null;
+  /** Deadline passed with nothing gone through. A fact about the RECORD. */
+  overdue: boolean;
+  days_waiting: number;
+  missed: number;
+  carried: number;
+}
+
+export interface HomeworkQueue {
+  from_date: string;
+  to_date: string;
+  items: HomeworkQueueItem[];
+  /** S-100 — the number on the button. Without it the screen is optional. */
+  to_check: number;
+  overdue: number;
+}
+
+export interface HomeworkLoadCell {
+  class_id: string;
+  class_label: string;
+  date: string;
+  subjects: number;
+  assignments: number;
+}
+
+/** D-37: admin and CLASS TEACHER only — never a subject teacher, and never a cap. */
+export interface HomeworkLoad {
+  from_date: string;
+  to_date: string;
+  cells: HomeworkLoadCell[];
+  busiest_class_label: string | null;
+  busiest_date: string | null;
+  busiest_subjects: number;
 }
 
 export interface HomeworkSheet {
@@ -1764,6 +1831,10 @@ export interface HomeworkScopeRow {
   done: number;
   not_done: number;
   partial: number;
+  /** V1-5: `late` is inside `completion` (it IS done — S-99) and reported
+   *  beside it; `carried` is outside the denominator entirely (D-34). */
+  late: number;
+  carried: number;
   completion: number | null;
   check_rate: number | null;
 }
@@ -1801,12 +1872,32 @@ export interface HomeworkOverview {
   checked: number;
   check_rate: number | null;
   overall_completion: number | null;
+  late: number;
+  carried: number;
   by_class: HomeworkScopeRow[];
   by_subject: HomeworkScopeRow[];
   teachers: TeacherCheckingRow[];
   needs_attention: StudentHomeworkRow[];
   perfect: StudentHomeworkRow[];
   most_improved: StudentHomeworkRow[];
+  /** D-85's two derived admin signals. Different problems, different rows, and
+   *  neither writes anything into a child's record: `delayed_teachers` is a
+   *  backlog (counted only past the deadline, at the org's own
+   *  `homework_gap_days`), `rough_classes` is a class that WAS checked and
+   *  largely didn't do it. */
+  delayed_teachers: TeacherCheckingRow[];
+  rough_classes: RoughClassRow[];
+}
+
+export interface RoughClassRow {
+  assignment_id: string;
+  class_label: string;
+  subject_name: string | null;
+  date: string;
+  text: string;
+  missed: number;
+  students_expected: number;
+  teacher_name: string | null;
 }
 
 export interface StudentHomeworkItem {
@@ -1830,6 +1921,12 @@ export interface StudentHomeworkHistory {
   done: number;
   not_done: number;
   partial: number;
+  /** V1-5: `late` counts as DONE inside `completion` and is reported beside it
+   *  (S-99). `carried`/`waived` are outside the denominator entirely (D-34/S-98)
+   *  and `not_checked` is the teacher's gap — never the child's miss. */
+  late: number;
+  carried: number;
+  waived: number;
   not_checked: number;
   completion: number | null;
   streak: number;

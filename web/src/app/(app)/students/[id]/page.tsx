@@ -22,6 +22,7 @@ import { Gauge, MeterBar, STATUS_COLOR } from "@/components/charts";
 import {
   AttendanceBySubject, GrowthProfiles, GrowthTiles, ScoreHistory, StrengthsAndGrowth,
 } from "@/components/students/growth-analytics";
+import { StudentHomeworkHistory } from "@/components/school/student-homework-history";
 import { TimelineBlock } from "@/components/students/timeline-block";
 import { Badge } from "@/components/ui/badge";
 import { PageLoading } from "@/components/ui/page-loading";
@@ -225,6 +226,15 @@ function GrowthInner() {
             </p>
           ) : null}
         </div>
+      </div>
+
+      {/* S-86 — the homework record. `GET /homework/student/{id}` has existed
+          since HW-1 and was called by nothing; this is the same component the
+          admin drills into from the dashboard's red list (D-31), so the two
+          screens can never answer the question differently. */}
+      <div className="rounded-xl border border-border bg-card p-4">
+        <h2 className="mb-3 text-sm font-semibold">Homework</h2>
+        <StudentHomeworkHistory studentId={data.student_id} />
       </div>
 
       <div className="rounded-xl border border-border bg-card p-4 text-sm">

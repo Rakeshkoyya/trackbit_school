@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, CheckCheck, ChevronRight, ClipboardCheck, ListTodo, Moon, Send, Users } from "lucide-react";
+import { BookOpen, Check, ChevronRight, ClipboardCheck, ListTodo, Moon, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { dayLabel } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
-import type { HomeworkPending, MyDayClass, MyDayPeriod } from "@/lib/school-types";
+import type { MyDayClass, MyDayPeriod } from "@/lib/school-types";
 import type { Task } from "@/lib/types";
 
 type HwTarget = { csId: string; title: string };
@@ -122,117 +122,6 @@ function ClassCard({ c, onHomework }: { c: MyDayClass; onHomework: () => void })
           <BookOpen className="h-4 w-4" /> {c.homework_set ? "Homework set" : "Set homework"}
         </Button>
       </div>
-    </div>
-  );
-}
-
-/** Homework checking, capture-by-exception (HW-1).
- *
- *  One tap for "everyone did it"; the sheet opens only when somebody didn't.
- *  Same shape as attendance, and the same reason: typing a count told us how
- *  many, never who — so nobody could be followed up and no parent could be told
- *  whether their own child had done it. */
-function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [misses, setMisses] = useState<Record<string, "not_done" | "partial">>({});
-
-  const { data: sheet } = useQuery({
-    queryKey: ["homework-sheet", hw.assignment_id],
-    queryFn: () => schoolApi.homeworkSheet(hw.assignment_id),
-    enabled: open,
-  });
-
-  // Seed the working copy from whatever was recorded before (derived, no effect).
-  const [seededFor, setSeededFor] = useState<string | null>(null);
-  if (sheet && seededFor !== hw.assignment_id) {
-    setMisses(Object.fromEntries(
-      sheet.roster.filter((r) => r.status !== "done").map((r) => [r.student_id, r.status])
-    ) as Record<string, "not_done" | "partial">);
-    setSeededFor(hw.assignment_id);
-  }
-
-  const done = () => {
-    qc.invalidateQueries({ queryKey: ["my-day"] });
-    qc.invalidateQueries({ queryKey: ["homework-sheet", hw.assignment_id] });
-    setOpen(false);
-  };
-  const check = useMutation({
-    mutationFn: (results: { student_id: string; status: "not_done" | "partial" }[]) =>
-      schoolApi.checkHomework(hw.assignment_id, { results }),
-    onSuccess: (res) => {
-      toast.success(res.not_done_count + res.partial_count === 0
-        ? "Recorded — everyone did it"
-        : `Recorded — ${res.not_done_count + res.partial_count} didn’t`);
-      done();
-    },
-    onError: (e) => showApiError(e, "Could not record"),
-  });
-
-  // Tap cycles: did it → didn't → partly → did it.
-  const cycle = (studentId: string) => {
-    const now = misses[studentId];
-    const next = { ...misses };
-    if (!now) next[studentId] = "not_done";
-    else if (now === "not_done") next[studentId] = "partial";
-    else delete next[studentId];
-    setMisses(next);
-  };
-
-  const missCount = Object.keys(misses).length;
-
-  return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <p className="text-sm font-medium">{hw.class_label} · {hw.subject_name}</p>
-      <p className="mb-2 truncate text-xs text-muted-foreground">{hw.text}</p>
-
-      {!open ? (
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" disabled={check.isPending} onClick={() => check.mutate([])}>
-            <CheckCheck className="h-4 w-4" /> Everyone did it
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-            Some didn’t…
-          </Button>
-        </div>
-      ) : !sheet ? (
-        <div className="h-24 animate-pulse rounded-md bg-muted" />
-      ) : (
-        <>
-          <p className="mb-1.5 text-xs text-muted-foreground">
-            Tap whoever didn’t do it. Tap again for “did some of it”.
-          </p>
-          <div className="mb-2 grid gap-1 sm:grid-cols-2">
-            {sheet.roster.map((r) => {
-              const state = misses[r.student_id];
-              return (
-                <button key={r.student_id} type="button" onClick={() => cycle(r.student_id)}
-                  className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm active:scale-[0.99] ${
-                    state === "not_done" ? "border-danger/40 bg-danger/8"
-                      : state === "partial" ? "border-warning/50 bg-warning-soft"
-                        : "border-border bg-card"}`}>
-                  <span className="min-w-0 flex-1 truncate">
-                    {r.roll_no ? `${r.roll_no}. ` : ""}{r.full_name}
-                  </span>
-                  {state ? (
-                    <Badge tone={state === "not_done" ? "danger" : "warning"}>
-                      {state === "not_done" ? "didn’t" : "partly"}
-                    </Badge>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={check.isPending}
-              onClick={() => check.mutate(
-                Object.entries(misses).map(([student_id, status]) => ({ student_id, status })))}>
-              Save — {sheet.roster.length - missCount}/{sheet.roster.length} did it
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -352,6 +241,15 @@ function MyDayInner() {
   const [hwFor, setHwFor] = useState<HwTarget | null>(null);
   const { data } = useQuery({ queryKey: ["my-day"], queryFn: schoolApi.myDay });
 
+  // S-100: the count that makes the button worth pressing. Its own query so a
+  // slow analytics read never delays the periods, which are the point of My Day.
+  const { data: queue } = useQuery({
+    queryKey: ["homework-queue"],
+    queryFn: () => schoolApi.homeworkQueue({}),
+  });
+  const toCheck = queue?.to_check ?? 0;
+  const overdue = queue?.overdue ?? 0;
+
   // Classes already covered by a period row don't need a second card below.
   const periodCsIds = new Set((data?.periods ?? []).map((p) => p.class_subject_id));
   const otherClasses = (data?.classes ?? []).filter((c) => !periodCsIds.has(c.class_subject_id));
@@ -362,15 +260,20 @@ function MyDayInner() {
         <PageHeader title="My Day" subtitle="Tap a period to take attendance, log the topic and set homework" />
       </div>
 
-      {data && data.homework_pending.length > 0 ? (
-        <section className="mb-6">
-          <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-            <ClipboardCheck className="h-4 w-4" /> Yesterday’s homework — mark completion
-          </h2>
-          <div className="space-y-2">
-            {data.homework_pending.map((hw) => <HomeworkCheckRow key={hw.assignment_id} hw={hw} />)}
-          </div>
-        </section>
+      {/* S-100 / D-36 — a counted button, not a block of sheets.
+          Checking homework is a DESK activity: the old "yesterday's homework"
+          section met a teacher here, walking between rooms with thirty seconds
+          and a phone, and asked her to go through thirty names. It now lives on
+          /homework and this is the pointer. Recorded so nobody optimises it back. */}
+      {toCheck > 0 ? (
+        <Link href="/homework"
+          className="mb-6 flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:bg-accent">
+          <ClipboardCheck className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1 text-sm font-medium">
+            Homework · {toCheck} to check
+          </span>
+          {overdue > 0 ? <Badge tone="warning">{overdue} past due</Badge> : null}
+        </Link>
       ) : null}
 
       {data && data.periods.length > 0 ? (

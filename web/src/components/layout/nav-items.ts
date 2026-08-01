@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CalendarRange,
   CheckSquare,
+  ClipboardCheck,
   Clock,
   GraduationCap,
   Settings2,
@@ -34,6 +35,9 @@ const plan: NavItem = { label: "Plan", href: "/plan", icon: CalendarRange };
 // the class-subjects she actually owns instead of picking her way to each one.
 const planForTeacher: NavItem = { ...plan, href: "/plan/my-subjects" };
 const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
+// V1-5 (D-36). Checking homework is a DESK activity, not a between-classes tap,
+// so it gets its own screen instead of a block at the top of My Day.
+const homework: NavItem = { label: "Homework", href: "/homework", icon: ClipboardCheck };
 const tasks: NavItem = { label: "Tasks", href: "/tasks", icon: CheckSquare, tour: "nav-boards" };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
 const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
@@ -69,7 +73,7 @@ export function navForRole(
       // actually lives in (D-03). Absent entirely for a subject teacher.
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
-        lucy, sessions, planForTeacher, students, timesheet, tasks,
+        lucy, sessions, planForTeacher, homework, students, timesheet, tasks,
       ];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent

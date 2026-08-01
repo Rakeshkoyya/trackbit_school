@@ -26,9 +26,12 @@ export interface ParentTaughtItem {
   topic: string;
 }
 
-/** `not_checked` means the teacher hasn't gone through it yet. It is a gap in
- *  the record, never a mark against the child — the UI must say so plainly. */
-export type HomeworkStatus = "done" | "not_done" | "partial" | "not_checked";
+/** V1-5 vocabulary (core/homework_verdict.py). `carried` = absent when it was
+ *  set, `waived` = the teacher let it go, `not_checked` = the teacher has not
+ *  gone through it. None of the three is the child failing to do something, and
+ *  no parent surface may colour them as if it were (D-35). */
+export type HomeworkStatus =
+  | "done" | "not_done" | "partial" | "late" | "carried" | "waived" | "not_checked";
 
 export interface ParentHomeworkItem {
   subject_name: string;

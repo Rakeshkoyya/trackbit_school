@@ -94,11 +94,15 @@ function HomeworkInner() {
           sub={o.needs_attention.length ? "repeat misses" : "nobody is repeatedly missing it"}
           tone={o.needs_attention.length ? "red" : "green"}
         />
+        {/* V1-5: `late` is INSIDE completion (it is done — S-99) and `carried`
+            is outside the denominator entirely (D-34). Both are named here so
+            the pattern stays visible: a class where everything arrives four days
+            late reads as 100% complete, and should not read as untroubled. */}
         <StatTile
-          label="Perfect record"
-          value={String(o.perfect.length)}
-          sub="zero misses over the window"
-          tone="green"
+          label="Late · was away"
+          value={`${o.late} · ${o.carried}`}
+          sub="handed in late (counts as done) · absent when it was set"
+          tone={o.late > 5 ? "amber" : "neutral"}
         />
       </div>
 
@@ -204,6 +208,54 @@ function HomeworkInner() {
             </tbody>
           </table>
         </ScrollX>
+      </Section>
+
+      {/* D-85's two derived signals. They are different problems and get
+          different rows: "nobody has checked anything" is about a teacher's
+          backlog, "this class WAS checked and N children missed it" is about a
+          class. Neither writes anything into a child's record. */}
+      <Section title="Nobody has checked this"
+        hint="Counted only once the deadline has passed — homework set an hour ago is not a failure. The threshold is the school's own setting, not a number baked in here.">
+        {o.delayed_teachers.length ? (
+          <div className="space-y-2">
+            {o.delayed_teachers.map((t) => (
+              <RedRow key={t.member_id ?? t.teacher_name} tone="amber"
+                title={t.teacher_name}
+                subtitle={`${t.unchecked_overdue} past their due date with nothing recorded`}
+                meta={<>
+                  {t.checked} of {t.assigned} checked
+                  <span className="block">
+                    {t.last_checked_at
+                      ? `last checked ${new Date(t.last_checked_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+                      : "never checked"}
+                  </span>
+                </>} />
+            ))}
+          </div>
+        ) : (
+          <Empty>Everyone is going through what they set.</Empty>
+        )}
+      </Section>
+
+      <Section title="Checked, and a lot of them missed it"
+        hint="The other half of the picture: the teacher did their part, and the class did not. A different conversation from the one above.">
+        {o.rough_classes.length ? (
+          <div className="space-y-2">
+            {o.rough_classes.map((r) => (
+              <RedRow key={r.assignment_id} tone="red"
+                title={<>{r.class_label}{r.subject_name ? ` · ${r.subject_name}` : ""}</>}
+                subtitle={r.text}
+                meta={<>
+                  {r.missed} of {r.students_expected} didn’t
+                  <span className="block">
+                    {r.teacher_name ?? "unassigned"} · {r.date.slice(5)}
+                  </span>
+                </>} />
+            ))}
+          </div>
+        ) : (
+          <Empty>No class has had a rough night this window.</Empty>
+        )}
       </Section>
 
       <Section title="Worth saying out loud"
