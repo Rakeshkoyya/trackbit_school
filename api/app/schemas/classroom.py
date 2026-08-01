@@ -1,7 +1,7 @@
 """Classroom log / homework schemas (M2, SPRD §5.2)."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,6 +56,11 @@ class MyDayPeriod(BaseModel):
     # Day-scoped by design: homework is set once per class-subject per day, so a
     # second period of the same subject shows it as already done.
     homework_set: bool = False
+    # DASH3 PR-2: this period is not on my timetable — I am covering it for
+    # someone who is away today. Rendered differently so the teacher knows why a
+    # class they don't teach is in their day.
+    substituting: bool = False
+    covering_for: str | None = None
 
 
 class MyDayOut(BaseModel):
@@ -109,9 +114,54 @@ class HomeworkOut(BaseModel):
     notified_count: int  # guardians notified (the teacher's payback, P3)
 
 
+class HomeworkResultIn(BaseModel):
+    """One student who did NOT do it. Doing it is the norm and has no row."""
+
+    student_id: uuid.UUID
+    status: str = Field(default="not_done", pattern="^(not_done|partial)$")
+    note: str | None = Field(default=None, max_length=300)
+
+
 class HomeworkCheckIn(BaseModel):
-    done_count: int = Field(ge=0)
-    total_count: int = Field(ge=0)
+    """"Everyone did it ✓" = an empty `results` list (HW-1).
+
+    Full replace, like attendance: submitting again is the corrected truth, not
+    an addition, so a teacher can reopen the sheet and fix a mis-tap.
+    """
+
+    results: list[HomeworkResultIn] = []
+
+
+class HomeworkSheetRow(BaseModel):
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None = None
+    # done | not_done | partial — `done` is the derived default (no row).
+    status: str = "done"
+    note: str | None = None
+
+
+class HomeworkSheetOut(BaseModel):
+    """The capture sheet for one homework: its roster, pre-loaded with whatever
+    was recorded last time."""
+
+    assignment_id: uuid.UUID
+    class_label: str
+    subject_name: str | None = None
+    text: str
+    date: date
+    due_date: date | None = None
+    # False = never checked. NOT the same as "everybody did it" — the whole
+    # reason the check row exists.
+    checked: bool = False
+    checked_at: datetime | None = None
+    checked_by: str | None = None
+    # A per-student assignment has a one-row sheet: only its target.
+    student_id: uuid.UUID | None = None
+    roster: list[HomeworkSheetRow] = []
+    done_count: int = 0
+    not_done_count: int = 0
+    partial_count: int = 0
 
 
 # ── deep log — lesson observations (teacher-view redesign) ──────────────────

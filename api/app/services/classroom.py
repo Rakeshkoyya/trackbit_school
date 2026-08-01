@@ -21,6 +21,7 @@ from app.models import (
     Guardian,
     HomeworkAssignment,
     HomeworkCheck,
+    HomeworkResult,
     LessonLog,
     LessonObservation,
     Membership,
@@ -40,6 +41,8 @@ from app.schemas.classroom import (
     HomeworkIn,
     HomeworkOut,
     HomeworkPending,
+    HomeworkSheetOut,
+    HomeworkSheetRow,
     LessonLogIn,
     LessonLogOut,
     MyDayClass,
@@ -57,6 +60,7 @@ from app.schemas.periods import (
     PeriodLogOut,
     PeriodPlanOut,
 )
+from app.schemas.timetable import TeacherSlot
 from app.services.attendance import AttendanceService
 from app.services.notify_guardian import notify_guardians
 from app.services.periods import assert_can_take_class, find_period, get_or_create_period
@@ -168,6 +172,14 @@ class ClassroomService:
         # its OWN period row (V2-P6) — two Maths periods on one day are independent
         # cards with independent topics, not two views of one class-subject.
         day_slots = TimetableService(self.db).teacher_day(m, today)
+        # …plus any period I'm covering for someone who is away (DASH3 PR-2). The
+        # grid says who *usually* takes it; today's cover says who is taking it.
+        # Skipped when a slot for the same (class, period) is already mine — a
+        # substitution can never displace my own timetable.
+        covering = self._substituted_slots(m, today, day_slots)
+        day_slots = day_slots + [ts for ts, _who in covering]
+        covering_by_slot = {(ts.class_id, ts.period_no): who for ts, who in covering}
+
         att_service = AttendanceService(self.db)
         class_ids = list({ts.class_id for ts in day_slots})
         att = att_service.period_states(m.org_id, class_ids, today)
@@ -207,9 +219,48 @@ class ClassroomService:
                 present_count=state.get("present_count"),
                 absent_count=state.get("absent_count"),
                 late_count=state.get("late_count"),
-                homework_set=ts.class_subject_id in hw_cs))
+                homework_set=ts.class_subject_id in hw_cs,
+                substituting=(ts.class_id, ts.period_no) in covering_by_slot,
+                covering_for=covering_by_slot.get((ts.class_id, ts.period_no))))
         periods.sort(key=lambda p: p.period_no)
         return MyDayOut(date=today, classes=classes, periods=periods, homework_pending=pending)
+
+    def _substituted_slots(self, m: CurrentMember, today: date, mine) -> list[tuple]:
+        """Periods I'm covering today, shaped as timetable slots so the rest of
+        My Day treats them identically. Returns (TeacherSlot, covering_for_name)."""
+        from app.services.substitution import SubstitutionService  # noqa: PLC0415
+
+        subs = SubstitutionService(self.db).for_teacher(m.org_id, m.membership.id, today)
+        subs = [s for s in subs if s.class_subject_id is not None]
+        if not subs:
+            return []
+        taken = {(ts.class_id, ts.period_no) for ts in mine}
+        rows = {
+            cs_id: (label, sname) for cs_id, cname, section, sname in self.db.execute(
+                select(ClassSubject.id, SchoolClass.name, SchoolClass.section, Subject.name)
+                .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+                .join(Subject, Subject.id == ClassSubject.subject_id)
+                .where(ClassSubject.id.in_([s.class_subject_id for s in subs])))
+            for label in [cname + (f"-{section}" if section else "")]
+        }
+        absent_ids = [s.absent_member_id for s in subs if s.absent_member_id]
+        absent_names = {
+            mid: name for mid, name in self.db.execute(
+                select(Membership.id, User.name).join(User, User.id == Membership.user_id)
+                .where(Membership.id.in_(absent_ids))).all()
+        } if absent_ids else {}
+
+        out: list[tuple] = []
+        for s in subs:
+            if (s.class_id, s.period_no) in taken:
+                continue
+            label, sname = rows.get(s.class_subject_id, ("?", None))
+            out.append((TeacherSlot(
+                weekday=today.weekday(), period_no=s.period_no, class_id=s.class_id,
+                class_label=label, subject_name=sname,
+                class_subject_id=s.class_subject_id),
+                absent_names.get(s.absent_member_id)))
+        return out
 
     # ── per-period topic resolution (V2-P6) ──────────────────────────────────
     def _week_topics(self, org_id: uuid.UUID, cs_id: uuid.UUID, monday: date):
@@ -348,8 +399,8 @@ class ClassroomService:
                     on_date: date | None = None) -> PeriodCardOut:
         """Everything the period-detail page needs, in one call. Purely a read —
         the period row is created by "Start attendance", not by opening the page."""
-        assert_can_take_class(self.db, m, class_id, None)
         d = on_date or self._today(m)
+        assert_can_take_class(self.db, m, class_id, None, d, period_no)
         monday = d - timedelta(days=d.weekday())
         period = find_period(self.db, m.org_id, class_id, d, period_no)
 
@@ -579,26 +630,105 @@ class ClassroomService:
         return HomeworkOut(id=hw.id, class_subject_id=cs.id, date=d, text=hw.text,
                            due_date=hw.due_date, student_id=hw.student_id, notified_count=count)
 
-    def check_homework(self, m: CurrentMember, assignment_id: uuid.UUID,
-                       body: HomeworkCheckIn) -> HomeworkOut:
+    # ── homework checking (HW-1) — capture-by-exception, like attendance ─────
+    def _homework(self, m: CurrentMember, assignment_id: uuid.UUID) -> HomeworkAssignment:
         hw = self.db.scalar(
             select(HomeworkAssignment).where(
                 HomeworkAssignment.id == assignment_id, HomeworkAssignment.org_id == m.org_id)
         )
         if hw is None:
             raise NotFoundError("Homework")
-        self._can_capture(m, self._cs(m.org_id, hw.class_subject_id))
+        return hw
+
+    def _homework_roster(self, org_id: uuid.UUID, hw: HomeworkAssignment,
+                         class_id: uuid.UUID) -> list[Student]:
+        """Who this homework is for. A per-student assignment has a roster of one
+        — checking it must not present the whole class."""
+        q = select(Student).where(Student.org_id == org_id, Student.status == "active")
+        q = (q.where(Student.id == hw.student_id) if hw.student_id
+             else q.where(Student.class_id == class_id))
+        return list(self.db.scalars(q.order_by(Student.roll_no, Student.full_name)))
+
+    def homework_sheet(self, m: CurrentMember, assignment_id: uuid.UUID) -> HomeworkSheetOut:
+        hw = self._homework(m, assignment_id)
+        cs = self._cs(m.org_id, hw.class_subject_id)
+        self._can_capture(m, cs)
+        klass = self.db.get(SchoolClass, cs.class_id)
+        subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
+        check = self.db.scalar(
+            select(HomeworkCheck).where(HomeworkCheck.assignment_id == assignment_id))
+        results = {
+            r.student_id: r for r in self.db.scalars(
+                select(HomeworkResult).where(HomeworkResult.assignment_id == assignment_id))
+        }
+        checked_by = None
+        if check is not None and check.checked_by_member_id:
+            checked_by = self.db.scalar(
+                select(User.name).join(Membership, Membership.user_id == User.id)
+                .where(Membership.id == check.checked_by_member_id))
+
+        rows: list[HomeworkSheetRow] = []
+        for st in self._homework_roster(m.org_id, hw, cs.class_id):
+            hit = results.get(st.id)
+            rows.append(HomeworkSheetRow(
+                student_id=st.id, full_name=st.full_name, roll_no=st.roll_no,
+                status=hit.status if hit else "done", note=hit.note if hit else None))
+        not_done = sum(1 for r in rows if r.status == "not_done")
+        partial = sum(1 for r in rows if r.status == "partial")
+        return HomeworkSheetOut(
+            assignment_id=hw.id, class_label=_label(klass), subject_name=subject,
+            text=hw.text, date=hw.date, due_date=hw.due_date,
+            checked=check is not None, checked_at=check.checked_at if check else None,
+            checked_by=checked_by, student_id=hw.student_id, roster=rows,
+            done_count=len(rows) - not_done - partial,
+            not_done_count=not_done, partial_count=partial)
+
+    def check_homework(self, m: CurrentMember, assignment_id: uuid.UUID,
+                       body: HomeworkCheckIn) -> HomeworkSheetOut:
+        """Record who didn't do it. An empty list means everyone did.
+
+        Full replace of the exception set (P1v2, same contract as
+        `AttendanceService.mark`), and it recomputes `done_count`/`total_count`
+        so every existing reader of those columns stays correct.
+        """
+        hw = self._homework(m, assignment_id)
+        cs = self._cs(m.org_id, hw.class_subject_id)
+        self._can_capture(m, cs)
+
         check = self.db.scalar(
             select(HomeworkCheck).where(HomeworkCheck.assignment_id == assignment_id))
         if check is None:
             check = HomeworkCheck(org_id=m.org_id, assignment_id=assignment_id)
             self.db.add(check)
-        check.done_count = body.done_count
-        check.total_count = body.total_count
+            self.db.flush()
+
+        # Only students this homework was actually set for can be flagged — the
+        # ids arrive from a client, and org_id comes from the token (law 1).
+        roster = {st.id for st in self._homework_roster(m.org_id, hw, cs.class_id)}
+        wanted = {r.student_id: r for r in body.results if r.student_id in roster}
+
+        existing = {
+            r.student_id: r for r in self.db.scalars(
+                select(HomeworkResult).where(HomeworkResult.assignment_id == assignment_id))
+        }
+        for student_id, row in existing.items():
+            if student_id not in wanted:
+                self.db.delete(row)
+        for student_id, incoming in wanted.items():
+            if student_id in existing:
+                existing[student_id].status = incoming.status
+                existing[student_id].note = incoming.note
+                continue
+            self.db.add(HomeworkResult(
+                org_id=m.org_id, check_id=check.id, assignment_id=assignment_id,
+                student_id=student_id, status=incoming.status, note=incoming.note))
+
+        check.total_count = len(roster)
+        check.done_count = len(roster) - len(wanted)
         check.checked_at = datetime.now(UTC)
+        check.checked_by_member_id = m.membership.id
         self.db.flush()
-        return HomeworkOut(id=hw.id, class_subject_id=hw.class_subject_id, date=hw.date,
-                           text=hw.text, due_date=hw.due_date, notified_count=0)
+        return self.homework_sheet(m, assignment_id)
 
     # ── compliance (CL-4) — coordinator/director ─────────────────────────────
     def compliance(self, m: CurrentMember, on_date: date | None = None) -> ComplianceOut:

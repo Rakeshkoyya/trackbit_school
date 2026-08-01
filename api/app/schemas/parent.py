@@ -59,6 +59,22 @@ class ParentTaughtItem(BaseModel):
 class ParentHomeworkItem(BaseModel):
     subject_name: str
     text: str
+    # done | not_done | partial | not_checked (HW-1). `not_checked` means the
+    # teacher hasn't gone through it — the UI must say "not checked yet", never
+    # imply the child missed it.
+    status: str = "not_checked"
+    due_date: date | None = None
+    personal: bool = False
+
+
+class ParentHomeworkDay(BaseModel):
+    """A day's homework for one child, with the day's verdict rolled up."""
+    date: date
+    items: list[ParentHomeworkItem] = []
+    done: int = 0
+    not_done: int = 0
+    partial: int = 0
+    not_checked: int = 0
 
 
 class ParentSessionItem(BaseModel):
@@ -79,6 +95,11 @@ class ParentTodayOut(BaseModel):
     taught: list[ParentTaughtItem] = []
     homework: list[ParentHomeworkItem] = []
     sessions: list[ParentSessionItem] = []
+    # Yesterday's homework, so the first question a parent asks — "did they do
+    # it?" — is answered without navigating anywhere (HW-1).
+    yesterday: ParentHomeworkDay | None = None
+    # Set and not yet due: what's still to do tonight.
+    pending: list[ParentHomeworkItem] = []
 
 
 class ParentReportSubject(BaseModel):

@@ -2,7 +2,9 @@
 
 lesson_logs = what was actually taught; homework = what was set (posting it
 auto-notifies guardians, the teacher's immediate payback, P3); homework_checks =
-next-day completion as a count, never per-item grading (P1 fence);
+the teacher went through it, with `homework_results` naming only the students who
+didn't do it (HW-1, 2026-07-29 — the counts are now derived from those rows).
+Still never per-item grading (P1 fence);
 lesson_observations = the OPTIONAL deep log (teacher-view redesign, 2026-07) —
 named sections a teacher adds to a period ("Vocabulary" → "Reading"/"Writing")
 with per-student rows only for exceptions, never the whole class (P1v2).
@@ -19,10 +21,11 @@ from sqlalchemy import (
     Index,
     Integer,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.base import CreatedAtMixin, UUIDPKMixin
@@ -144,6 +147,21 @@ class LessonObservation(Base, UUIDPKMixin, CreatedAtMixin):
 
 
 class HomeworkCheck(Base, UUIDPKMixin, CreatedAtMixin):
+    """The teacher sat down and went through this homework (HW-1).
+
+    **The row's existence is the fact.** Its absence means "not checked yet",
+    which is emphatically NOT the same as "everybody did it" — that distinction
+    is the whole point of the checking-discipline analytic, and it is the same
+    one `class_periods.attendance_marked_at` draws for attendance and
+    `staff_attendance_days` draws for staff. Without it, a teacher who never
+    checks anything reads as a teacher whose class has perfect completion.
+
+    `done_count`/`total_count` are now **derived caches** recomputed from the
+    roster minus `homework_results` on every check. They are kept because the
+    dashboard's homework health chart already sums them; nothing writes them by
+    hand any more.
+    """
+
     __tablename__ = "homework_checks"
 
     org_id: Mapped[uuid.UUID] = _org_fk()
@@ -154,3 +172,63 @@ class HomeworkCheck(Base, UUIDPKMixin, CreatedAtMixin):
     done_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Who actually checked — a substitute may check a colleague's homework, and
+    # "which teacher isn't checking" has to name the person, not the timetable.
+    checked_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
+    )
+
+    results: Mapped[list["HomeworkResult"]] = relationship(
+        back_populates="check", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # One check per assignment. Previously only a convention in the service;
+        # a double-submit could silently create a second row and double-count the
+        # class in the dashboard's homework totals.
+        UniqueConstraint("assignment_id", name="uq_homework_checks_assignment"),
+    )
+
+
+class HomeworkResult(Base, UUIDPKMixin, CreatedAtMixin):
+    """One student who did NOT do the homework (HW-1) — exception rows only.
+
+    Capture-by-exception, exactly like `attendance_exceptions` and
+    `check_results`: the teacher taps "everyone did it" and flags the few who
+    didn't. Every student's status is still knowable — roster minus these rows is
+    the done list — but the teacher never touches 40 names to record 3 facts
+    (P1v2).
+
+    Hangs off the check rather than the assignment so that clearing a check
+    clears its verdicts with it: a teacher who reopens the sheet is re-checking,
+    not amending a record that outlived its check.
+    """
+
+    __tablename__ = "homework_results"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    check_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("homework_checks.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Denormalised from the check so per-student history is one query, not a join
+    # through checks for every read (the parent portal asks for exactly this).
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("homework_assignments.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # not_done = nothing · partial = started it. Anything else is "done", which
+    # has no row.
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="not_done")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    check: Mapped["HomeworkCheck"] = relationship(back_populates="results")
+
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "student_id", name="uq_homework_results_student"),
+        CheckConstraint("status IN ('not_done', 'partial')", name="homework_result_status_valid"),
+    )

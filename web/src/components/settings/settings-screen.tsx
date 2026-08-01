@@ -9,6 +9,66 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
+import { schoolApi } from "@/lib/school-api";
+
+/** Leave allowance (SF-1). These two numbers are the school's own policy, not a
+ *  hard rule the app enforces: an application over either one still reaches the
+ *  admin, flagged, so an emergency stays on the record instead of becoming a
+ *  phone call nobody logged. */
+function LeavePolicySection() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["leave-policy"], queryFn: schoolApi.leavePolicy });
+  const [perYear, setPerYear] = useState<number | null>(null);
+  const [perMonth, setPerMonth] = useState<number | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => schoolApi.setLeavePolicy({
+      leaves_per_year: perYear ?? data!.leaves_per_year,
+      leaves_per_month: perMonth ?? data!.leaves_per_month,
+    }),
+    onSuccess: (p) => {
+      qc.setQueryData(["leave-policy"], p);
+      qc.invalidateQueries({ queryKey: ["leave"] });
+      setPerYear(null);
+      setPerMonth(null);
+      toast.success("Leave policy saved");
+    },
+    onError: (e) => showApiError(e, "Could not save the leave policy"),
+  });
+
+  if (!data) return <div className="mt-5 h-48 animate-pulse rounded-xl bg-muted" />;
+
+  const yearVal = perYear ?? data.leaves_per_year;
+  const monthVal = perMonth ?? data.leaves_per_month;
+  const dirty = perYear !== null || perMonth !== null;
+
+  return (
+    <section className="mt-5 rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-1 text-sm font-semibold">Leave</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        How much time off each staff member gets. Requests over these limits still reach you —
+        they arrive marked so you can decide.
+      </p>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="leave-year">Days a year</Label>
+            <Input id="leave-year" type="number" min={0} max={365} value={yearVal}
+              onChange={(e) => setPerYear(Math.max(0, Math.min(365, Number(e.target.value))))} />
+          </div>
+          <div>
+            <Label htmlFor="leave-month">Days a month</Label>
+            <Input id="leave-month" type="number" min={0} max={31} value={monthVal}
+              onChange={(e) => setPerMonth(Math.max(0, Math.min(31, Number(e.target.value))))} />
+          </div>
+        </div>
+        <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+          {save.isPending ? "Saving…" : "Save leave policy"}
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 export function SettingsScreen() {
   const qc = useQueryClient();
@@ -81,6 +141,8 @@ export function SettingsScreen() {
           </Button>
         </div>
       </section>
+
+      <LeavePolicySection />
     </div>
   );
 }

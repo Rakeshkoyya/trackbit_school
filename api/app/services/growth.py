@@ -30,6 +30,8 @@ from app.models import (
     ClassSubject,
     DailyCheck,
     HomeworkAssignment,
+    HomeworkCheck,
+    HomeworkResult,
     LessonLog,
     LessonObservation,
     Membership,
@@ -188,14 +190,37 @@ class GrowthService:
 
         # ── homework, checks, observations, scores — one query each ───────────
         hw_rows = self.db.execute(
-            select(HomeworkAssignment.class_subject_id, HomeworkAssignment.student_id)
+            select(HomeworkAssignment.class_subject_id, HomeworkAssignment.student_id,
+                   HomeworkAssignment.id)
             .where(HomeworkAssignment.org_id == m.org_id,
                    HomeworkAssignment.class_subject_id.in_(cs_ids),
                    or_(HomeworkAssignment.student_id.is_(None),
                        HomeworkAssignment.student_id == student.id))).all() if cs_ids else []
+        # This student's verdict on each of them (HW-1) — two more queries for the
+        # whole set, never one per assignment.
+        hw_ids = [row[2] for row in hw_rows]
+        hw_checked = set(self.db.scalars(
+            select(HomeworkCheck.assignment_id)
+            .where(HomeworkCheck.assignment_id.in_(hw_ids)))) if hw_ids else set()
+        hw_mine = {
+            r.assignment_id: r.status for r in self.db.scalars(
+                select(HomeworkResult).where(HomeworkResult.assignment_id.in_(hw_ids),
+                                             HomeworkResult.student_id == student.id))
+        } if hw_ids else {}
+        hw_done: dict[uuid.UUID, int] = defaultdict(int)
+        hw_not_done: dict[uuid.UUID, int] = defaultdict(int)
+        hw_unchecked: dict[uuid.UUID, int] = defaultdict(int)
+        for cs_id, _sid, hw_id in hw_rows:
+            if hw_id not in hw_checked:
+                hw_unchecked[cs_id] += 1
+            elif hw_id in hw_mine:
+                hw_not_done[cs_id] += 1
+            else:
+                hw_done[cs_id] += 1
+
         hw_assigned: dict[uuid.UUID, int] = defaultdict(int)
         hw_personal: dict[uuid.UUID, int] = defaultdict(int)
-        for cs_id, sid in hw_rows:
+        for cs_id, sid, _hw_id in hw_rows:
             hw_assigned[cs_id] += 1
             if sid is not None:
                 hw_personal[cs_id] += 1
@@ -243,6 +268,9 @@ class GrowthService:
                 chapters=chapters_by_cs.get(cs.id, []),
                 homework_assigned=hw_assigned.get(cs.id, 0),
                 homework_personal=hw_personal.get(cs.id, 0),
+                homework_done=hw_done.get(cs.id, 0),
+                homework_not_done=hw_not_done.get(cs.id, 0),
+                homework_not_checked=hw_unchecked.get(cs.id, 0),
                 checks_flagged=checks_flagged.get(cs.id, 0),
                 observations=obs_by_cs.get(cs.id, []),
                 scores=scores_by_cs.get(cs.id, [])))

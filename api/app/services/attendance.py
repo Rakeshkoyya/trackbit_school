@@ -71,8 +71,8 @@ class AttendanceService:
     def roster(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
                on_date: date | None = None) -> AttendanceRosterOut:
         klass = self._class(m.org_id, class_id)
-        assert_can_take_class(self.db, m, class_id, None)
         d = on_date or self._today(m)
+        assert_can_take_class(self.db, m, class_id, None, d, period_no)
         roster = self._roster(m.org_id, class_id)
         period = self.db.scalar(
             select(ClassPeriod).where(
@@ -99,8 +99,9 @@ class AttendanceService:
     # ── mark (the one-tap capture) ───────────────────────────────────────────
     def mark(self, m: CurrentMember, body: AttendanceMarkIn) -> AttendanceMarkOut:
         klass = self._class(m.org_id, body.class_id)
-        assert_can_take_class(self.db, m, body.class_id, body.class_subject_id)
         d = body.date or self._today(m)
+        assert_can_take_class(self.db, m, body.class_id, body.class_subject_id,
+                              d, body.period_no)
         roster_ids = {s.id for s in self._roster(m.org_id, body.class_id)}
 
         existing = find_period(self.db, m.org_id, body.class_id, d, body.period_no)

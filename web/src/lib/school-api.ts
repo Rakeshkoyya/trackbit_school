@@ -7,9 +7,17 @@ import type {
   FeeStructure,
   FeeSummary,
   Guardian,
+  HomeworkOverview,
+  HomeworkSheet,
+  LeaveBalance,
+  LeaveList,
+  LeavePolicy,
+  LeaveRequest,
   RosterAnalyze,
   RosterCommitResult,
   SchoolClass,
+  StaffAttendance,
+  StudentHomeworkHistory,
   StudentCategory,
   StudentDetail,
   StudentFeeDetail,
@@ -17,6 +25,9 @@ import type {
   StudentListItem,
   Subject,
   Term,
+  TimesheetDay,
+  TimesheetWeek,
+  WorkType,
 } from "@/lib/school-types";
 
 const qs = (params: Record<string, string | undefined>) => {
@@ -204,8 +215,16 @@ export const schoolApi = {
   deleteLog: (id: string) => api.del<{ message: string }>(`/classroom/lesson-logs/${id}`),
   addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null; student_id?: string | null }) =>
     api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
-  checkHomework: (id: string, b: { done_count: number; total_count: number }) =>
-    api.post<{ id: string }>(`/classroom/homework/${id}/check`, b),
+  // HW-1: capture-by-exception. An empty `results` list means everyone did it.
+  homeworkSheet: (id: string) =>
+    api.get<HomeworkSheet>(`/classroom/homework/${id}/sheet`),
+  checkHomework: (id: string, b: { results: { student_id: string; status: "not_done" | "partial"; note?: string | null }[] }) =>
+    api.post<HomeworkSheet>(`/classroom/homework/${id}/check`, b),
+  homeworkOverview: (windowDays?: number) =>
+    api.get<HomeworkOverview>(`/homework/overview${qs({ window_days: windowDays ? String(windowDays) : undefined })}`),
+  studentHomework: (studentId: string, windowDays?: number) =>
+    api.get<StudentHomeworkHistory>(
+      `/homework/student/${studentId}${qs({ window_days: windowDays ? String(windowDays) : undefined })}`),
   compliance: () => api.get<import("@/lib/school-types").Compliance>("/classroom/compliance"),
 
   // period detail page (V2-P6) — everything for one class-period in one call
@@ -487,4 +506,35 @@ export const schoolApi = {
     api.post<StudentFeeDetail>(`/fees/installments/${instId}/pay`, b),
   markPaid: (instId: string) => api.post<StudentFeeDetail>(`/fees/installments/${instId}/mark-paid`),
   undo: (instId: string) => api.post<StudentFeeDetail>(`/fees/installments/${instId}/undo`),
+
+  // ── SF-1 staff: attendance · timesheet · leave ────────────────────────────
+  staffAttendance: (onDate?: string) =>
+    api.get<StaffAttendance>(`/staff/attendance${qs({ on_date: onDate })}`),
+  /** Full replace of the day's absence set — "everyone in" is an empty list. */
+  markStaffAttendance: (b: { date?: string; absent_member_ids: string[]; notes?: Record<string, string> }) =>
+    api.post<StaffAttendance>("/staff/attendance", b),
+
+  workTypes: () => api.get<WorkType[]>("/staff/work-types"),
+  timesheetWeek: (p: { member_id?: string; week_start?: string } = {}) =>
+    api.get<TimesheetWeek>(`/staff/timesheet/week${qs(p)}`),
+  timesheetDay: (p: { member_id?: string; on_date?: string } = {}) =>
+    api.get<TimesheetDay>(`/staff/timesheet/day${qs(p)}`),
+  setTimesheetEntry: (b: { date: string; period_no: number; work_type: string; note?: string | null; member_id?: string }) =>
+    api.put<TimesheetDay>("/staff/timesheet/entry", b),
+  clearTimesheetEntry: (p: { on_date: string; period_no: number; member_id?: string }) =>
+    api.del<TimesheetDay>(`/staff/timesheet/entry${qs({ ...p, period_no: String(p.period_no) })}`),
+  orgTimesheetToday: (onDate?: string) =>
+    api.get<TimesheetWeek[]>(`/staff/timesheet/today${qs({ on_date: onDate })}`),
+
+  leavePolicy: () => api.get<LeavePolicy>("/staff/leave/policy"),
+  setLeavePolicy: (b: LeavePolicy) => api.put<LeavePolicy>("/staff/leave/policy", b),
+  leaveBalance: (memberId?: string) =>
+    api.get<LeaveBalance>(`/staff/leave/balance${qs({ member_id: memberId })}`),
+  leaveRequests: (p: { status?: string; mine?: boolean } = {}) =>
+    api.get<LeaveList>(`/staff/leave${qs({ status: p.status, mine: p.mine ? "true" : undefined })}`),
+  applyLeave: (b: { start_date: string; end_date: string; reason: string }) =>
+    api.post<LeaveRequest>("/staff/leave", b),
+  decideLeave: (id: string, b: { action: "approved" | "rejected"; note?: string | null }) =>
+    api.post<LeaveRequest>(`/staff/leave/${id}/decision`, b),
+  cancelLeave: (id: string) => api.post<LeaveRequest>(`/staff/leave/${id}/cancel`),
 };

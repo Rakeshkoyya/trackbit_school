@@ -1,12 +1,27 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Loader2, Moon, NotebookPen } from "lucide-react";
+import { BookOpen, ClipboardCheck, Loader2, Moon, NotebookPen } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { parentApi, type DayStatus } from "@/lib/parent-api";
+import { parentApi, type DayStatus, type HomeworkStatus } from "@/lib/parent-api";
 
 import { useParentPortal } from "./parent-context";
+
+/** How each verdict reads to a parent. `not_checked` is deliberately neutral and
+ *  worded as the teacher's pending action — never as something the child failed
+ *  to do. */
+const HW_STATUS: Record<HomeworkStatus, { label: string; tone: "success" | "warning" | "danger" | "neutral" }> = {
+  done: { label: "done", tone: "success" },
+  not_done: { label: "not done", tone: "danger" },
+  partial: { label: "partly done", tone: "warning" },
+  not_checked: { label: "not checked yet", tone: "neutral" },
+};
+
+function dayLabel(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN",
+    { weekday: "short", day: "numeric", month: "short" });
+}
 
 const STATUS_COPY: Record<DayStatus, { label: string; tone: "success" | "warning" | "danger" | "neutral"; hint?: string }> = {
   present: { label: "Present today", tone: "success" },
@@ -95,7 +110,64 @@ export default function ParentTodayPage() {
         )}
       </Section>
 
-      <Section icon={NotebookPen} title="Homework tonight">
+      {/* Yesterday's verdict — the question a parent opens this app to answer. */}
+      {data.yesterday ? (
+        <Section icon={ClipboardCheck} title={`Last homework · ${dayLabel(data.yesterday.date)}`}>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {data.yesterday.done ? (
+              <Badge tone="success">{data.yesterday.done} done</Badge>
+            ) : null}
+            {data.yesterday.not_done ? (
+              <Badge tone="danger">{data.yesterday.not_done} not done</Badge>
+            ) : null}
+            {data.yesterday.partial ? (
+              <Badge tone="warning">{data.yesterday.partial} partly done</Badge>
+            ) : null}
+            {data.yesterday.not_checked ? (
+              <Badge tone="neutral">{data.yesterday.not_checked} not checked yet</Badge>
+            ) : null}
+          </div>
+          <ul className="space-y-2">
+            {data.yesterday.items.map((hw, i) => (
+              <li key={i} className="flex items-baseline gap-2 text-sm">
+                <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
+                  {hw.subject_name}
+                </span>
+                <span className="min-w-0 flex-1">{hw.text}</span>
+                <Badge tone={HW_STATUS[hw.status].tone}>{HW_STATUS[hw.status].label}</Badge>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+
+      {/* Still to do — set and not finished, whether or not it was set today. */}
+      {data.pending.length ? (
+        <Section icon={NotebookPen} title="Still to do">
+          <ul className="space-y-2">
+            {data.pending.map((hw, i) => (
+              <li key={i} className="flex items-baseline gap-2 text-sm">
+                <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
+                  {hw.subject_name}
+                </span>
+                <span className="min-w-0 flex-1">
+                  {hw.text}
+                  {hw.personal ? (
+                    <span className="ml-1 text-xs text-muted-foreground">(just for them)</span>
+                  ) : null}
+                </span>
+                {hw.due_date ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    due {dayLabel(hw.due_date)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+
+      <Section icon={NotebookPen} title="Homework set today">
         {data.homework.length ? (
           <ul className="space-y-2">
             {data.homework.map((hw, i) => (
@@ -103,7 +175,10 @@ export default function ParentTodayPage() {
                 <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
                   {hw.subject_name}
                 </span>
-                <span>{hw.text}</span>
+                <span className="min-w-0 flex-1">{hw.text}</span>
+                {hw.status !== "not_checked" ? (
+                  <Badge tone={HW_STATUS[hw.status].tone}>{HW_STATUS[hw.status].label}</Badge>
+                ) : null}
               </li>
             ))}
           </ul>

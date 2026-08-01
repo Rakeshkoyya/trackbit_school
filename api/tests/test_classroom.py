@@ -73,10 +73,14 @@ def test_homework_notifies_guardians(client, cleanup):
     # only the non-opted-out guardian is notified (P3 payback, opt-out respected)
     assert hw.json()["notified_count"] == 1
 
-    # next-day completion as a count (never per-item)
+    # Next-day checking is capture-by-exception now (HW-1): an empty list means
+    # everyone did it, and the counts are derived rather than typed.
     chk = client.post(f"/api/v1/classroom/homework/{hw.json()['id']}/check", headers=h,
-                      json={"done_count": 18, "total_count": 20})
-    assert chk.status_code == 200
+                      json={"results": []})
+    assert chk.status_code == 200, chk.text
+    body = chk.json()
+    assert body["checked"] is True
+    assert body["done_count"] == 2 and body["not_done_count"] == 0
 
 
 def test_compliance_view(client, cleanup):

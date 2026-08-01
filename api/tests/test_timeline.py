@@ -73,7 +73,13 @@ def test_timeline_renders_periods_with_gaps_and_homework(client, cleanup):
     assert len(periods) == 2
     assert periods[1]["attendance"] == "absent" and periods[1]["gap"] is True
     assert periods[2]["attendance"] == "present" and periods[2]["gap"] is False
-    assert any("Extra reading" in hw for hw in periods[1]["homework"])
+    # HW-1 turned timeline homework from bare strings into rows carrying THIS
+    # student's status, so the assertion reads the field rather than the item.
+    assert any(hw["text"] == "Extra reading" for hw in periods[1]["homework"])
+    personal = next(hw for hw in periods[1]["homework"] if hw["text"] == "Extra reading")
+    assert personal["personal"] is True
+    # Nobody has checked it, and "not checked" is the teacher's gap — never a miss.
+    assert personal["status"] == "not_checked"
 
 
 def test_timeline_includes_sessions(client, cleanup):

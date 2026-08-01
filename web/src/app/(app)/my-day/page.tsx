@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, ChevronRight, ClipboardCheck, Moon, Send, Users } from "lucide-react";
+import { BookOpen, Check, CheckCheck, ChevronRight, ClipboardCheck, Moon, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -120,25 +120,113 @@ function ClassCard({ c, onHomework }: { c: MyDayClass; onHomework: () => void })
   );
 }
 
+/** Homework checking, capture-by-exception (HW-1).
+ *
+ *  One tap for "everyone did it"; the sheet opens only when somebody didn't.
+ *  Same shape as attendance, and the same reason: typing a count told us how
+ *  many, never who — so nobody could be followed up and no parent could be told
+ *  whether their own child had done it. */
 function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
   const qc = useQueryClient();
-  const [done, setDone] = useState("");
-  const [total, setTotal] = useState("");
+  const [open, setOpen] = useState(false);
+  const [misses, setMisses] = useState<Record<string, "not_done" | "partial">>({});
+
+  const { data: sheet } = useQuery({
+    queryKey: ["homework-sheet", hw.assignment_id],
+    queryFn: () => schoolApi.homeworkSheet(hw.assignment_id),
+    enabled: open,
+  });
+
+  // Seed the working copy from whatever was recorded before (derived, no effect).
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  if (sheet && seededFor !== hw.assignment_id) {
+    setMisses(Object.fromEntries(
+      sheet.roster.filter((r) => r.status !== "done").map((r) => [r.student_id, r.status])
+    ) as Record<string, "not_done" | "partial">);
+    setSeededFor(hw.assignment_id);
+  }
+
+  const done = () => {
+    qc.invalidateQueries({ queryKey: ["my-day"] });
+    qc.invalidateQueries({ queryKey: ["homework-sheet", hw.assignment_id] });
+    setOpen(false);
+  };
   const check = useMutation({
-    mutationFn: () => schoolApi.checkHomework(hw.assignment_id, { done_count: Number(done), total_count: Number(total) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["my-day"] }); toast.success("Recorded"); },
+    mutationFn: (results: { student_id: string; status: "not_done" | "partial" }[]) =>
+      schoolApi.checkHomework(hw.assignment_id, { results }),
+    onSuccess: (res) => {
+      toast.success(res.not_done_count + res.partial_count === 0
+        ? "Recorded — everyone did it"
+        : `Recorded — ${res.not_done_count + res.partial_count} didn’t`);
+      done();
+    },
     onError: (e) => showApiError(e, "Could not record"),
   });
+
+  // Tap cycles: did it → didn't → partly → did it.
+  const cycle = (studentId: string) => {
+    const now = misses[studentId];
+    const next = { ...misses };
+    if (!now) next[studentId] = "not_done";
+    else if (now === "not_done") next[studentId] = "partial";
+    else delete next[studentId];
+    setMisses(next);
+  };
+
+  const missCount = Object.keys(misses).length;
+
   return (
     <div className="rounded-lg border border-border bg-card px-4 py-3">
       <p className="text-sm font-medium">{hw.class_label} · {hw.subject_name}</p>
       <p className="mb-2 truncate text-xs text-muted-foreground">{hw.text}</p>
-      <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (done && total) check.mutate(); }}>
-        <Input className="h-8 w-16" type="number" placeholder="done" value={done} onChange={(e) => setDone(e.target.value)} />
-        <span className="text-muted-foreground">/</span>
-        <Input className="h-8 w-16" type="number" placeholder="total" value={total} onChange={(e) => setTotal(e.target.value)} />
-        <Button size="sm" type="submit" disabled={check.isPending || !done || !total}>Save</Button>
-      </form>
+
+      {!open ? (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={check.isPending} onClick={() => check.mutate([])}>
+            <CheckCheck className="h-4 w-4" /> Everyone did it
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+            Some didn’t…
+          </Button>
+        </div>
+      ) : !sheet ? (
+        <div className="h-24 animate-pulse rounded-md bg-muted" />
+      ) : (
+        <>
+          <p className="mb-1.5 text-xs text-muted-foreground">
+            Tap whoever didn’t do it. Tap again for “did some of it”.
+          </p>
+          <div className="mb-2 grid gap-1 sm:grid-cols-2">
+            {sheet.roster.map((r) => {
+              const state = misses[r.student_id];
+              return (
+                <button key={r.student_id} type="button" onClick={() => cycle(r.student_id)}
+                  className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm active:scale-[0.99] ${
+                    state === "not_done" ? "border-danger/40 bg-danger/8"
+                      : state === "partial" ? "border-warning/50 bg-warning-soft"
+                        : "border-border bg-card"}`}>
+                  <span className="min-w-0 flex-1 truncate">
+                    {r.roll_no ? `${r.roll_no}. ` : ""}{r.full_name}
+                  </span>
+                  {state ? (
+                    <Badge tone={state === "not_done" ? "danger" : "warning"}>
+                      {state === "not_done" ? "didn’t" : "partly"}
+                    </Badge>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={check.isPending}
+              onClick={() => check.mutate(
+                Object.entries(misses).map(([student_id, status]) => ({ student_id, status })))}>
+              Save — {sheet.roster.length - missCount}/{sheet.roster.length} did it
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

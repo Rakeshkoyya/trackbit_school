@@ -18,6 +18,10 @@ from app.models.base import CreatedAtMixin, UUIDPKMixin
 NOTIF_TYPES = (
     "assigned", "passed", "reminder", "overdue", "digest", "report_card", "nudge",
     "unassigned",  # F9: a task left you (board went private / you left a board)
+    # DASH3 PR-2: you are covering someone's period today. Push-only — cover is
+    # decided minutes before the bell, and an email that lands after the period
+    # is worse than nothing.
+    "substitute",
 )
 
 

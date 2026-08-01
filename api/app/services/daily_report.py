@@ -31,6 +31,7 @@ from app.models import (
     DailyReport,
     HomeworkAssignment,
     HomeworkCheck,
+    HomeworkResult,
     LessonLog,
     Membership,
     Organization,
@@ -100,6 +101,41 @@ class DailyReportService:
                 or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d),
             )))
 
+    # ── ambiguity rules the SF-1/HW-1 capture made answerable (DASH3 §6) ──────
+    def _staff_ambiguities(self, m: CurrentMember, d: date) -> list[str]:
+        """Staff away with periods nobody is covering.
+
+        Before SF-1 this could not be said at all. It goes in ambiguities rather
+        than risks deliberately: the school may well have merged the classes and
+        simply not told the app, so this is a "did we handle it?" not an
+        accusation. Silent when staff attendance was never taken — an unmarked
+        morning is not a full house, and it is also not evidence of absence.
+        """
+        from app.services.insights.attendance import AttendanceInsights  # noqa: PLC0415
+
+        presence = AttendanceInsights(self.db).staff_presence(m, d)
+        if not presence.marked:
+            return []
+        out: list[str] = []
+        for a in presence.absentees:
+            uncovered = a.periods_due - a.periods_covered
+            if uncovered > 0:
+                out.append(
+                    f"{a.name} was away with {uncovered} period(s) uncovered — "
+                    "was a substitute arranged?")
+        return out
+
+    def _homework_streak_ambiguities(self, m: CurrentMember) -> list[str]:
+        """Students missing homework repeatedly. Named, because HW-1 finally can."""
+        from app.services.homework import HomeworkService  # noqa: PLC0415
+
+        rows = HomeworkService(self.db).overview(m).needs_attention[:3]
+        return [
+            f"{r.full_name} ({r.class_label}) has missed homework "
+            f"{r.not_done + r.partial} time(s) recently — worth a word home."
+            for r in rows
+        ]
+
     # ── assembly ─────────────────────────────────────────────────────────────
     def _assemble(
         self, m: CurrentMember, d: date, *, include_fees: bool,
@@ -138,6 +174,8 @@ class DailyReportService:
                            key=lambda c: cs_meta.get(c, (None, ""))[1]):
             ambiguities.append(
                 f"{cs_meta.get(csid, (None, '?'))[1]} was logged but attendance wasn't taken.")
+        ambiguities.extend(self._staff_ambiguities(m, d))
+        ambiguities.extend(self._homework_streak_ambiguities(m))
 
         # ── sections ──
         att_lines = [f"{len(marked_keys)} of {len(slots)} periods marked · "
@@ -158,6 +196,28 @@ class DailyReportService:
             HomeworkCheck.org_id == org_id, HomeworkCheck.checked_at >= start_utc,
             HomeworkCheck.checked_at < end_utc)) or 0
         hw_lines = [f"{hw_given} homework set · {hw_checked} check(s) recorded"]
+        # Who actually didn't do it, now that we know (HW-1). Counted across
+        # today's checks so the report says something a count never could.
+        hw_missed = self.db.scalar(
+            select(func.count(HomeworkResult.id))
+            .join(HomeworkCheck, HomeworkCheck.id == HomeworkResult.check_id)
+            .where(HomeworkResult.org_id == org_id,
+                   HomeworkCheck.checked_at >= start_utc,
+                   HomeworkCheck.checked_at < end_utc)) or 0
+        if hw_checked:
+            hw_lines.append(
+                f"{hw_missed} student(s) hadn't done it" if hw_missed
+                else "Everyone who was checked had done it")
+        # Homework past its deadline that nobody has gone through. A missing check
+        # is the teacher's gap, and saying nothing lets it accumulate silently.
+        hw_unchecked = self.db.scalar(
+            select(func.count(HomeworkAssignment.id))
+            .outerjoin(HomeworkCheck, HomeworkCheck.assignment_id == HomeworkAssignment.id)
+            .where(HomeworkAssignment.org_id == org_id, HomeworkCheck.id.is_(None),
+                   func.coalesce(HomeworkAssignment.due_date, HomeworkAssignment.date) < d,
+                   HomeworkAssignment.date >= d - timedelta(days=14))) or 0
+        if hw_unchecked:
+            hw_lines.append(f"{hw_unchecked} past homework still unchecked")
 
         confirmed = self.db.scalar(select(func.count(DailyCheck.id)).where(
             DailyCheck.org_id == org_id, DailyCheck.date == d,

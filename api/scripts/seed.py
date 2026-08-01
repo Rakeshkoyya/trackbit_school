@@ -27,9 +27,13 @@ from app.models import (
     FeeStructure,
     Guardian,
     HomeworkAssignment,
+    HomeworkCheck,
+    HomeworkResult,
     Installment,
     Intervention,
     InterventionItem,
+    LeaveRequest,
+    LeaveRequestEvent,
     LessonLog,
     Membership,
     Organization,
@@ -43,6 +47,8 @@ from app.models import (
     SessionStudent,
     SessionStudentLog,
     SkillArea,
+    StaffAbsence,
+    StaffAttendanceDay,
     Student,
     StudentBand,
     StudentCategory,
@@ -53,6 +59,7 @@ from app.models import (
     TaskEvent,
     TaskInstance,
     Term,
+    TimesheetEntry,
     TimetableSlot,
     Transaction,
     User,
@@ -232,9 +239,19 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     demo_log = LessonLog(org_id=org.id, class_subject_id=math.id, date=today_ist,
                          member_id=mships[ramesh].id, coverage="full")
     db.add(demo_log)
+    # Yesterday's homework, still waiting on the teacher — this is what My Day's
+    # "check homework" row renders against.
     db.add(HomeworkAssignment(org_id=org.id, class_subject_id=math.id,
                               date=today_ist - timedelta(days=1), text="Exercise 4.2, sums 1–10",
                               due_date=today_ist + timedelta(days=1), notified_at=_now()))
+    # An older one that WAS checked, with one student who didn't do it (HW-1), so
+    # the analytics and the parent's "did they do it?" both have real data.
+    checked_hw = HomeworkAssignment(
+        org_id=org.id, class_subject_id=math.id, date=today_ist - timedelta(days=2),
+        text="Exercise 4.1, sums 1–8", due_date=today_ist - timedelta(days=1),
+        notified_at=_now())
+    db.add(checked_hw)
+    db.flush()
 
     cats = {}
     for name in ["Day Scholar", "Hosteller"]:
@@ -454,6 +471,61 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
                            student_id=sixa_students[0].id, status="not_done"))
     db.flush()
 
+    # The checked homework (HW-1): the teacher went through it and flagged one
+    # student. Counts are derived here exactly as check_homework computes them.
+    if sixa_students:
+        hw_check = HomeworkCheck(
+            org_id=org.id, assignment_id=checked_hw.id, checked_at=_now(),
+            checked_by_member_id=mships[ramesh].id,
+            total_count=len(sixa_students), done_count=len(sixa_students) - 1)
+        db.add(hw_check)
+        db.flush()
+        db.add(HomeworkResult(
+            org_id=org.id, check_id=hw_check.id, assignment_id=checked_hw.id,
+            student_id=sixa_students[0].id, status="not_done", note="Left the book at home"))
+        db.flush()
+
+    # ── SF-1: staff attendance, timesheets and leave ────────────────────────
+    # Today's staff attendance, taken by KC with Anil away — so the Staff screen
+    # and the dashboard's staff alert both render against real capture.
+    staff_day = StaffAttendanceDay(org_id=org.id, date=today_ist,
+                                   marked_by_member_id=mships[kc].id, marked_at=_now())
+    db.add(staff_day)
+    db.flush()
+    db.add(StaffAbsence(org_id=org.id, day_id=staff_day.id, member_id=mships[anil].id,
+                        source="manual", note="Sick"))
+
+    # Ramesh's timesheet for today: the periods he is not teaching, filled in.
+    # Period numbers here are free in the seeded grid (6-A/6-B use 1–4).
+    for period_no, work_type, note in (
+        (5, "notebook_checking", "6-A science books"),
+        (6, "exam_work", "Term 1 question paper"),
+        (7, "student_support", "Reading practice — C band"),
+    ):
+        db.add(TimesheetEntry(org_id=org.id, member_id=mships[ramesh].id, date=today_ist,
+                              period_no=period_no, work_type=work_type, note=note))
+
+    # One leave request waiting on the admin (drives the dashboard alert) and one
+    # already approved, so the Leave screen has both states and a real history.
+    pending = LeaveRequest(
+        org_id=org.id, member_id=mships[ramesh].id,
+        start_date=today_ist + timedelta(days=7), end_date=today_ist + timedelta(days=7),
+        days=1, reason="Sister's wedding", status="pending")
+    approved = LeaveRequest(
+        org_id=org.id, member_id=mships[anil].id,
+        start_date=today_ist, end_date=today_ist, days=1, reason="Sick", status="approved")
+    db.add_all([pending, approved])
+    db.flush()
+    db.add_all([
+        LeaveRequestEvent(org_id=org.id, request_id=pending.id, action="applied",
+                          actor_member_id=mships[ramesh].id),
+        LeaveRequestEvent(org_id=org.id, request_id=approved.id, action="applied",
+                          actor_member_id=mships[anil].id),
+        LeaveRequestEvent(org_id=org.id, request_id=approved.id, action="approved",
+                          actor_member_id=mships[kc].id, note="Get well soon."),
+    ])
+    db.flush()
+
     # The 8 AM daily report — generated from the day we just seeded (leads Dashboard).
     DailyReportService(db).generate(org, today_ist, include_fees=True)
     db.flush()
@@ -511,7 +583,15 @@ def seed() -> None:
                             category="tasks", created_by=kc.id, owner_id=kc.id)
         housekeeping = Board(org_id=org.id, name="Housekeeping", visibility="public",
                              category="tasks", created_by=kc.id, owner_id=kc.id)
-        db.add_all([daily, admissions, maintenance, housekeeping])
+        # DASH3 PR-0: where every action-rail follow-up lands. `task_scope='assigned'`
+        # so each teacher sees only their own rows while the admin sees all — a
+        # private per-teacher board would collide with law 5 (admins don't see
+        # private boards they aren't in), leaving the admin firing tasks they
+        # could never track.
+        followups = Board(org_id=org.id, name="Follow-ups", visibility="public",
+                          task_scope="assigned", category="tasks",
+                          created_by=kc.id, owner_id=kc.id)
+        db.add_all([daily, admissions, maintenance, housekeeping, followups])
         db.flush()
 
         # Board membership. Owners are always board members (so a flip to private
@@ -522,6 +602,7 @@ def seed() -> None:
             BoardMember(board_id=admissions.id, user_id=priya.id),
             BoardMember(board_id=maintenance.id, user_id=kc.id),
             BoardMember(board_id=housekeeping.id, user_id=kc.id),
+            BoardMember(board_id=followups.id, user_id=kc.id),
         ])
         db.flush()
 
@@ -616,7 +697,7 @@ def seed() -> None:
         db.commit()
         print(f"Seeded '{DEMO_ORG_NAME}': org={org.id}")
         print("  users=4 (admins KC/Priya, teachers Ramesh/Anil)")
-        print("  boards=4 (Daily Ops, Admissions, Maintenance, Housekeeping)")
+        print("  boards=5 (Daily Ops, Admissions, Maintenance, Housekeeping, Follow-ups)")
         print(f"  tasks={len(instances)}")
         print(f"  school: {counts['classes']} classes, {counts['students']} students, "
               f"{counts['enrolled']} fee enrolments (year 2026-27)")

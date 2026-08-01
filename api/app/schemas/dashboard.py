@@ -56,7 +56,7 @@ class AttendancePulse(BaseModel):
 
 class Alert(BaseModel):
     id: str                   # synthetic (computed, not stored) — for keys/prefill
-    type: str                 # pace | compliance | homework
+    type: str                 # pace | compliance | homework | staff
     severity: str             # amber | red
     title: str
     detail: str

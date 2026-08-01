@@ -26,6 +26,7 @@ from app.models.checks import CheckResult, DailyCheck
 from app.models.classroom import (
     HomeworkAssignment,
     HomeworkCheck,
+    HomeworkResult,
     LessonLog,
     LessonObservation,
 )
@@ -37,6 +38,7 @@ from app.models.fees import (
     StudentFee,
     Transaction,
 )
+from app.models.insights import FOLLOWUP_KINDS, FollowupAction, PeriodSubstitution
 from app.models.lucy import (
     LucyConversation,
     LucyMessage,
@@ -68,6 +70,13 @@ from app.models.sessions import (
     SessionStudent,
     SessionStudentLog,
 )
+from app.models.staff import (
+    LeaveRequest,
+    LeaveRequestEvent,
+    StaffAbsence,
+    StaffAttendanceDay,
+    TimesheetEntry,
+)
 from app.models.students import Guardian, Student, StudentCategory
 from app.models.task import EVENT_TYPES, Attachment, TaskEvent, TaskInstance, TaskTemplate
 from app.models.timetable import TimetableSlot
@@ -97,15 +106,20 @@ __all__ = [
     "ExamPortion",
     "FeeInstallmentTemplate",
     "FeeStructure",
+    "FOLLOWUP_KINDS",
+    "FollowupAction",
     "Guardian",
     "HomeworkAssignment",
     "HomeworkCheck",
+    "HomeworkResult",
     "Installment",
     "Intervention",
     "InterventionItem",
     "Invoice",
     "LessonLog",
     "LessonObservation",
+    "LeaveRequest",
+    "LeaveRequestEvent",
     "LucyConversation",
     "LucyMessage",
     "LucyPendingAction",
@@ -120,6 +134,7 @@ __all__ = [
     "PlanApproval",
     "PlanComment",
     "PlanEntry",
+    "PeriodSubstitution",
     "SchoolClass",
     "ScoreCapture",
     "ScoreCapturePage",
@@ -131,6 +146,8 @@ __all__ = [
     "SessionStudent",
     "SessionStudentLog",
     "SkillArea",
+    "StaffAbsence",
+    "StaffAttendanceDay",
     "Student",
     "StudentBand",
     "StudentCategory",
@@ -143,6 +160,7 @@ __all__ = [
     "TaskEvent",
     "TaskInstance",
     "TaskTemplate",
+    "TimesheetEntry",
     "TimetableSlot",
     "User",
 ]

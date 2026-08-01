@@ -46,12 +46,21 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     parent_portal_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    # Leave policy (SF-1). Defaults are the founder's starting figures; every
+    # school tunes them in Setup → Settings. `leaves_per_month` is the monthly
+    # cap in DAYS — an application over either limit is still submittable and
+    # arrives at the admin flagged, never silently blocked (a human decides
+    # whether an emergency is worth the allowance).
+    leaves_per_year: Mapped[int] = mapped_column(Integer, nullable=False, server_default="8")
+    leaves_per_month: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
     __table_args__ = (
         CheckConstraint("plan IN ('free', 'pro')", name="plan_valid"),
         CheckConstraint("plan_status IN ('none', 'active', 'grace')", name="plan_status_valid"),
         CheckConstraint("band_b_min > 0 AND band_b_min < band_a_min AND band_a_min <= 100",
                         name="band_thresholds_valid"),
+        CheckConstraint("leaves_per_year >= 0 AND leaves_per_month >= 0",
+                        name="leave_policy_valid"),
     )
 
     def __repr__(self) -> str:

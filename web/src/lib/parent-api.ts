@@ -26,9 +26,25 @@ export interface ParentTaughtItem {
   topic: string;
 }
 
+/** `not_checked` means the teacher hasn't gone through it yet. It is a gap in
+ *  the record, never a mark against the child — the UI must say so plainly. */
+export type HomeworkStatus = "done" | "not_done" | "partial" | "not_checked";
+
 export interface ParentHomeworkItem {
   subject_name: string;
   text: string;
+  status: HomeworkStatus;
+  due_date: string | null;
+  personal: boolean;
+}
+
+export interface ParentHomeworkDay {
+  date: string;
+  items: ParentHomeworkItem[];
+  done: number;
+  not_done: number;
+  partial: number;
+  not_checked: number;
 }
 
 export interface ParentSessionItem {
@@ -50,6 +66,10 @@ export interface ParentToday {
   taught: ParentTaughtItem[];
   homework: ParentHomeworkItem[];
   sessions: ParentSessionItem[];
+  /** The last day with homework, and how it went — the first thing a parent asks. */
+  yesterday: ParentHomeworkDay | null;
+  /** Set and not finished: what's still to do. */
+  pending: ParentHomeworkItem[];
 }
 
 export interface ParentAttendance {

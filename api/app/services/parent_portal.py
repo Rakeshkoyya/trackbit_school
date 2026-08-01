@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentParent
 from app.core.exceptions import ForbiddenError
-from app.models import Organization
+from app.models import Organization, Student
 from app.schemas.parent import (
+    ParentHomeworkDay,
     ParentHomeworkItem,
     ParentReportOut,
     ParentReportSubject,
@@ -32,6 +33,7 @@ from app.schemas.parent import (
     ParentTodayOut,
 )
 from app.services.growth import GrowthService
+from app.services.homework import HomeworkService
 from app.services.timeline import StudentTimelineService
 
 
@@ -83,7 +85,9 @@ class ParentPortalService:
                 seen.add((subject, x.topic))
                 taught.append(ParentTaughtItem(subject_name=subject, topic=x.topic))
             for hw in x.homework:
-                homework.append(ParentHomeworkItem(subject_name=subject, text=hw))
+                homework.append(ParentHomeworkItem(
+                    subject_name=subject, text=hw.text, status=hw.status,
+                    due_date=hw.due_date, personal=hw.personal))
 
         sessions = [
             ParentSessionItem(
@@ -91,10 +95,54 @@ class ParentPortalService:
                 homework_done=s.homework_done, log_note=s.log_note)
             for s in t.sessions
         ]
+        yesterday, pending = self._homework(p, student_id, t.date)
         return ParentTodayOut(
             date=t.date, status=status, marked_periods=len(marked),
             absent_periods=absents, late_periods=lates,
-            taught=taught, homework=homework, sessions=sessions)
+            taught=taught, homework=homework, sessions=sessions,
+            yesterday=yesterday, pending=pending)
+
+    # ── homework the parent actually asks about (HW-1) ───────────────────────
+    def _homework(self, p: CurrentParent, student_id: uuid.UUID, today: date
+                  ) -> tuple[ParentHomeworkDay | None, list[ParentHomeworkItem]]:
+        """Yesterday's verdict and what's still outstanding, in one read.
+
+        Deliberately goes through `HomeworkService.history_for` rather than
+        calling the timeline once per day: the timeline is ~7 queries a day, so
+        walking back a week for "did they do yesterday's homework" would be
+        fifty round-trips to a remote database for two small answers.
+
+        The projection stays an allowlist — text, subject, status, due date —
+        exactly as the rest of this module (P4: nothing here is band data, but
+        the discipline is the point).
+        """
+        student = self.db.get(Student, student_id)
+        if student is None:
+            return None, []
+        history = HomeworkService(self.db).history_for(p.org.id, student, 8, today)
+
+        def project(i) -> ParentHomeworkItem:
+            return ParentHomeworkItem(
+                subject_name=i.subject_name or "—", text=i.text, status=i.status,
+                due_date=i.due_date, personal=i.personal)
+
+        past = [i for i in history.items if i.date < today]
+        yesterday = None
+        if past:
+            last_day = max(i.date for i in past)
+            items = [project(i) for i in past if i.date == last_day]
+            yesterday = ParentHomeworkDay(
+                date=last_day, items=items,
+                done=sum(1 for i in items if i.status == "done"),
+                not_done=sum(1 for i in items if i.status == "not_done"),
+                partial=sum(1 for i in items if i.status == "partial"),
+                not_checked=sum(1 for i in items if i.status == "not_checked"))
+
+        pending = [
+            project(i) for i in history.items
+            if i.status != "done" and (i.due_date is None or i.due_date >= today)
+        ]
+        return yesterday, pending
 
     def report(self, p: CurrentParent, student_id: uuid.UUID) -> ParentReportOut:
         self._assert_child(p, student_id)

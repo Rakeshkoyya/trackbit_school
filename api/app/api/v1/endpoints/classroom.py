@@ -18,6 +18,7 @@ from app.schemas.classroom import (
     HomeworkCheckIn,
     HomeworkIn,
     HomeworkOut,
+    HomeworkSheetOut,
     LessonLogIn,
     LessonLogOut,
     MyDayOut,
@@ -56,7 +57,14 @@ def add_homework(body: HomeworkIn, m: CurrentMember = Depends(require_academic),
     return ClassroomService(db).add_homework(m, body)
 
 
-@router.post("/homework/{assignment_id}/check", response_model=HomeworkOut)
+@router.get("/homework/{assignment_id}/sheet", response_model=HomeworkSheetOut)
+def homework_sheet(assignment_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """The roster for one homework, pre-loaded with what was recorded last time."""
+    return ClassroomService(db).homework_sheet(m, assignment_id)
+
+
+@router.post("/homework/{assignment_id}/check", response_model=HomeworkSheetOut)
 def check_homework(assignment_id: uuid.UUID, body: HomeworkCheckIn,
                    m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
     return ClassroomService(db).check_homework(m, assignment_id, body)

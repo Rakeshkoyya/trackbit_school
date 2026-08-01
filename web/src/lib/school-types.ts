@@ -495,8 +495,17 @@ export interface TimelinePeriod {
   attendance: "present" | "late" | "absent" | "unmarked";
   late_minutes: number | null;
   checks_flagged: string[];
-  homework: string[];
+  homework: TimelineHomework[];
   gap: boolean;
+}
+
+/** One homework as it applies to THIS student (HW-1). */
+export interface TimelineHomework {
+  assignment_id: string;
+  text: string;
+  status: HomeworkStatus;
+  due_date: string | null;
+  personal: boolean;
 }
 
 export interface TimelineSession {
@@ -671,7 +680,8 @@ export interface SessionRecord {
 // â”€â”€ director dashboard (M4) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface DashboardAlert {
   id: string;
-  type: "pace" | "compliance" | "homework";
+  /** `staff` (SF-1) resolves on its own screen rather than becoming a task. */
+  type: "pace" | "compliance" | "homework" | "staff";
   severity: "amber" | "red";
   title: string;
   detail: string;
@@ -1408,4 +1418,228 @@ export interface StudentGrowth {
   growth_areas: string[];
   /** The mirror of `growth_areas` — what this student is visibly good at. */
   strengths: string[];
+}
+
+// ── SF-1: staff attendance, timesheet, leave ─────────────────────────────────
+
+export interface StaffRosterRow {
+  member_id: string;
+  name: string;
+  role: string;
+  /** Derived — present unless an absence row exists for the day. */
+  present: boolean;
+  /** An approved leave covers this date, so the sheet opens them unticked. */
+  on_leave: boolean;
+  leave_reason: string | null;
+  note: string | null;
+}
+
+export interface StaffAttendance {
+  date: string;
+  /** False = nobody has taken attendance yet, which is not the same as a full house. */
+  marked: boolean;
+  marked_at: string | null;
+  marked_by: string | null;
+  roster: StaffRosterRow[];
+  total: number;
+  present_count: number;
+  absent_count: number;
+}
+
+/** 'class' = the timetable owns it (locked) · 'work' = recorded · 'free' = open. */
+export type TimesheetSlotKind = "class" | "work" | "free";
+
+export interface TimesheetSlot {
+  period_no: number;
+  start: string;
+  end: string;
+  kind: TimesheetSlotKind;
+  class_label: string | null;
+  subject_name: string | null;
+  work_type: string | null;
+  work_label: string | null;
+  note: string | null;
+}
+
+export interface TimesheetDay {
+  date: string;
+  weekday: number;
+  is_working_day: boolean;
+  slots: TimesheetSlot[];
+  teaching_count: number;
+  work_count: number;
+  free_count: number;
+}
+
+export interface TimesheetWeek {
+  member_id: string;
+  member_name: string;
+  week_start: string;
+  days: TimesheetDay[];
+  teaching_periods: number;
+  work_periods: number;
+  free_periods: number;
+}
+
+export interface WorkType {
+  key: string;
+  label: string;
+}
+
+export interface LeavePolicy {
+  leaves_per_year: number;
+  leaves_per_month: number;
+}
+
+export interface LeaveBalance {
+  member_id: string;
+  academic_year_id: string | null;
+  allowed_per_year: number;
+  allowed_per_month: number;
+  approved_days: number;
+  pending_days: number;
+  remaining: number;
+}
+
+export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface LeaveEvent {
+  action: string;
+  actor_name: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface LeaveRequest {
+  id: string;
+  member_id: string;
+  member_name: string;
+  start_date: string;
+  end_date: string;
+  days: number;
+  reason: string;
+  status: LeaveStatus;
+  created_at: string;
+  /** Policy breaches. Advisory — the request still reaches the admin. */
+  warnings: string[];
+  events: LeaveEvent[];
+}
+
+export interface LeaveList {
+  requests: LeaveRequest[];
+  pending_count: number;
+  policy: LeavePolicy;
+}
+
+// ── HW-1: per-student homework capture + analytics ───────────────────────────
+
+/** `not_checked` is the teacher not having gone through it — a gap in the
+ *  record, never a mark against the student. No surface may render it as a miss. */
+export type HomeworkStatus = "done" | "not_done" | "partial" | "not_checked";
+
+export interface HomeworkSheetRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  status: "done" | "not_done" | "partial";
+  note: string | null;
+}
+
+export interface HomeworkSheet {
+  assignment_id: string;
+  class_label: string;
+  subject_name: string | null;
+  text: string;
+  date: string;
+  due_date: string | null;
+  /** False = never checked, which is NOT the same as everyone having done it. */
+  checked: boolean;
+  checked_at: string | null;
+  checked_by: string | null;
+  student_id: string | null;
+  roster: HomeworkSheetRow[];
+  done_count: number;
+  not_done_count: number;
+  partial_count: number;
+}
+
+export interface HomeworkScopeRow {
+  key: string;
+  id: string | null;
+  assigned: number;
+  checked: number;
+  students_expected: number;
+  done: number;
+  not_done: number;
+  partial: number;
+  completion: number | null;
+  check_rate: number | null;
+}
+
+export interface TeacherCheckingRow {
+  member_id: string | null;
+  teacher_name: string;
+  assigned: number;
+  checked: number;
+  unchecked_overdue: number;
+  check_rate: number | null;
+  last_checked_at: string | null;
+}
+
+export interface StudentHomeworkRow {
+  student_id: string;
+  full_name: string;
+  class_label: string;
+  roll_no: string | null;
+  assigned: number;
+  done: number;
+  not_done: number;
+  partial: number;
+  completion: number | null;
+  streak: number;
+  subjects: string[];
+  teachers: string[];
+}
+
+export interface HomeworkOverview {
+  window_days: number;
+  from_date: string;
+  to_date: string;
+  assigned: number;
+  checked: number;
+  check_rate: number | null;
+  overall_completion: number | null;
+  by_class: HomeworkScopeRow[];
+  by_subject: HomeworkScopeRow[];
+  teachers: TeacherCheckingRow[];
+  needs_attention: StudentHomeworkRow[];
+  perfect: StudentHomeworkRow[];
+  most_improved: StudentHomeworkRow[];
+}
+
+export interface StudentHomeworkItem {
+  assignment_id: string;
+  date: string;
+  due_date: string | null;
+  subject_name: string | null;
+  class_label: string | null;
+  text: string;
+  personal: boolean;
+  status: HomeworkStatus;
+  note: string | null;
+}
+
+export interface StudentHomeworkHistory {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  window_days: number;
+  assigned: number;
+  done: number;
+  not_done: number;
+  partial: number;
+  not_checked: number;
+  completion: number | null;
+  streak: number;
+  items: StudentHomeworkItem[];
 }

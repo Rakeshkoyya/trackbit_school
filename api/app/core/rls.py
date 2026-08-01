@@ -79,6 +79,11 @@ SCHOOL_CLASSROOM_TABLES = (
     "homework_checks",
 )
 
+# HW-1 per-student homework results — engaged in migration d8e9f0a1b2c3.
+SCHOOL_HOMEWORK_TABLES = (
+    "homework_results",
+)
+
 # Teacher-view deep log (2026-07) — engaged in migration a8b9c0d1e2f3.
 SCHOOL_OBSERVATION_TABLES = (
     "lesson_observations",
@@ -152,6 +157,21 @@ SCHOOL_LUCY_TABLES = (
 # GA-1 composed views (GA §5) — engaged in migration d5e6f7a8b9c0.
 SCHOOL_LUCY_VIEW_TABLES = (
     "lucy_views",
+)
+
+# SF-1 staff presence, timesheet and leave — engaged in migration c7d8e9f0a1b2.
+SCHOOL_STAFF_TABLES = (
+    "staff_attendance_days",
+    "staff_absences",
+    "timesheet_entries",
+    "leave_requests",
+    "leave_request_events",
+)
+
+# DASH3 admin operating board — engaged in migration e0f1a2b3c4d5.
+SCHOOL_INSIGHTS_TABLES = (
+    "period_substitutions",
+    "followup_actions",
 )
 
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.

@@ -6,6 +6,21 @@ from datetime import date
 from pydantic import BaseModel
 
 
+class TimelineHomework(BaseModel):
+    """One homework as it applies to THIS student (HW-1).
+
+    `not_checked` is the teacher not having gone through it — a gap in the
+    record, never a mark against the child, and no parent-facing surface may
+    render it as a miss.
+    """
+    assignment_id: uuid.UUID
+    text: str
+    # done | not_done | partial | not_checked
+    status: str = "not_checked"
+    due_date: date | None = None
+    personal: bool = False
+
+
 class TimelinePeriod(BaseModel):
     period_no: int
     class_subject_id: uuid.UUID
@@ -15,7 +30,7 @@ class TimelinePeriod(BaseModel):
     attendance: str
     late_minutes: int | None = None
     checks_flagged: list[str] = []
-    homework: list[str] = []
+    homework: list[TimelineHomework] = []
     gap: bool = False  # absent periods render as gaps
 
 

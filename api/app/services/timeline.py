@@ -24,6 +24,8 @@ from app.models import (
     ClassSubject,
     DailyCheck,
     HomeworkAssignment,
+    HomeworkCheck,
+    HomeworkResult,
     LessonLog,
     SchoolClass,
     SessionAttendance,
@@ -37,7 +39,12 @@ from app.models import (
 from app.models import (
     Session as SessionModel,
 )
-from app.schemas.timeline import StudentTimelineOut, TimelinePeriod, TimelineSession
+from app.schemas.timeline import (
+    StudentTimelineOut,
+    TimelineHomework,
+    TimelinePeriod,
+    TimelineSession,
+)
 
 
 def _label(name: str, section: str | None) -> str:
@@ -103,16 +110,33 @@ class StudentTimelineService:
                    CheckResult.student_id == student.id, CheckResult.status == "not_done")
         ).all():
             flagged.setdefault(csid, []).append(desc)
-        # homework for the student (class-wide or targeted)
-        homework: dict[uuid.UUID, list[str]] = {}
-        for csid, text in self.db.execute(
-            select(HomeworkAssignment.class_subject_id, HomeworkAssignment.text)
+        # Homework for the student (class-wide or targeted), each carrying THIS
+        # student's verdict (HW-1). Three queries, never one per assignment.
+        hw_rows = list(self.db.execute(
+            select(HomeworkAssignment.class_subject_id, HomeworkAssignment.id,
+                   HomeworkAssignment.text, HomeworkAssignment.due_date,
+                   HomeworkAssignment.student_id)
             .where(HomeworkAssignment.org_id == org_id, HomeworkAssignment.date == d,
                    HomeworkAssignment.class_subject_id.in_(cs_ids),
                    or_(HomeworkAssignment.student_id.is_(None),
                        HomeworkAssignment.student_id == student.id))
-        ).all():
-            homework.setdefault(csid, []).append(text)
+        ).all())
+        hw_ids = [r[1] for r in hw_rows]
+        checked = set(self.db.scalars(
+            select(HomeworkCheck.assignment_id)
+            .where(HomeworkCheck.assignment_id.in_(hw_ids)))) if hw_ids else set()
+        mine = {
+            r.assignment_id: r.status for r in self.db.scalars(
+                select(HomeworkResult).where(HomeworkResult.assignment_id.in_(hw_ids),
+                                             HomeworkResult.student_id == student.id))
+        } if hw_ids else {}
+        homework: dict[uuid.UUID, list[TimelineHomework]] = {}
+        for csid, hw_id, text, due, target in hw_rows:
+            status = ("not_checked" if hw_id not in checked
+                      else mine.get(hw_id, "done"))
+            homework.setdefault(csid, []).append(TimelineHomework(
+                assignment_id=hw_id, text=text, status=status, due_date=due,
+                personal=target is not None))
 
         out: list[TimelinePeriod] = []
         for s in slots:

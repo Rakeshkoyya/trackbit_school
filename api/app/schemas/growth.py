@@ -67,6 +67,12 @@ class GrowthSubject(BaseModel):
     chapters: list[GrowthChapter] = []
     homework_assigned: int = 0
     homework_personal: int = 0  # per-student additions targeted at this student
+    # This student's own record on that homework (HW-1). `homework_not_checked`
+    # is the teacher's gap — reported so the other three read honestly, and never
+    # counted against the child.
+    homework_done: int = 0
+    homework_not_done: int = 0
+    homework_not_checked: int = 0
     checks_flagged: int = 0  # daily-check "didn't do it" exceptions
     observations: list[GrowthObservation] = []
     scores: list[GrowthScore] = []

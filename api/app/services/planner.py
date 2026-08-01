@@ -916,6 +916,31 @@ class PlannerService:
             .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
             .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
         ).all()
+        return self._forecast_rows(m, rows)
+
+    def forecast_org(self, m: CurrentMember, year_id: uuid.UUID) -> list[ForecastOut]:
+        """Every class-subject in the year, in ONE batch (DASH3 PR-6).
+
+        `forecast(class_id)` is already batched within a class, but the dashboard
+        used to call it in a loop over classes — one calendar read, two IN()
+        queries and a term read PER CLASS, each a round-trip to a remote Postgres.
+        For a 20-class school that is ~80 round-trips for one card. This does the
+        identical computation with the loop moved inside a single query set, so
+        the cost stops scaling with the number of classes.
+        """
+        rows = self.db.execute(
+            select(ClassSubject, Subject.name, SchoolClass)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+            .where(ClassSubject.org_id == m.org_id,
+                   SchoolClass.academic_year_id == year_id)
+            .order_by(SchoolClass.name, SchoolClass.section, Subject.name)
+        ).all()
+        return self._forecast_rows(m, rows)
+
+    def _forecast_rows(self, m: CurrentMember, rows) -> list[ForecastOut]:
+        """The shared computation — see `forecast`. `rows` is
+        (ClassSubject, subject_name, SchoolClass), all in ONE academic year."""
         if not rows:
             return []
         cs_ids = [cs.id for cs, _n, _k in rows]

@@ -63,14 +63,9 @@ class DashboardService:
             select(AcademicYear).where(AcademicYear.org_id == m.org_id, AcademicYear.is_active.is_(True)))
 
     def _rag_rows(self, m: CurrentMember, year_id: uuid.UUID):
-        classes = self.db.scalars(
-            select(SchoolClass.id).where(
-                SchoolClass.org_id == m.org_id, SchoolClass.academic_year_id == year_id))
-        rows = []
-        planner = PlannerService(self.db)
-        for cid in classes:
-            rows.extend(planner.forecast(m, cid))
-        return rows
+        # One batched pass over the whole year (DASH3 PR-6). This used to loop
+        # `forecast` per class — several remote round-trips each — for one card.
+        return PlannerService(self.db).forecast_org(m, year_id)
 
     def _homework_health(self, m: CurrentMember, year_id: uuid.UUID) -> HomeworkHealth:
         since = self._today(m) - timedelta(days=HOMEWORK_WINDOW_DAYS)
@@ -102,6 +97,11 @@ class DashboardService:
                               classes=classes)
 
     # ── attendance pulse (the charts read this; nothing here is stored) ──────
+    def attendance_pulse(self, m: CurrentMember, year_id: uuid.UUID) -> AttendancePulse:
+        """Public entry point — the DASH3 attendance board reuses this rather
+        than writing a second roll-up that could disagree with the overview."""
+        return self._attendance_pulse(m, year_id)
+
     def _attendance_pulse(self, m: CurrentMember, year_id: uuid.UUID) -> AttendancePulse:
         """Roll the exception rows up per day and per class.
 
@@ -235,6 +235,40 @@ class DashboardService:
                     id=f"homework:{c.class_label}", type="homework", severity="amber",
                     title=f"{c.class_label} homework completion at {int(c.completion * 100)}%",
                     detail="Follow up on homework completion with the class teacher."))
+        # Homework nobody went through (HW-1). Separate from low completion on
+        # purpose: this one is about the teacher, not the class, and an unchecked
+        # pile is invisible in any completion figure.
+        from app.services.homework import HomeworkService
+
+        unchecked = HomeworkService(self.db).unchecked_count(m)
+        if unchecked:
+            alerts.append(Alert(
+                id="homework:unchecked", type="homework",
+                severity="red" if unchecked > 5 else "amber",
+                title=f"{unchecked} homework past due with no check recorded",
+                detail="Nobody has gone through these. Ask the teachers to close them off."))
+        # staff who are out today, and leave still waiting on the admin (SF-1).
+        # Both are computed here rather than stored — the same rule as everything
+        # else on this board.
+        from app.services.leave import LeaveService
+        from app.services.staff_attendance import StaffAttendanceService
+
+        staff = StaffAttendanceService(self.db).summary(m)
+        if staff["marked"] and staff["absent"]:
+            names = ", ".join(staff["absentees"][:4])
+            more = f" +{staff['absent'] - 4} more" if staff["absent"] > 4 else ""
+            alerts.append(Alert(
+                id="staff:absent", type="staff",
+                severity="red" if staff["absent"] > 2 else "amber",
+                title=f"{staff['absent']} staff away today",
+                detail=f"{names}{more}. Check which classes need covering."))
+        pending_leave = LeaveService(self.db).pending_count(m)
+        if pending_leave:
+            alerts.append(Alert(
+                id="leave:pending", type="staff", severity="amber",
+                title=f"{pending_leave} leave request{'s' if pending_leave > 1 else ''} waiting",
+                detail="Approve or decline them on the Staff → Leave screen."))
+
         # weak-subject early warning (class average falling across cycles, M3)
         from app.services.assessments import AssessmentService
         for t in AssessmentService(self.db).weak_subjects(m):

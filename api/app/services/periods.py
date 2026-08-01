@@ -28,9 +28,16 @@ def today_for(m: CurrentMember) -> date:
 
 def assert_can_take_class(
     db: Session, m: CurrentMember, class_id: uuid.UUID, class_subject_id: uuid.UUID | None,
+    on_date: date | None = None, period_no: int | None = None,
 ) -> None:
     """Admin takes any class; a teacher takes a class they teach a subject in.
-    A given class-subject must belong to that class."""
+    A given class-subject must belong to that class.
+
+    A teacher covering the period today also passes (DASH3 PR-2). Without this a
+    substitute would see the period in My Day and be refused when they tapped it,
+    which is worse than never showing it — so the date is threaded through from
+    the period card.
+    """
     if class_subject_id is not None:
         cs = db.scalar(select(ClassSubject).where(
             ClassSubject.id == class_subject_id, ClassSubject.org_id == m.org_id))
@@ -43,8 +50,15 @@ def assert_can_take_class(
     teaches = db.scalar(select(ClassSubject.id).where(
         ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id,
         ClassSubject.teacher_member_id == m.membership.id).limit(1))
-    if teaches is None:
-        raise ForbiddenError("You don't teach this class.", code="not_your_class")
+    if teaches is not None:
+        return
+    if on_date is not None:
+        from app.services.substitution import SubstitutionService  # noqa: PLC0415
+
+        if SubstitutionService(db).covers(m.org_id, m.membership.id, class_id,
+                                          on_date, period_no):
+            return
+    raise ForbiddenError("You don't teach this class.", code="not_your_class")
 
 
 def find_period(
@@ -92,14 +106,15 @@ class PeriodService:
             ClassPeriod.id == period_id, ClassPeriod.org_id == m.org_id))
         if period is None:
             raise NotFoundError("Period")
-        assert_can_take_class(self.db, m, period.class_id, None)
+        assert_can_take_class(self.db, m, period.class_id, None,
+                              period.date, period.period_no)
         return period
 
     def open(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
              class_subject_id: uuid.UUID | None, on_date: date | None = None) -> ClassPeriod:
         self._class(m.org_id, class_id)
-        assert_can_take_class(self.db, m, class_id, class_subject_id)
         d = on_date or today_for(m)
+        assert_can_take_class(self.db, m, class_id, class_subject_id, d, period_no)
         return get_or_create_period(self.db, m, class_id, d, period_no, class_subject_id)
 
     def close(self, m: CurrentMember, period_id: uuid.UUID) -> ClassPeriod:

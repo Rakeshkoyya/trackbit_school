@@ -56,8 +56,16 @@ def _render(db: Session, n: Notification) -> tuple[str, str, str]:
             "A task moved off your list",
             f"{title_task} is no longer assigned to you — nothing you need to do.",
         ),
+        # DASH3 PR-2. Push-only on purpose: cover is decided minutes before the
+        # bell, and an email arriving after the period is worse than nothing.
+        "substitute": (
+            p.get("subject", "You're covering a period"),
+            p.get("body", "A period was assigned to you today."),
+        ),
     }
     title, body = mapping.get(n.notif_type, ("TrackBit", title_task))
+    if n.notif_type == "substitute":
+        url = f"{settings.FRONTEND_BASE_URL}{p.get('url', '/my-day')}"
     return title, body, url
 
 

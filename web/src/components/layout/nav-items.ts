@@ -4,10 +4,12 @@ import {
   CalendarClock,
   CalendarRange,
   CheckSquare,
+  Clock,
   GraduationCap,
   Settings2,
   Sparkles,
   Sun,
+  UserCheck,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
@@ -33,6 +35,10 @@ const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarCh
 const setup: NavItem = { label: "Setup", href: "/setup", icon: Settings2, tour: "nav-members" };
 const lucy: NavItem = { label: "Lucy", href: "/lucy", icon: Sparkles };
 const platform: NavItem = { label: "Schools", href: "/platform", icon: Building2 };
+// SF-1. Two sides of the same module: the admin marks who came in and approves
+// leave; the teacher records their own periods and applies for it.
+const staff: NavItem = { label: "Staff", href: "/staff", icon: UserCheck };
+const timesheet: NavItem = { label: "My time", href: "/timesheet", icon: Clock };
 
 // Role-aware primary nav — the full ordered list, used by the DESKTOP sidebar.
 // SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
@@ -48,9 +54,9 @@ export function navForRole(
   const extra = isSuperAdmin ? [platform] : [];
   switch (role) {
     case "admin":
-      return [...extra, dashboard, lucy, plan, students, fees, tasks, setup];
+      return [...extra, dashboard, lucy, plan, students, staff, fees, tasks, setup];
     case "teacher":
-      return [...extra, myDay, lucy, sessions, plan, students, tasks];
+      return [...extra, myDay, lucy, sessions, plan, students, timesheet, tasks];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent
     default:

@@ -14,6 +14,8 @@ from app.api.v1.endpoints import (
     daily_report,
     dashboard,
     fees,
+    homework,
+    insights,
     lucy,
     marketing,
     me,
@@ -27,6 +29,7 @@ from app.api.v1.endpoints import (
     push,
     recurring,
     sessions,
+    staff,
     students,
     tasks,
     timetable,
@@ -55,8 +58,14 @@ api_router.include_router(periods.router, prefix="/periods", tags=["periods"])
 api_router.include_router(overview.router, prefix="/overview", tags=["overview"])
 api_router.include_router(checks.router, prefix="/checks", tags=["checks"])
 api_router.include_router(classroom.router, prefix="/classroom", tags=["classroom"])
+# HW-1 homework analytics (capture stays on /classroom)
+api_router.include_router(homework.router, prefix="/homework", tags=["homework"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
+# SF-1 staff presence, timesheet and leave
+api_router.include_router(staff.router, prefix="/staff", tags=["staff"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+# DASH3 admin operating board — the six modules + the action rail
+api_router.include_router(insights.router, prefix="/insights", tags=["insights"])
 api_router.include_router(daily_report.router, prefix="/reports", tags=["reports"])
 api_router.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
 api_router.include_router(students.router, prefix="/students", tags=["students"])
