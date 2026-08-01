@@ -65,7 +65,14 @@ export const appApi = {
   deleteBoard: (id: string) => api.del<{ message: string }>(`/boards/${id}`),
   boardTasks: (id: string, includeDone = true) =>
     api.get<Task[]>(`/boards/${id}/tasks?include_done=${includeDone}`),
-  boardTable: (id: string) => api.get<BoardTable>(`/boards/${id}/table`),
+  // D-44: default = open + last-7-days done; the date range reaches older done rows.
+  boardTable: (id: string, range?: { doneFrom?: string; doneTo?: string }) => {
+    const params = new URLSearchParams();
+    if (range?.doneFrom) params.set("done_from", range.doneFrom);
+    if (range?.doneTo) params.set("done_to", range.doneTo);
+    const qs = params.toString();
+    return api.get<BoardTable>(`/boards/${id}/table${qs ? `?${qs}` : ""}`);
+  },
   boardCategories: (id: string) => api.get<string[]>(`/boards/${id}/categories`),
   createCategory: (id: string, name: string, color?: string) =>
     api.post<{ message: string }>(`/boards/${id}/categories`, { name, color }),
@@ -83,7 +90,9 @@ export const appApi = {
   createTask: (body: CreateTaskInput) => api.post<TaskDetail>("/tasks", body),
   editTask: (id: string, body: Record<string, unknown>) =>
     api.patch<TaskDetail>(`/tasks/${id}`, body),
-  completeTask: (id: string) => api.post<CompleteResult>(`/tasks/${id}/complete`),
+  // D-46: outcome is the optional "what happened?" recorded at completion.
+  completeTask: (id: string, outcome?: string | null) =>
+    api.post<CompleteResult>(`/tasks/${id}/complete`, outcome ? { outcome } : {}),
   reopenTask: (id: string) => api.post<Task>(`/tasks/${id}/reopen`),
   claimTask: (id: string) => api.post<Task>(`/tasks/${id}/claim`),
   reassignTask: (id: string, to_user_id: string) =>

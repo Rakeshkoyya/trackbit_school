@@ -10,10 +10,10 @@ for them, plus any after-school sessions. Absent periods surface as gaps.
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
@@ -41,6 +41,7 @@ from app.models import (
 )
 from app.schemas.timeline import (
     StudentTimelineOut,
+    TimelineFollowup,
     TimelineHomework,
     TimelinePeriod,
     TimelineSession,
@@ -75,6 +76,7 @@ class StudentTimelineService:
         return StudentTimelineOut(
             student_id=student.id, full_name=student.full_name, class_label=class_label,
             date=d, periods=periods, sessions=sessions,
+            followups=self._followups(m, student.id, d),
             day_status=classify_day(len(periods), len(marked), absents),
             marked_periods=len(marked), absent_periods=absents,
             late_periods=sum(1 for p in marked if p.attendance == "late"))
@@ -162,6 +164,32 @@ class StudentTimelineService:
                 checks_flagged=flagged.get(s.class_subject_id, []),
                 homework=homework.get(s.class_subject_id, []), gap=status == "absent"))
         return out
+
+    def _followups(self, m: CurrentMember, student_id: uuid.UUID,
+                   d: date) -> list[TimelineFollowup]:
+        """Follow-ups raised ABOUT this student on this org-local day (D-46) —
+        raised or resolved that day, so "was anything done about Kabir?" is
+        answerable from the same screen that shows the absence."""
+        from app.models import TaskInstance  # noqa: PLC0415
+        from app.services import events as task_events  # noqa: PLC0415
+
+        tz = ZoneInfo(m.org.timezone)
+        start = datetime.combine(d, datetime.min.time(), tzinfo=tz)
+        end = start + timedelta(days=1)
+        rows = list(self.db.scalars(select(TaskInstance).where(
+            TaskInstance.org_id == m.org_id,
+            TaskInstance.subject_type == "student",
+            TaskInstance.subject_id == student_id,
+            TaskInstance.status.notin_(("cancelled",)),
+            or_(and_(TaskInstance.created_at >= start, TaskInstance.created_at < end),
+                and_(TaskInstance.completed_at >= start, TaskInstance.completed_at < end)))
+            .order_by(TaskInstance.created_at)))
+        names = task_events.resolve_user_names(
+            self.db, {r.assignee_id for r in rows if r.assignee_id})
+        return [TimelineFollowup(
+            task_id=r.id, title=r.title, status=r.status,
+            assignee_name=names.get(r.assignee_id) if r.assignee_id else None,
+            outcome=r.outcome) for r in rows]
 
     def _sessions(self, org_id: uuid.UUID, student_id: uuid.UUID, d: date) -> list[TimelineSession]:
         rows = self.db.execute(

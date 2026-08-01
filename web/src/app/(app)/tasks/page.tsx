@@ -6,11 +6,13 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { StaleSection } from "@/components/boards/board-extras";
 import { BoardMobile } from "@/components/boards/board-mobile";
 import { TaskTable, type ColumnKey, type GroupBy } from "@/components/boards/board-table";
 import { useCelebration } from "@/components/celebration/celebration-provider";
 import { MondayRecap } from "@/components/history/monday-recap";
 import { CreateTaskSheet } from "@/components/tasks/create-task-sheet";
+import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useAuth } from "@/contexts/auth-context";
@@ -35,6 +37,8 @@ export default function TasksTodayPage() {
   const { onCompletion, showRitual } = useCelebration();
   const [tab, setTab] = useState<Tab>("mine");
   const [sheetOpen, setSheetOpen] = useState(false);
+  // D-46: a follow-up being completed waits here for its "what happened?".
+  const [outcomeFor, setOutcomeFor] = useState<BoardRow | null>(null);
 
   const { data: home } = useQuery({ queryKey: ["home"], queryFn: appApi.today });
   const { data: hist } = useQuery({ queryKey: ["history"], queryFn: appApi.history });
@@ -53,17 +57,17 @@ export default function TasksTodayPage() {
   }
 
   const complete = useMutation({
-    mutationFn: (row: BoardRow) => {
+    mutationFn: ({ row, outcome }: { row: BoardRow; outcome: string | null }) => {
       const id = instanceId(row);
       if (!id) return Promise.reject(new Error("Not actionable today"));
-      return appApi.completeTask(id);
+      return appApi.completeTask(id, outcome);
     },
-    onMutate: (row) => {
+    onMutate: ({ row }) => {
       const snap = snapshotRowCaches(qc);
       patchRowEverywhere(qc, row.id, { status: "done" });
       return { snap };
     },
-    onSuccess: (_res, row) => {
+    onSuccess: (_res, { row }) => {
       const prevHist = qc.getQueryData<History>(["history"]);
       const firstEver = (prevHist?.total_completed ?? 0) === 0;
       onCompletion({ force: firstEver });
@@ -104,6 +108,11 @@ export default function TasksTodayPage() {
       toast.error(e instanceof ApiError ? e.message : "Could not complete");
     },
   });
+  // D-46: a task about a person asks "what happened?" first; the rest stay one tap.
+  const startComplete = (row: BoardRow) => {
+    if (row.subject) setOutcomeFor(row);
+    else complete.mutate({ row, outcome: null });
+  };
 
   const reopen = useMutation({
     mutationFn: (row: BoardRow) => {
@@ -157,6 +166,10 @@ export default function TasksTodayPage() {
   const rows: BoardRow[] = onBoardTab
     ? (boardTable.data?.rows ?? [])
     : (myTasks.data?.rows ?? []);
+  // D-45: on a board tab, stale open rows sit in their own group (desktop).
+  const staleRows = onBoardTab ? rows.filter((r) => r.stale && r.status !== "done") : [];
+  const mainRows = staleRows.length > 0 ? rows.filter((r) => !staleRows.includes(r)) : rows;
+  const hiddenDone = onBoardTab ? (boardTable.data?.hidden_done_count ?? 0) : 0;
   // My tasks = one flat, ungrouped list across all boards, ordered by urgency so
   // the next thing to do is on top. Board tabs keep their category grouping.
   const groupBy: GroupBy = onBoardTab ? "category" : "none";
@@ -232,8 +245,25 @@ export default function TasksTodayPage() {
         <>
           {/* ── Desktop: Monday-style table ── */}
           <div className="hidden lg:block">
+            {hiddenDone > 0 ? (
+              <p className="mb-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                {hiddenDone} completed task{hiddenDone === 1 ? "" : "s"} older than 7 days —{" "}
+                <button
+                  onClick={() => router.push(`/boards/${tab}`)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  open the board to filter by date
+                </button>
+              </p>
+            ) : null}
+            <StaleSection
+              rows={staleRows}
+              onComplete={startComplete}
+              onReopen={(r) => reopen.mutate(r)}
+              onOpen={openRow}
+            />
             <TaskTable
-              rows={rows}
+              rows={mainRows}
               groupBy={groupBy}
               columns={columns}
               sortBy={onBoardTab ? "created" : "urgency"}
@@ -241,7 +271,7 @@ export default function TasksTodayPage() {
               groupDefs={onBoardTab ? boardTable.data?.groups : undefined}
               addContext={onBoardTab ? { boardId: tab } : undefined}
               hideEmptyGroups
-              onComplete={(r) => complete.mutate(r)}
+              onComplete={startComplete}
               onReopen={(r) => reopen.mutate(r)}
               onOpen={openRow}
             />
@@ -251,7 +281,7 @@ export default function TasksTodayPage() {
           <div className="lg:hidden">
             <BoardMobile
               rows={rows}
-              onComplete={(r) => complete.mutate(r)}
+              onComplete={startComplete}
               onClaim={(r) => claim.mutate(r)}
               onOpen={openRow}
             />
@@ -273,6 +303,14 @@ export default function TasksTodayPage() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         defaultBoardId={tab !== "mine" ? tab : undefined}
+      />
+      <OutcomeSheet
+        target={outcomeFor ? { title: outcomeFor.title, subjectName: outcomeFor.subject?.name } : null}
+        onClose={() => setOutcomeFor(null)}
+        onConfirm={(outcome) => {
+          if (outcomeFor) complete.mutate({ row: outcomeFor, outcome });
+          setOutcomeFor(null);
+        }}
       />
     </div>
   );

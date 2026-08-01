@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
@@ -104,7 +104,9 @@ class ClassroomService:
         monday = today - timedelta(days=today.weekday())
         year = self._active_year(m.org_id)
         if year is None:
-            return MyDayOut(date=today, classes=[], periods=[], homework_pending=[])
+            tasks, older = self._my_day_tasks(m, today, None)
+            return MyDayOut(date=today, classes=[], periods=[], homework_pending=[],
+                            tasks=tasks, older_task_count=older)
 
         rows = self.db.execute(
             select(ClassSubject, Subject.name, SchoolClass)
@@ -234,7 +236,77 @@ class ClassroomService:
                 substituting=(ts.class_id, ts.period_no) in covering_by_slot,
                 covering_for=covering_by_slot.get((ts.class_id, ts.period_no))))
         periods.sort(key=lambda p: p.period_no)
-        return MyDayOut(date=today, classes=classes, periods=periods, homework_pending=pending)
+        tasks, older = self._my_day_tasks(m, today, year)
+        return MyDayOut(date=today, classes=classes, periods=periods,
+                        homework_pending=pending, tasks=tasks, older_task_count=older)
+
+    def _my_day_tasks(self, m: CurrentMember, today: date, year: AcademicYear | None):
+        """D-41/D-43: the narrow task window under the periods — rail follow-ups
+        from the last 3 WORKING days (a Friday follow-up must survive the
+        weekend, D-43's build note) ∪ anything due today, whatever board it came
+        from. Capped at 5 (S-109); everything else lives on /tasks, and the
+        returned count keeps the window honest ("4 older tasks →")."""
+        from app.core.timeutil import org_day_bounds  # noqa: PLC0415
+        from app.models import Board, CalendarEvent, TaskInstance  # noqa: PLC0415
+        from app.services.calendar import (  # noqa: PLC0415
+            DEFAULT_WORKING_WEEKDAYS,
+            event_rows,
+            expand_blocked_dates,
+        )
+        from app.services.insights.actions import FOLLOWUPS_BOARD_NAME  # noqa: PLC0415
+        from app.services.task import TaskService  # noqa: PLC0415
+
+        start_utc, end_utc, _ = org_day_bounds(m.org.timezone)
+        ww = (set(year.working_weekdays) if year is not None and year.working_weekdays
+              else set(DEFAULT_WORKING_WEEKDAYS))
+        blocked: set[date] = set()
+        if year is not None:
+            events = list(self.db.scalars(select(CalendarEvent).where(
+                CalendarEvent.org_id == m.org_id,
+                CalendarEvent.academic_year_id == year.id,
+                CalendarEvent.end_date >= today - timedelta(days=30),
+                CalendarEvent.start_date <= today)))
+            blocked = expand_blocked_dates(event_rows(events))
+        # Walk back until 3 working days are collected (today counts if working).
+        cutoff, d, seen = today, today, 0
+        while seen < 3:
+            if d.weekday() in ww and d not in blocked:
+                seen += 1
+                cutoff = d
+            d -= timedelta(days=1)
+            if (today - d).days > 30:  # a broken calendar must not loop forever
+                break
+        cutoff_utc = datetime.combine(
+            cutoff, datetime.min.time(), tzinfo=ZoneInfo(m.org.timezone)).astimezone(UTC)
+
+        followups_board_id = self.db.scalar(select(Board.id).where(
+            Board.org_id == m.org_id, Board.name == FOLLOWUPS_BOARD_NAME,
+            Board.archived_at.is_(None)))
+        # Recurring rows: only today's occurrence, and missed ones expire quietly
+        # (same rule as HomeService.my_tasks).
+        recurring_ok = or_(
+            TaskInstance.template_id.is_(None),
+            and_(TaskInstance.occurrence_date == today, TaskInstance.status == "open"))
+        window = [and_(TaskInstance.due_at >= start_utc, TaskInstance.due_at < end_utc)]
+        if followups_board_id is not None:
+            window.append(and_(TaskInstance.board_id == followups_board_id,
+                               TaskInstance.created_at >= cutoff_utc))
+        rows = list(self.db.scalars(select(TaskInstance).where(
+            TaskInstance.org_id == m.org_id,
+            TaskInstance.assignee_id == m.user_id,
+            TaskInstance.status.in_(("open", "missed")),
+            recurring_ok, or_(*window))))
+        rows.sort(key=lambda t: (t.due_at is None, t.due_at or t.created_at))
+        shown = rows[:5]
+
+        total_open = int(self.db.scalar(
+            select(func.count()).select_from(TaskInstance).where(
+                TaskInstance.org_id == m.org_id,
+                TaskInstance.assignee_id == m.user_id,
+                TaskInstance.status.in_(("open", "missed")),
+                recurring_ok)) or 0)
+        older = max(0, total_open - len(shown))
+        return TaskService(self.db)._serialize_many(m, shown), older
 
     def _substituted_slots(self, m: CurrentMember, today: date, mine) -> list[tuple]:
         """Periods I'm covering today, shaped as timetable slots so the rest of

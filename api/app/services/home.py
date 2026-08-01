@@ -156,12 +156,17 @@ class HomeService:
             }
 
         me = AssigneeOut(id=member.user_id, name=member.user.name)
+        subjects = self.tasks._subject_map(insts)
+        asked = self.tasks._asked_map(insts)
         rows = [
             MyTaskRow(
                 kind="task", id=t.id, title=t.title, description=t.description,
                 category=t.category, priority=t.priority, assignee=me,
                 due_at=t.due_at, all_day=t.all_day, status=t.status,
                 pass_count=t.pass_count, is_critical=t.is_critical,
+                subject=subjects.get(t.id), outcome=t.outcome,
+                asked_by=asked.get(t.id, (None, None))[0],
+                asked_at=asked.get(t.id, (None, None))[1],
                 created_at=t.created_at,
                 board_id=t.board_id, board_name=board_names.get(t.board_id, ""),
             )

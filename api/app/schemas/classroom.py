@@ -5,6 +5,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.task import TaskOut
+
 # Several fields are named `date`, which shadows the `date` type inside the class
 # body before its own annotation is evaluated. Annotate those via this alias so
 # the field name can't clobber the type.
@@ -68,6 +70,11 @@ class MyDayOut(BaseModel):
     classes: list[MyDayClass]
     periods: list[MyDayPeriod] = []
     homework_pending: list[HomeworkPending]
+    # D-41/D-43: the narrow task window BELOW the periods — rail follow-ups from
+    # the last 3 working days ∪ due today, tickable in place, capped at 5.
+    tasks: list[TaskOut] = []
+    # The window is never silent: "n older tasks →" links to /tasks (D-43).
+    older_task_count: int = 0
 
 
 # ── quick log (CL-2) ─────────────────────────────────────────────────────────

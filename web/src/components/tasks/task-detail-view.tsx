@@ -7,6 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { useCelebration } from "@/components/celebration/celebration-provider";
+import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { TaskAttachments } from "@/components/tasks/task-attachments";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
   const { onCompletion } = useCelebration();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [recurOpen, setRecurOpen] = useState(false);
+  const [outcomeOpen, setOutcomeOpen] = useState(false);
   const [days, setDays] = useState<string[]>(["mon"]);
   const [time, setTime] = useState("");
 
@@ -58,7 +60,7 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Could not save"),
   });
   const complete = useMutation({
-    mutationFn: () => appApi.completeTask(taskId),
+    mutationFn: (outcome: string | null) => appApi.completeTask(taskId, outcome),
     onSuccess: (res) => {
       if (res.already_done) {
         toast(`Already done${res.completed_by_name ? ` by ${res.completed_by_name}` : ""} ✓`);
@@ -203,6 +205,28 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
             {task.category ? task.category : <span className="text-muted-foreground">—</span>}
           </InfoRow>
           <InfoRow label="Board">{task.board_name}</InfoRow>
+          {task.subject ? (
+            <InfoRow label="About">
+              {task.subject.type === "student" ? (
+                <a href={`/students/${task.subject.id}`} className="text-primary hover:underline">
+                  {task.subject.name}
+                </a>
+              ) : (
+                task.subject.name
+              )}
+            </InfoRow>
+          ) : null}
+          {task.asked_by ? (
+            <InfoRow label="Asked by">
+              {task.asked_by}
+              {task.asked_at ? ` · ${dayLabel(task.asked_at)}` : ""}
+            </InfoRow>
+          ) : null}
+          {task.outcome ? (
+            <InfoRow label="What happened">
+              <span className="text-sm">“{task.outcome}”</span>
+            </InfoRow>
+          ) : null}
           {task.is_critical ? (
             <InfoRow label="Critical"><Badge tone="warning">Alarm reminder</Badge></InfoRow>
           ) : null}
@@ -251,12 +275,26 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
           {done ? (
             <Button variant="outline" size="lg" className="w-full" onClick={() => reopen.mutate()}>Reopen</Button>
           ) : (
-            <Button size="lg" className="w-full" onClick={() => complete.mutate()}>
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={() => (task.subject ? setOutcomeOpen(true) : complete.mutate(null))}
+            >
               <Check className="h-5 w-5" /> Mark done
             </Button>
           )}
         </div>
       </div>
+
+      {/* D-46: completing a follow-up asks what happened */}
+      <OutcomeSheet
+        target={outcomeOpen ? { title: task.title, subjectName: task.subject?.name } : null}
+        onClose={() => setOutcomeOpen(false)}
+        onConfirm={(outcome) => {
+          complete.mutate(outcome);
+          setOutcomeOpen(false);
+        }}
+      />
 
       {/* Reassign picker */}
       <Sheet open={pickerOpen} onOpenChange={setPickerOpen} title="Reassign to">

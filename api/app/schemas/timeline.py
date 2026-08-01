@@ -43,6 +43,17 @@ class TimelineSession(BaseModel):
     log_note: str | None = None
 
 
+class TimelineFollowup(BaseModel):
+    """D-46: a follow-up raised ABOUT this student, on this day — staff-only
+    surface; the parent projection never carries it."""
+
+    task_id: uuid.UUID
+    title: str
+    status: str  # open | done | missed
+    assignee_name: str | None = None
+    outcome: str | None = None  # "what happened?", once completed
+
+
 class StudentTimelineOut(BaseModel):
     student_id: uuid.UUID
     full_name: str
@@ -50,6 +61,7 @@ class StudentTimelineOut(BaseModel):
     date: date
     periods: list[TimelinePeriod]
     sessions: list[TimelineSession]
+    followups: list[TimelineFollowup] = []
     # THE day status (V1-0d, ux §9) — computed once here by `classify_day`;
     # the parent portal, the report card and the admin board all render it.
     day_status: str = "no_school"

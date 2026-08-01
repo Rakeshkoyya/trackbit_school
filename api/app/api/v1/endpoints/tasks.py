@@ -13,6 +13,7 @@ from app.schemas.recurrence import RecurringTemplateOut
 from app.schemas.task import (
     AssignRequest,
     AttachmentOut,
+    CompleteRequest,
     CompleteResponse,
     MakeRecurringRequest,
     NoteCreateRequest,
@@ -59,10 +60,14 @@ def edit_task(
 @router.post("/{task_id}/complete", response_model=CompleteResponse)
 def complete_task(
     task_id: uuid.UUID,
+    body: CompleteRequest | None = None,
     member: CurrentMember = Depends(get_current_member),
     db: Session = Depends(get_db),
 ) -> CompleteResponse:
-    return TaskService(db).complete(member, task_id)
+    # D-46: body is optional — one-tap complete stays one tap; "what happened?"
+    # rides along when the user answered it.
+    return TaskService(db).complete(member, task_id,
+                                    outcome=body.outcome if body else None)
 
 
 @router.post("/{task_id}/reopen", response_model=TaskOut)

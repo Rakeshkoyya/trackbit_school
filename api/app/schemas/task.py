@@ -11,6 +11,15 @@ class AssigneeOut(BaseModel):
     name: str
 
 
+class TaskSubjectOut(BaseModel):
+    """What the task is about (D-46): a student or a member, resolved to a name
+    so the row reads "Kabir Shah — absent 4 days" instead of a bare title."""
+
+    type: str  # student | member
+    id: uuid.UUID
+    name: str
+
+
 class TaskOut(BaseModel):
     id: uuid.UUID
     board_id: uuid.UUID
@@ -26,6 +35,11 @@ class TaskOut(BaseModel):
     pass_count: int = 0
     is_critical: bool = False
     passed_by: str | None = None  # name of who last passed it (home transparency)
+    subject: TaskSubjectOut | None = None  # D-46
+    outcome: str | None = None  # D-46: "what happened?" once completed
+    # S-106: who asked for this (latest 'assigned' actor ≠ assignee) and when.
+    asked_by: str | None = None
+    asked_at: datetime | None = None
     created_at: datetime
 
 
@@ -53,6 +67,9 @@ class TaskCreateRequest(BaseModel):
     due_at: datetime | None = None
     all_day: bool = False
     is_critical: bool = False
+    # D-46: what the task is about. Set by the action rail; validated org-scoped.
+    subject_type: str | None = Field(default=None, pattern="^(student|member)$")
+    subject_id: uuid.UUID | None = None
 
 
 class TaskUpdateRequest(BaseModel):
@@ -77,6 +94,14 @@ class MakeRecurringRequest(BaseModel):
 
 class ReassignRequest(BaseModel):
     to_user_id: uuid.UUID
+
+
+class CompleteRequest(BaseModel):
+    """D-46: completion asks one OPTIONAL question — what happened?
+    "Spoke to the father — fever, back Monday" is the fact the admin wanted
+    when they pressed the button. Empty body keeps the one-tap complete."""
+
+    outcome: str | None = Field(default=None, max_length=500)
 
 
 class CompleteResponse(BaseModel):

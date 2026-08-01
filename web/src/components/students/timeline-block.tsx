@@ -43,6 +43,24 @@ export function TimelineBlock({ studentId }: { studentId: string }) {
           ))}
         </ul>
       )}
+      {/* D-46: a follow-up raised about this child, and what came of it. */}
+      {(data.followups ?? []).length > 0 ? (
+        <ul className="mt-2 space-y-1 border-t border-border pt-2">
+          {data.followups.map((f) => (
+            <li key={f.task_id} className="flex items-center gap-2 text-xs">
+              <span className="w-6 shrink-0 font-semibold text-muted-foreground">☎</span>
+              <span className="min-w-0 flex-1 truncate">
+                Follow-up: {f.title}
+                {f.assignee_name ? <span className="text-muted-foreground"> · {f.assignee_name}</span> : null}
+                {f.outcome ? <span className="text-muted-foreground"> · “{f.outcome}”</span> : null}
+              </span>
+              <span className={f.status === "done" ? "text-[#234a37]" : "text-warning"}>
+                {f.status === "done" ? "handled" : "open"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 """Board endpoints."""
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -126,10 +127,15 @@ def board_tasks(
 @router.get("/{board_id}/table", response_model=BoardTableResponse)
 def board_table(
     board_id: uuid.UUID,
+    done_from: date | None = None,
+    done_to: date | None = None,
     member: CurrentMember = Depends(get_current_member),
     db: Session = Depends(get_db),
 ) -> BoardTableResponse:
-    return TaskService(db).board_table(member, board_id)
+    # D-44: default shows open + last-7-days done; the org-local date range
+    # reaches everything older ("what did we follow up on in October").
+    return TaskService(db).board_table(member, board_id,
+                                       done_from=done_from, done_to=done_to)
 
 
 @router.get("/{board_id}/categories", response_model=list[str])

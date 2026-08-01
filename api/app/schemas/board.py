@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.schemas.task import AssigneeOut
+from app.schemas.task import AssigneeOut, TaskSubjectOut
 
 
 class BoardListItem(BaseModel):
@@ -89,6 +89,12 @@ class BoardRow(BaseModel):
     pass_count: int = 0
     is_critical: bool = False
     passed_by: str | None = None
+    subject: TaskSubjectOut | None = None  # D-46: who/what the task is about
+    outcome: str | None = None  # D-46: "what happened?" once completed
+    asked_by: str | None = None  # S-106: "Priya asked · this morning"
+    asked_at: datetime | None = None
+    # D-45: open and untouched for 3+ weeks — grouped, never auto-closed.
+    stale: bool = False
     created_at: datetime
 
 
@@ -101,6 +107,9 @@ class BoardTableResponse(BaseModel):
     rows: list[BoardRow] = []
     categories: list[str] = []  # distinct tags on this board (for the dropdown)
     groups: list[BoardGroup] = []  # ordered category groups w/ colors (incl. empty)
+    # D-44: done rows outside the returned window. The date filter ships WITH the
+    # window — a count the UI must surface, or the window is silent data loss.
+    hidden_done_count: int = 0
 
 
 class CategoryCreateRequest(BaseModel):

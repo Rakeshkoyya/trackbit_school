@@ -1,21 +1,25 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, CheckCheck, ChevronRight, ClipboardCheck, Moon, Send, Users } from "lucide-react";
+import { BookOpen, Check, CheckCheck, ChevronRight, ClipboardCheck, ListTodo, Moon, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
+import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
+import { dayLabel } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
 import type { HomeworkPending, MyDayClass, MyDayPeriod } from "@/lib/school-types";
+import type { Task } from "@/lib/types";
 
 type HwTarget = { csId: string; title: string };
 
@@ -231,6 +235,84 @@ function HomeworkCheckRow({ hw }: { hw: HomeworkPending }) {
   );
 }
 
+/** D-41/D-43: the narrow task window under the periods — rail follow-ups from
+ *  the last 3 working days plus anything due today, tickable in place. My Day
+ *  is a prompt, not an inbox: everything else lives on /tasks, and the footer
+ *  count says so ("4 older tasks →"). */
+function TasksSection({ tasks, olderCount }: { tasks: Task[]; olderCount: number }) {
+  const qc = useQueryClient();
+  const [outcomeFor, setOutcomeFor] = useState<Task | null>(null);
+
+  const complete = useMutation({
+    mutationFn: ({ task, outcome }: { task: Task; outcome: string | null }) =>
+      appApi.completeTask(task.id, outcome),
+    onSuccess: () => {
+      toast.success("Done ✓");
+      qc.invalidateQueries({ queryKey: ["my-day"] });
+      qc.invalidateQueries({ queryKey: ["my-tasks"] });
+    },
+    onError: (e) => showApiError(e, "Could not complete"),
+  });
+  // D-46: a follow-up about a person asks "what happened?"; the rest are one tap.
+  const tick = (task: Task) => {
+    if (task.subject) setOutcomeFor(task);
+    else complete.mutate({ task, outcome: null });
+  };
+
+  if (tasks.length === 0 && olderCount === 0) return null;
+  const now = new Date();
+  return (
+    <section className="mt-6">
+      <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+        <ListTodo className="h-4 w-4" /> Tasks
+      </h2>
+      <div className="space-y-2">
+        {tasks.map((t) => {
+          const overdue = t.due_at != null && new Date(t.due_at) < now;
+          const dueLabel = t.due_at ? dayLabel(t.due_at) : null;
+          return (
+            <div key={t.id}
+              className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+              <button
+                onClick={() => tick(t)}
+                disabled={complete.isPending}
+                aria-label="Mark done"
+                className="h-6 w-6 shrink-0 rounded-full border-2 border-muted-foreground/30 transition-colors hover:border-success hover:bg-success/10"
+              />
+              <Link href={`/task/${t.id}`} className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{t.title}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {t.board_name}
+                  {t.asked_by ? ` · ${t.asked_by} asked` : ""}
+                </p>
+              </Link>
+              {dueLabel ? (
+                <Badge tone={overdue ? "danger" : "neutral"}>
+                  {overdue ? `due ${dueLabel.toLowerCase()}` : dueLabel}
+                </Badge>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {olderCount > 0 ? (
+        <Link href="/tasks"
+          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+          {olderCount} older task{olderCount === 1 ? "" : "s"} <ChevronRight className="h-3 w-3" />
+        </Link>
+      ) : null}
+      <OutcomeSheet
+        target={outcomeFor ? { title: outcomeFor.title, subjectName: outcomeFor.subject?.name } : null}
+        onClose={() => setOutcomeFor(null)}
+        onConfirm={(outcome) => {
+          if (outcomeFor) complete.mutate({ task: outcomeFor, outcome });
+          setOutcomeFor(null);
+        }}
+      />
+    </section>
+  );
+}
+
 /** This evening (HS): the teacher's hostel blocks for today, from the sessions list. */
 function EveningSection() {
   const { data: sessions = [] } = useQuery({ queryKey: ["sessions"], queryFn: schoolApi.sessions });
@@ -299,6 +381,9 @@ function MyDayInner() {
           </div>
         </section>
       ) : null}
+
+      {/* D-41: below the periods, never above them (D-24). */}
+      {data ? <TasksSection tasks={data.tasks ?? []} olderCount={data.older_task_count ?? 0} /> : null}
 
       {!data || (data.periods.length === 0 && otherClasses.length === 0) ? (
         data && data.homework_pending.length === 0 ? (

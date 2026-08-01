@@ -239,6 +239,10 @@ export interface MyDay {
   classes: MyDayClass[];
   periods: MyDayPeriod[];
   homework_pending: HomeworkPending[];
+  // D-41/D-43: rail follow-ups (last 3 working days) ∪ due today, capped at 5.
+  tasks: import("./types").Task[];
+  // "n older tasks →" — the window is never silent (D-43).
+  older_task_count: number;
 }
 
 // â”€â”€ timetable (V2-P1, SPRD2 Â§5.3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -516,6 +520,16 @@ export interface TimelineSession {
   log_note: string | null;
 }
 
+/** D-46: a follow-up raised about this student — staff-only, never projected
+ *  to the parent portal. */
+export interface TimelineFollowup {
+  task_id: string;
+  title: string;
+  status: string;
+  assignee_name: string | null;
+  outcome: string | null;
+}
+
 export interface StudentTimeline {
   student_id: string;
   full_name: string;
@@ -523,6 +537,7 @@ export interface StudentTimeline {
   date: string;
   periods: TimelinePeriod[];
   sessions: TimelineSession[];
+  followups: TimelineFollowup[];
   /** THE day status (V1-0d) — computed once server-side; render, never re-derive. */
   day_status: "present" | "partial" | "absent" | "not_marked" | "no_school";
   marked_periods: number;

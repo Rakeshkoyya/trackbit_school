@@ -66,6 +66,13 @@ export interface Assignee {
   name: string;
 }
 
+/** D-46: what a task is about — a student or a member, resolved to a name. */
+export interface TaskSubject {
+  type: "student" | "member";
+  id: string;
+  name: string;
+}
+
 export interface Task {
   id: string;
   board_id: string;
@@ -81,6 +88,10 @@ export interface Task {
   pass_count: number;
   is_critical: boolean;
   passed_by: string | null;
+  subject?: TaskSubject | null; // D-46
+  outcome?: string | null; // D-46: "what happened?" once completed
+  asked_by?: string | null; // S-106: "Priya asked · this morning"
+  asked_at?: string | null;
   created_at: string;
 }
 
@@ -414,6 +425,11 @@ export interface BoardRow {
   pass_count: number;
   is_critical: boolean;
   passed_by: string | null;
+  subject?: TaskSubject | null; // D-46
+  outcome?: string | null; // D-46
+  asked_by?: string | null; // S-106
+  asked_at?: string | null;
+  stale?: boolean; // D-45: open + untouched 3 weeks — grouped, never auto-closed
   created_at: string;
 }
 
@@ -426,6 +442,8 @@ export interface BoardTable {
   rows: BoardRow[];
   categories: string[];
   groups: BoardGroup[];
+  /** D-44: done rows hidden by the 7-day window — the date filter reaches them. */
+  hidden_done_count: number;
 }
 
 export interface MyTaskRow extends BoardRow {

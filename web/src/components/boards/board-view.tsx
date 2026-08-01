@@ -8,10 +8,12 @@ import { toast } from "sonner";
 
 import { useCelebration } from "@/components/celebration/celebration-provider";
 import { BoardKanban } from "@/components/boards/board-kanban";
+import { type DoneRange, OlderDoneBar, StaleSection } from "@/components/boards/board-extras";
 import { BoardMobile } from "@/components/boards/board-mobile";
 import { BoardSettingsSheet } from "@/components/boards/board-settings-sheet";
 import { TaskTable, type GroupBy } from "@/components/boards/board-table";
 import { CreateTaskSheet } from "@/components/tasks/create-task-sheet";
+import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useAuth } from "@/contexts/auth-context";
@@ -37,11 +39,15 @@ export function BoardView({ boardId }: { boardId: string }) {
   const [view] = useState<"table" | "board">("table"); // Kanban hidden for now
   const [groupBy, setGroupBy] = useState<GroupBy>("category");
   const [scope, setScope] = useState<Scope>("all");
+  // D-44: null = the default window (open + last-7-days done).
+  const [doneRange, setDoneRange] = useState<DoneRange | null>(null);
+  // D-46: a follow-up being completed waits here for its "what happened?".
+  const [outcomeFor, setOutcomeFor] = useState<BoardRow | null>(null);
 
   const board = useQuery({ queryKey: ["board", boardId], queryFn: () => appApi.board(boardId) });
   const table = useQuery({
-    queryKey: ["board-table", boardId],
-    queryFn: () => appApi.boardTable(boardId),
+    queryKey: ["board-table", boardId, doneRange],
+    queryFn: () => appApi.boardTable(boardId, doneRange ?? undefined),
   });
   const members = useQuery({ queryKey: ["members"], queryFn: appApi.members });
 
@@ -52,12 +58,12 @@ export function BoardView({ boardId }: { boardId: string }) {
   };
 
   const complete = useMutation({
-    mutationFn: (row: BoardRow) => {
+    mutationFn: ({ row, outcome }: { row: BoardRow; outcome: string | null }) => {
       const id = instanceFor(row);
       if (!id) return Promise.reject(new Error("Not actionable today"));
-      return appApi.completeTask(id);
+      return appApi.completeTask(id, outcome);
     },
-    onMutate: (row) => {
+    onMutate: ({ row }) => {
       const snap = snapshotRowCaches(qc);
       patchRowEverywhere(qc, row.id, { status: "done" });
       return { snap };
@@ -69,6 +75,12 @@ export function BoardView({ boardId }: { boardId: string }) {
     },
     onSettled: () => invalidate(),
   });
+  // D-46: a task about a person asks "what happened?" first; anything else
+  // stays one tap.
+  const startComplete = (row: BoardRow) => {
+    if (row.subject) setOutcomeFor(row);
+    else complete.mutate({ row, outcome: null });
+  };
   const claim = useMutation({
     mutationFn: (row: BoardRow) => {
       const id = instanceFor(row);
@@ -130,6 +142,9 @@ export function BoardView({ boardId }: { boardId: string }) {
     scope === "mine"
       ? allRows.filter((r) => !r.assignee || r.assignee.id === myId)
       : allRows;
+  // D-45: stale rows leave the main table for their own group (desktop).
+  const staleRows = rows.filter((r) => r.stale && r.status !== "done");
+  const mainRows = staleRows.length > 0 ? rows.filter((r) => !staleRows.includes(r)) : rows;
   const memberList = members.data?.members ?? [];
 
   return (
@@ -215,16 +230,27 @@ export function BoardView({ boardId }: { boardId: string }) {
               />
             </div>
 
+            <OlderDoneBar
+              hiddenCount={table.data?.hidden_done_count ?? 0}
+              range={doneRange}
+              onRange={setDoneRange}
+            />
+            <StaleSection
+              rows={staleRows}
+              onComplete={startComplete}
+              onReopen={(r) => reopen.mutate(r)}
+              onOpen={openRow}
+            />
             {view === "table" ? (
               <TaskTable
-                rows={rows}
+                rows={mainRows}
                 members={memberList}
                 groupBy={groupBy}
                 columns={["person", "due", "priority"]}
                 groupDefs={table.data?.groups}
                 canAssignPerson={!restricted}
                 addContext={{ boardId }}
-                onComplete={(r) => complete.mutate(r)}
+                onComplete={startComplete}
                 onReopen={(r) => reopen.mutate(r)}
                 onOpen={openRow}
               />
@@ -233,7 +259,7 @@ export function BoardView({ boardId }: { boardId: string }) {
             ) : (
               <BoardKanban
                 rows={rows}
-                onComplete={(r) => complete.mutate(r)}
+                onComplete={startComplete}
                 onClaim={(r) => claim.mutate(r)}
                 onOpen={openRow}
               />
@@ -256,7 +282,7 @@ export function BoardView({ boardId }: { boardId: string }) {
             ) : (
               <BoardMobile
                 rows={rows}
-                onComplete={(r) => complete.mutate(r)}
+                onComplete={startComplete}
                 onClaim={(r) => claim.mutate(r)}
                 onOpen={openRow}
               />
@@ -277,6 +303,14 @@ export function BoardView({ boardId }: { boardId: string }) {
       {b.can_manage ? (
         <BoardSettingsSheet board={b} open={settingsOpen} onOpenChange={setSettingsOpen} />
       ) : null}
+      <OutcomeSheet
+        target={outcomeFor ? { title: outcomeFor.title, subjectName: outcomeFor.subject?.name } : null}
+        onClose={() => setOutcomeFor(null)}
+        onConfirm={(outcome) => {
+          if (outcomeFor) complete.mutate({ row: outcomeFor, outcome });
+          setOutcomeFor(null);
+        }}
+      />
     </div>
   );
 }

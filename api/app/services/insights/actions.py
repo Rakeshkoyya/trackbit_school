@@ -197,6 +197,11 @@ class ActionService:
         assignee_user_id: uuid.UUID | None = None
         target_member_id: uuid.UUID | None = body.member_id
 
+        # The default title comes from the SUBJECT, whoever ends up assigned —
+        # an explicit assignee must not cost the row its name.
+        if body.student_id is not None and not title:
+            title = f"Call {self._student(m, body.student_id).full_name}'s parent"
+
         if body.user_id is not None:
             assignee_user_id = body.user_id
         elif body.member_id is not None:
@@ -205,8 +210,6 @@ class ActionService:
                                                  Membership.org_id == m.org_id))
         elif body.student_id is not None:
             student = self._student(m, body.student_id)
-            if not title:
-                title = f"Call {student.full_name}'s parent"
             teacher_member_id = self.db.scalar(
                 select(SchoolClass.class_teacher_member_id)
                 .where(SchoolClass.id == student.class_id)) if student.class_id else None
@@ -229,21 +232,31 @@ class ActionService:
         # absence must extend one follow-up, never file three identical rows in
         # one teacher's list. (The per-day window stays for guardian_reminded,
         # where it is right — a message is an event, a task is a state.)
+        # D-46 gave the task a subject, which is the real dedupe key; the walk
+        # over this rail's own action log stays only for rows created before
+        # tasks carried one.
         if subject_id is not None:
-            prior_details = list(self.db.scalars(
-                select(FollowupAction.detail)
-                .where(FollowupAction.org_id == m.org_id,
-                       FollowupAction.kind == "followup_assigned",
-                       FollowupAction.subject_type == subject_type,
-                       FollowupAction.subject_id == subject_id)
-                .order_by(FollowupAction.created_at.desc()).limit(10)))
-            prior_task_ids = [uuid.UUID(dd["task_id"]) for dd in prior_details
-                              if dd and dd.get("task_id")]
             open_task = self.db.scalar(
                 select(TaskInstance).where(
                     TaskInstance.org_id == m.org_id,
-                    TaskInstance.id.in_(prior_task_ids),
-                    TaskInstance.status == "open").limit(1)) if prior_task_ids else None
+                    TaskInstance.subject_type == subject_type,
+                    TaskInstance.subject_id == subject_id,
+                    TaskInstance.status == "open").limit(1))
+            if open_task is None:
+                prior_details = list(self.db.scalars(
+                    select(FollowupAction.detail)
+                    .where(FollowupAction.org_id == m.org_id,
+                           FollowupAction.kind == "followup_assigned",
+                           FollowupAction.subject_type == subject_type,
+                           FollowupAction.subject_id == subject_id)
+                    .order_by(FollowupAction.created_at.desc()).limit(10)))
+                prior_task_ids = [uuid.UUID(dd["task_id"]) for dd in prior_details
+                                  if dd and dd.get("task_id")]
+                open_task = self.db.scalar(
+                    select(TaskInstance).where(
+                        TaskInstance.org_id == m.org_id,
+                        TaskInstance.id.in_(prior_task_ids),
+                        TaskInstance.status == "open").limit(1)) if prior_task_ids else None
             if open_task is not None:
                 TaskService(self.db).edit(m, open_task.id, TaskUpdateRequest(
                     due_at=due_at, all_day=all_day))
@@ -260,7 +273,8 @@ class ActionService:
         board = ensure_followups_board(self.db, m)
         task = TaskService(self.db).create(m, TaskCreateRequest(
             board_id=board.id, title=title[:255], description=body.note,
-            assignee_id=assignee_user_id, due_at=due_at, all_day=all_day))
+            assignee_id=assignee_user_id, due_at=due_at, all_day=all_day,
+            subject_type=subject_type, subject_id=subject_id))
         self._append(m, "followup_assigned", subject_type, subject_id,
                      target_member_id=target_member_id,
                      detail={"task_id": str(task.id), "title": title, "board": board.name})

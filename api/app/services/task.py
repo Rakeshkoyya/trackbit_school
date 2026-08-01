@@ -1,7 +1,7 @@
 """Task service — all task operations flow through the event writer (plan §7.1)."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select, update
@@ -11,7 +11,7 @@ from app.core import plans
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.core.recurrence import occurs_on
-from app.core.timeutil import org_day_bounds
+from app.core.timeutil import org_day_bounds, org_zone
 from app.core.visibility import (
     assignable_pool,
     can_view_all_tasks,
@@ -19,7 +19,16 @@ from app.core.visibility import (
     can_view_task,
     is_assignable,
 )
-from app.models import Board, BoardCategory, TaskEvent, TaskInstance, TaskTemplate
+from app.models import (
+    Board,
+    BoardCategory,
+    Membership,
+    Student,
+    TaskEvent,
+    TaskInstance,
+    TaskTemplate,
+    User,
+)
 from app.schemas.board import BoardGroup, BoardRow, BoardTableResponse
 from app.schemas.task import (
     AssigneeOut,
@@ -28,6 +37,7 @@ from app.schemas.task import (
     TaskDetailOut,
     TaskEventOut,
     TaskOut,
+    TaskSubjectOut,
     TaskUpdateRequest,
 )
 from app.services import analytics, events, notifications
@@ -39,6 +49,11 @@ def _now() -> datetime:
 
 # Hidden from default Home/board views; visible only under explicit filters.
 _HIDDEN_STATUSES = ("cancelled",)
+
+# D-44: done rows older than this leave the default board read (date filter reaches them).
+DONE_WINDOW_DAYS = 7
+# D-45: an open row nobody has touched (no event) for this long is grouped as stale.
+STALE_AFTER_DAYS = 21
 
 # Fallback palette for category groups that exist only on tasks (not yet saved
 # as a BoardCategory with a picked color). Mirrors the web `groupColor` palette.
@@ -85,6 +100,58 @@ class TaskService:
         )
 
     # ---- serialization -------------------------------------------------
+    def _subject_map(self, instances: list[TaskInstance]) -> dict[uuid.UUID, TaskSubjectOut]:
+        """task_id → resolved subject (D-46), batched — students and members in
+        one query each, never one per row."""
+        student_ids = {i.subject_id for i in instances
+                       if i.subject_type == "student" and i.subject_id}
+        member_ids = {i.subject_id for i in instances
+                      if i.subject_type == "member" and i.subject_id}
+        student_names: dict[uuid.UUID, str] = {}
+        member_names: dict[uuid.UUID, str] = {}
+        if student_ids:
+            student_names = dict(self.db.execute(
+                select(Student.id, Student.full_name).where(Student.id.in_(student_ids))).all())
+        if member_ids:
+            member_names = dict(self.db.execute(
+                select(Membership.id, User.name)
+                .join(User, User.id == Membership.user_id)
+                .where(Membership.id.in_(member_ids))).all())
+        out: dict[uuid.UUID, TaskSubjectOut] = {}
+        for i in instances:
+            if not i.subject_type or not i.subject_id:
+                continue
+            name = (student_names if i.subject_type == "student" else member_names).get(
+                i.subject_id)
+            if name:
+                out[i.id] = TaskSubjectOut(type=i.subject_type, id=i.subject_id, name=name)
+        return out
+
+    def _asked_map(self, instances: list[TaskInstance],
+                   ) -> dict[uuid.UUID, tuple[str, datetime]]:
+        """task_id → (who assigned it, when) for rows someone ELSE asked for
+        (S-106). No new data — task_events already records 'assigned' with the
+        actor; self-assigned rows get no badge."""
+        ids = [i.id for i in instances if i.assignee_id]
+        if not ids:
+            return {}
+        rows = self.db.execute(
+            select(TaskEvent.instance_id, TaskEvent.actor_id, TaskEvent.created_at)
+            .where(TaskEvent.instance_id.in_(ids),
+                   TaskEvent.event_type.in_(("assigned", "passed")))
+            .order_by(TaskEvent.instance_id, TaskEvent.id.desc())
+        ).all()
+        by_assignee = {i.id: i.assignee_id for i in instances}
+        latest: dict[uuid.UUID, tuple[uuid.UUID, datetime]] = {}
+        for inst_id, actor_id, at in rows:
+            if inst_id in latest:
+                continue
+            if actor_id and actor_id != by_assignee.get(inst_id):
+                latest[inst_id] = (actor_id, at)
+        names = events.resolve_user_names(self.db, {a for a, _ in latest.values()})
+        return {iid: (names.get(actor, "someone"), at)
+                for iid, (actor, at) in latest.items()}
+
     def _serialize_many(self, member: CurrentMember, instances: list[TaskInstance]) -> list[TaskOut]:
         if not instances:
             return []
@@ -95,6 +162,8 @@ class TaskService:
         }
         assignee_ids = {i.assignee_id for i in instances if i.assignee_id}
         names = events.resolve_user_names(self.db, assignee_ids)
+        subjects = self._subject_map(instances)
+        asked = self._asked_map(instances)
 
         # passed_by: actor name of the latest 'passed' event, for passed tasks.
         passed_by: dict[uuid.UUID, str] = {}
@@ -140,6 +209,10 @@ class TaskService:
                     pass_count=i.pass_count,
                     is_critical=i.is_critical,
                     passed_by=passed_by.get(i.id),
+                    subject=subjects.get(i.id),
+                    outcome=i.outcome,
+                    asked_by=asked.get(i.id, (None, None))[0],
+                    asked_at=asked.get(i.id, (None, None))[1],
                     created_at=i.created_at,
                 )
             )
@@ -179,12 +252,13 @@ class TaskService:
             actor = names.get(e.actor_id) if e.actor_id else None
             p = e.payload or {}
             to_name = name_of(p.get("to")) if p.get("to") else "someone"
+            outcome_suffix = f" — “{p['outcome']}”" if p.get("outcome") else ""
             text = {
                 "created": f"Created by {actor or 'someone'}",
                 "assigned": f"Assigned to {to_name}",
                 "claimed": f"Claimed by {actor or 'someone'}",
                 "passed": f"Passed to {to_name}",
-                "completed": f"Completed by {actor or 'someone'}",
+                "completed": f"Completed by {actor or 'someone'}{outcome_suffix}",
                 "reopened": f"Reopened by {actor or 'someone'}",
                 "missed": "Missed",
                 "edited": f"Edited by {actor or 'someone'}",
@@ -253,9 +327,16 @@ class TaskService:
         seen = {c.strip() for c in list(inst_cats) + list(tmpl_cats) if c and c.strip()}
         return sorted(seen, key=str.lower)
 
-    def board_table(self, member: CurrentMember, board_id: uuid.UUID) -> BoardTableResponse:
+    def board_table(self, member: CurrentMember, board_id: uuid.UUID,
+                    done_from: date | None = None,
+                    done_to: date | None = None) -> BoardTableResponse:
         """Monday-style rows: one-time instances + one row per active recurring
-        template (folding the per-day occurrences into a single logical task)."""
+        template (folding the per-day occurrences into a single logical task).
+
+        D-44: open rows always; done rows from the last 7 days; everything older
+        behind the (done_from, done_to) date filter — no archive state, nothing
+        moved. `hidden_done_count` reports what the window is not showing.
+        """
         board = self._get_board(board_id)
         self._require_viewable(member, board)
         _, _, now_local = org_day_bounds(member.org.timezone)
@@ -264,21 +345,62 @@ class TaskService:
         # one-time tasks and recurring templates defaulting to them.
         sees_all = self._sees_all_tasks(member, board)
 
-        one_time_q = select(TaskInstance).where(
+        tz = org_zone(member.org.timezone)
+        if done_from or done_to:
+            frm = (datetime.combine(done_from, time.min, tzinfo=tz).astimezone(UTC)
+                   if done_from else None)
+            to = (datetime.combine(done_to + timedelta(days=1), time.min, tzinfo=tz)
+                  .astimezone(UTC) if done_to else None)
+        else:
+            frm, to = _now() - timedelta(days=DONE_WINDOW_DAYS), None
+        done_window = [TaskInstance.status == "done"]
+        if frm is not None:
+            done_window.append(TaskInstance.completed_at >= frm)
+        if to is not None:
+            done_window.append(TaskInstance.completed_at < to)
+
+        base_filter = [
             TaskInstance.board_id == board_id,
             TaskInstance.template_id.is_(None),
             TaskInstance.status.notin_(_HIDDEN_STATUSES),
+        ]
+        if not sees_all:
+            base_filter.append(TaskInstance.assignee_id == member.user_id)
+
+        one_time_q = select(TaskInstance).where(
+            *base_filter, TaskInstance.status != "done"
         )
         templates_q = select(TaskTemplate).where(
             TaskTemplate.board_id == board_id, TaskTemplate.active.is_(True)
         )
         if not sees_all:
-            one_time_q = one_time_q.where(TaskInstance.assignee_id == member.user_id)
             templates_q = templates_q.where(
                 TaskTemplate.default_assignee_id == member.user_id
             )
-        one_time = list(self.db.scalars(one_time_q.order_by(TaskInstance.created_at)))
+        open_rows = list(self.db.scalars(one_time_q.order_by(TaskInstance.created_at)))
+        done_rows = list(self.db.scalars(
+            select(TaskInstance).where(*base_filter, *done_window)
+            .order_by(TaskInstance.created_at)))
+        hidden_done = int(self.db.scalar(
+            select(func.count()).select_from(TaskInstance)
+            .where(*base_filter, TaskInstance.status == "done")) or 0) - len(done_rows)
+        one_time = sorted(open_rows + done_rows, key=lambda i: i.created_at)
         templates = list(self.db.scalars(templates_q.order_by(TaskTemplate.title)))
+
+        # D-45: open rows nobody has touched (no event of any kind) in 3 weeks.
+        stale_cutoff = _now() - timedelta(days=STALE_AFTER_DAYS)
+        open_ids = [i.id for i in open_rows if i.status in ("open", "missed")]
+        stale_ids: set[uuid.UUID] = set()
+        if open_ids:
+            touched = dict(self.db.execute(
+                select(TaskEvent.instance_id, func.max(TaskEvent.created_at))
+                .where(TaskEvent.instance_id.in_(open_ids))
+                .group_by(TaskEvent.instance_id)).all())
+            for i in open_rows:
+                if i.id in open_ids:
+                    last = touched.get(i.id) or i.created_at
+                    if last < stale_cutoff:
+                        stale_ids.add(i.id)
         # Today's materialized instance per template (for the check/claim action).
         today_by_tmpl: dict[uuid.UUID, TaskInstance] = {}
         if templates:
@@ -299,6 +421,8 @@ class TaskService:
         def assignee_of(uid: uuid.UUID | None) -> AssigneeOut | None:
             return AssigneeOut(id=uid, name=names.get(uid, "—")) if uid else None
 
+        subjects = self._subject_map(one_time)
+        asked = self._asked_map(one_time)
         rows: list[BoardRow] = []
         for i in one_time:
             rows.append(
@@ -307,6 +431,10 @@ class TaskService:
                     category=i.category, priority=i.priority, assignee=assignee_of(i.assignee_id),
                     due_at=i.due_at, all_day=i.all_day, status=i.status,
                     pass_count=i.pass_count, is_critical=i.is_critical,
+                    subject=subjects.get(i.id), outcome=i.outcome,
+                    asked_by=asked.get(i.id, (None, None))[0],
+                    asked_at=asked.get(i.id, (None, None))[1],
+                    stale=i.id in stale_ids,
                     created_at=i.created_at,
                 )
             )
@@ -348,7 +476,8 @@ class TaskService:
             groups.append(BoardGroup(name=name, color=_auto_color(name)))
 
         return BoardTableResponse(
-            rows=rows, categories=self.board_categories(member, board_id), groups=groups
+            rows=rows, categories=self.board_categories(member, board_id), groups=groups,
+            hidden_done_count=max(0, hidden_done),
         )
 
     # ---- category groups (Monday-style, first-class) ------------------
@@ -460,6 +589,17 @@ class TaskService:
             raise ValidationError("That person can't be assigned on this board.",
                                   code="not_assignable")
 
+        # D-46: the subject must be a real row in THIS org — a task about a
+        # student in another school must not be creatable.
+        subject_type, subject_id = req.subject_type, req.subject_id
+        if subject_type and subject_id:
+            model = Student if subject_type == "student" else Membership
+            if not self.db.scalar(select(model.id).where(
+                    model.id == subject_id, model.org_id == member.org_id)):
+                raise NotFoundError("Task subject")
+        else:
+            subject_type = subject_id = None
+
         inst = TaskInstance(
             org_id=member.org_id,
             board_id=board.id,
@@ -471,6 +611,8 @@ class TaskService:
             due_at=req.due_at,
             all_day=req.all_day,
             is_critical=req.is_critical,
+            subject_type=subject_type,
+            subject_id=subject_id,
             status="open",
             created_by=member.user_id,
         )
@@ -658,15 +800,18 @@ class TaskService:
         notifications.reset_reminder(self.db, inst)
         return self._serialize_one(member, inst)
 
-    def complete(self, member: CurrentMember, instance_id: uuid.UUID) -> CompleteResponse:
+    def complete(self, member: CurrentMember, instance_id: uuid.UUID,
+                 outcome: str | None = None) -> CompleteResponse:
         inst = self._get_instance(instance_id)
         board = self._get_board(inst.board_id)
         self._require_viewable(member, board)
 
+        outcome = (outcome or "").strip() or None
         res = self.db.execute(
             update(TaskInstance)
             .where(TaskInstance.id == instance_id, TaskInstance.status.in_(("open", "missed")))
-            .values(status="done", completed_at=_now(), completed_by=member.user_id)
+            .values(status="done", completed_at=_now(), completed_by=member.user_id,
+                    outcome=outcome)
         )
         if res.rowcount == 0:
             self.db.refresh(inst)
@@ -678,8 +823,11 @@ class TaskService:
                 return CompleteResponse(status="done", already_done=True, completed_by_name=who)
             raise ConflictError("This task can't be completed.", code="not_completable")
         self.db.refresh(inst)
+        # D-46: "what happened?" lives on the completion event (law 3); the
+        # instance column is only the derived cache for cheap reads.
         events.append_event(self.db, org_id=member.org_id, instance_id=inst.id,
-                            event_type="completed", actor_id=member.user_id)
+                            event_type="completed", actor_id=member.user_id,
+                            payload={"outcome": outcome} if outcome else None)
         analytics.track(self.db, event=analytics.TASK_COMPLETED, org_id=member.org_id,
                         user_id=member.user_id)
         return CompleteResponse(status="done", already_done=False)
@@ -693,6 +841,7 @@ class TaskService:
         inst.status = "open"
         inst.completed_at = None
         inst.completed_by = None
+        inst.outcome = None  # cache only — the completion event keeps its payload
         self.db.flush()
         events.append_event(self.db, org_id=member.org_id, instance_id=inst.id,
                             event_type="reopened", actor_id=member.user_id)

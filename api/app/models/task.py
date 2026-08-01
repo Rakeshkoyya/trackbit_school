@@ -110,6 +110,15 @@ class TaskInstance(Base, UUIDPKMixin, CreatedAtMixin):
     # due_at NULL = "anytime until done" — never missed (plan G5).
     all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="open")
+    # D-46 (V1-1): what the task is ABOUT — 'student' | 'member'. Set by the
+    # action rail so the row can read "Kabir Shah — absent 4 days", the child's
+    # timeline can show a follow-up was raised, and the rail can dedupe on the
+    # open task for a subject instead of walking its own action log.
+    subject_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # D-46: "what happened?" recorded at completion. Derived cache — the truth is
+    # the 'completed' event payload (law 3); reopen clears this, never the event.
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -132,6 +141,10 @@ class TaskInstance(Base, UUIDPKMixin, CreatedAtMixin):
         CheckConstraint("status IN ('open', 'done', 'missed', 'cancelled')", name="status_valid"),
         Index("ix_task_instances_home", "org_id", "assignee_id", "status", "due_at"),
         Index("ix_task_instances_board", "board_id", "status", "due_at"),
+        Index(
+            "ix_task_instances_subject", "org_id", "subject_type", "subject_id",
+            postgresql_where=text("subject_id IS NOT NULL"),
+        ),
         Index(
             "uq_task_instances_template_occurrence",
             "template_id",
