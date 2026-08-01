@@ -572,6 +572,26 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     `components/staff/month-summary.tsx`), the four-state staff roster, half-day leave apply,
     Arrange-cover from an approval, the slack chart, and `/staff/today` finally naming who is
     covering **for whom**.
+- **V1-5 (homework: the verdict model, 2026-08-02)** — migration **`c5d6e7f8a9b0`** (widens
+  `homework_results.status` to `late`/`carried`/`waived`) — **on dev + test; prod is at
+  `b4c5d6e7f8a9` and still needs it.**
+  - **`core/homework_verdict.py` is THE vocabulary and arithmetic** — import it, never re-decide
+    what `late`/`carried`/`partial` is worth. `late` counts as **done** and is reported *beside*
+    completion (`S-99`); `carried` (absent when it was set) and `waived` leave the denominator
+    entirely (`D-34`/`S-98`); `not_checked` is the **teacher's** gap and may never render as a
+    child's miss on any surface, parent-facing included. It also owns `miss_streak`, so one number
+    appears beside a name everywhere.
+  - `GET /homework/queue` (backlog + `to_check`) · `GET /homework/load` (`D-37`) ·
+    `GET /homework/student/{id}` · the check sheet carries `absent_when_set`, `carried_pending`
+    and `miss_streak`. `homework_gap_days` (org setting) drives the delayed-teacher signal —
+    never hardcode it.
+  - Frontend: **`/homework`** is `D-36`'s three levels and My Day keeps only `S-100`'s counted
+    button (the yesterday-homework block is **deleted on purpose** — checking is a desk activity).
+    `components/school/homework-check-sheet.tsx` (five-verdict cycle, `S-85` absentee badge shown
+    but **never preselected**, `S-97` carried, `S-89` streak) and
+    `components/school/student-homework-history.tsx` are each mounted **twice** — the second is the
+    teacher's by-student view *and* the admin's `D-31` drill-down. `/dashboard/homework` gains
+    `delayed_teachers` + `rough_classes` as named rows. `test_homework_v1_5.py` (11).
 - **V1-6 (syllabus, planning & the mid-year proof, 2026-08-02)** — **no migration.** `S-51`: the
   phrase *"syllabus covered"* was computed in **five** places with no two alike — the admin board
   (planned denominator, partial=0.5), the growth report (whole syllabus, partial=0), the class
