@@ -1103,11 +1103,21 @@ Current state: test DB and **DO prod are both at head `b0c1d2e3f4a5`** (V1-11), 
 migration behind, so anything run against it before then was missing `guardian_messages` and
 `parent_login_attempts`.
 
-⚠️ **`.env` is now in `ACTIVE: LOCAL` mode** (switched at V1-13 close, 2026-08-02): the app was
-being clicked through by hand and every tap is a write, which against the prod URLs would edit a
-real school's data. It is also the only mode in which law 2 is real — locally the app runs as
-`trackbit_school_app` (NOBYPASSRLS). The `PROD_*_BACKUP` comments are intact; **flip the banner
-back before running Alembic against DigitalOcean.**
+⚠️ **`.env` is in `ACTIVE: PRODUCTION` mode** (2026-08-02, founder's request: run the local
+codebase against the real prod DB). Prod is **pre-launch and holds no critical data** — that is
+the only reason this is safe, and it stops being true the day a real school is on it. While it is
+in this mode:
+- every click in the app is a **write to production**, and `alembic upgrade head` migrates
+  production with no confirmation and no dry run;
+- **law 2 is inert** — `DATABASE_URL` is `doadmin` (`rolbypassrls = true`), so every
+  `org_isolation` policy is bypassed. Switch to LOCAL for anything security-related;
+- **`ENABLE_SCHEDULER` must stay `false`.** APScheduler runs per process, so a local uvicorn plus
+  the Dokploy container would both fire the 19:00 report, the 16:00 reminder and the absence
+  alerts off the same rows;
+- **never run `scripts.seed` here** — it creates the demo org and demo users, in production.
+
+`TEST_DATABASE_URL` stays local in both modes and `conftest.py` refuses to start otherwise, so
+pytest is safe either way. The `LOCAL_*_BACKUP` comments carry the local URLs for switching back.
 
 🚨 **`.env` was in `ACTIVE: PRODUCTION` mode when that ran, and `alembic upgrade head` therefore
 applied V1-5 → V1-11 (`c5d6e7f8a9b0`, `d6e7f8a9b0c1`, `e7f8a9b0c1d2`, `f8a9b0c1d2e3`,
