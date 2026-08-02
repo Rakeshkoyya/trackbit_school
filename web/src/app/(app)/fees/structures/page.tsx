@@ -94,7 +94,7 @@ function StructuresInner() {
       </Link>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Fee structures</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <YearSwitcher />
           <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New</Button>
         </div>

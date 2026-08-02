@@ -115,9 +115,12 @@ export function RedRow({
         <span className="block text-sm font-medium">{title}</span>
         {subtitle ? <span className="mt-0.5 block text-xs text-muted-foreground">{subtitle}</span> : null}
       </span>
-      {meta ? <span className="shrink-0 text-right text-xs text-muted-foreground">{meta}</span> : null}
     </>
   );
+  // `meta` is a SIBLING of the link, never inside it (V1-13). The reach board
+  // puts a `tel:` link in meta, and an <a> inside an <a> is invalid HTML that
+  // React reports as a hydration error — and the phone number, which is the
+  // whole point of that row, stops being separately tappable.
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
       {href ? (
@@ -125,7 +128,11 @@ export function RedRow({
       ) : (
         <div className="flex min-w-0 flex-1 items-start gap-3">{body}</div>
       )}
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div> : null}
+      {/* No `shrink-0` on either: at 360px a long meta ("Over the monthly limit
+          — 3 days in August…") or a wordy action ("Ask for a catch-up plan")
+          pushed the whole page into horizontal scroll. */}
+      {meta ? <span className="min-w-0 text-right text-xs text-muted-foreground">{meta}</span> : null}
+      {actions ? <div className="flex min-w-0 flex-wrap items-center gap-1.5">{actions}</div> : null}
     </div>
   );
 }

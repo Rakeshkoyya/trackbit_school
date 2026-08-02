@@ -94,7 +94,7 @@ function FeesInner() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Fees</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <YearSwitcher />
           <Link href="/fees/structures"><Button size="sm" variant="outline"><Layers className="h-4 w-4" /> Structures</Button></Link>
           <Button size="sm" onClick={() => setEnrollOpen(true)}><Plus className="h-4 w-4" /> Enrol</Button>

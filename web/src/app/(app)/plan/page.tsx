@@ -145,7 +145,10 @@ function PlanYearInner() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-        <div className="space-y-4">
+        {/* min-w-0: without it this grid track sizes to its widest child's
+            min-content, which at 360px pushed the whole page sideways. The
+            second column already had it. */}
+        <div className="min-w-0 space-y-4">
           {canEdit ? (
             <div className="space-y-3 rounded-xl border border-border bg-card p-4">
               <div>

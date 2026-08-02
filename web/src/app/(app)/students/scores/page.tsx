@@ -87,7 +87,7 @@ function ScoresInner() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <PageHeader title="Scores" subtitle="Record a test's results, browse previous exams" />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <YearSwitcher />
           {isAdmin ? (
             <Button size="sm" variant="outline" onClick={() => setNewCycle(true)}>
