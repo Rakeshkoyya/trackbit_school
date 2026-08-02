@@ -12,20 +12,36 @@ gives the screen its three verbs:
             attaches a draft photo capture as evidence, and writes the scores
             in the same transaction
 
+    lock    V1-8 `D-53`: verify-and-lock. The locked exam IS the record — for
+            the analytics, the report card, and (per `D-54`) as the training
+            label. Editing after it is refused until an **admin unlocks with a
+            reason**, and the unlock is an appended row, never a mutation
+            (`Q-62`, law 3).
+
 Access mirrors attendance: admin any class, a teacher only classes they teach.
-Band tests are admin-only (bands are the admin's domain, P4)."""
+Band tests are admin-only (bands are the admin's domain, P4).
+
+V1-8 also gives every exam a **scale** (`minor` | `major`) and, where a school
+has configured one, its **own name for the type** (`D-55`). Neither is a display
+detail: `core/exams.py` owns what they mean, and no read may pool marks across
+scales (`S-114`)."""
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.exams import sum_mismatch, type_label
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AssessmentCycle,
     AssessmentScore,
+    CalendarEvent,
     ClassSubject,
+    ExamLockEvent,
+    ExamType,
     Membership,
     SchoolClass,
     ScoreCapture,
@@ -38,11 +54,14 @@ from app.models import (
 from app.schemas.assessments import (
     CapturePageOut,
     ExamDetail,
+    ExamLockRow,
     ExamRosterRow,
     ExamSaveIn,
     ExamSummary,
+    QuestionMark,
 )
 from app.services import storage
+from app.services.exam_types import ExamTypeService
 from app.services.periods import assert_can_take_class
 
 
@@ -78,6 +97,24 @@ class ExamService:
         if c is None:
             raise NotFoundError("Exam")
         return c
+
+    def _papers(self, cycle_id: uuid.UUID) -> dict[uuid.UUID, str]:
+        """student → the URL of their own marked script (`S-119`).
+
+        The photos are kept forever as evidence and rendered on the exam page,
+        but until V1-8 there was no way back to them from the screen where a
+        parent asks *"can I see it?"*. One query for the whole roster."""
+        rows = self.db.execute(
+            select(ScoreCapturePage.student_id, ScoreCapturePage.object_key)
+            .join(ScoreCapture, ScoreCapture.id == ScoreCapturePage.capture_id)
+            .where(ScoreCapture.cycle_id == cycle_id,
+                   ScoreCapture.status != "discarded",
+                   ScoreCapturePage.student_id.is_not(None))
+            .order_by(ScoreCapturePage.page_no)).all()
+        out: dict[uuid.UUID, str] = {}
+        for student_id, key in rows:
+            out.setdefault(student_id, storage.url_for(key))
+        return out
 
     # ── feed ─────────────────────────────────────────────────────────────────
     def feed(self, m: CurrentMember, class_id: uuid.UUID | None = None,
@@ -128,6 +165,10 @@ class ExamService:
             .join(ScoreCapturePage, ScoreCapturePage.capture_id == ScoreCapture.id)
             .where(ScoreCapture.cycle_id.in_(cids), ScoreCapture.status != "discarded")
             .group_by(ScoreCapture.cycle_id)).all())
+        # The school's own words for the types on screen (`D-55`) — one query,
+        # because the feed groups by them.
+        type_names = dict(self.db.execute(
+            select(ExamType.id, ExamType.name).where(ExamType.org_id == m.org_id)).all())
 
         out: list[ExamSummary] = []
         for c in cycles:
@@ -136,7 +177,12 @@ class ExamService:
                       else roster_sizes.get(c.class_id, scored) if c.class_id
                       else scored)
             out.append(ExamSummary(
-                id=c.id, type=c.type, name=c.name, date=c.date,
+                id=c.id, type=c.type,
+                exam_type_id=c.exam_type_id,
+                exam_type_name=type_names.get(c.exam_type_id),
+                type_label=type_names.get(c.exam_type_id) or type_label(c.type),
+                scale=c.scale, locked=c.locked_at is not None,
+                name=c.name, date=c.date,
                 class_id=c.class_id, class_label=classes.get(c.class_id),
                 subject_id=c.subject_id, subject_name=subjects.get(c.subject_id),
                 topic=c.topic,
@@ -174,36 +220,66 @@ class ExamService:
             roster += list(self.db.scalars(select(Student).where(
                 Student.id.in_(missing)).order_by(Student.full_name)))
 
+        papers = self._papers(c.id)
         rows, tot_s, tot_x = [], 0.0, 0.0
         verified = False
         for st in roster:
             sc = scores.get(st.id)
+            qm = None
             if sc is not None:
                 tot_s += float(sc.score)
                 tot_x += float(sc.max_score)
                 verified = verified or sc.verified_by is not None
+                qm = [QuestionMark(**q) for q in sc.question_marks] if sc.question_marks else None
             rows.append(ExamRosterRow(
                 student_id=st.id, full_name=st.full_name, roll_no=st.roll_no,
                 score=float(sc.score) if sc else None,
-                max_score=float(sc.max_score) if sc else None))
+                max_score=float(sc.max_score) if sc else None,
+                question_marks=qm,
+                paper_url=papers.get(st.id),
+                sum_mismatch=sum_mismatch(sc.question_marks if sc else None,
+                                          float(sc.score) if sc else None)))
 
         page_rows = list(self.db.execute(
             select(ScoreCapturePage).join(
                 ScoreCapture, ScoreCapture.id == ScoreCapturePage.capture_id)
             .where(ScoreCapture.cycle_id == c.id, ScoreCapture.status != "discarded")
             .order_by(ScoreCapture.created_at, ScoreCapturePage.page_no)).scalars())
+        exam_type = self.db.get(ExamType, c.exam_type_id) if c.exam_type_id else None
+        event_name = self.db.scalar(select(CalendarEvent.name).where(
+            CalendarEvent.id == c.exam_event_id)) if c.exam_event_id else None
         return ExamDetail(
-            id=c.id, type=c.type, name=c.name, date=c.date,
+            id=c.id, type=c.type,
+            exam_type_id=c.exam_type_id,
+            exam_type_name=exam_type.name if exam_type else None,
+            type_label=exam_type.name if exam_type else type_label(c.type),
+            scale=c.scale,
+            exam_event_id=c.exam_event_id, exam_event_name=event_name,
+            name=c.name, date=c.date,
             class_id=c.class_id, class_label=_label(klass),
             subject_id=c.subject_id, subject_name=subject.name, topic=c.topic,
             total_marks=float(c.total_marks) if c.total_marks is not None else None,
             student_ids=[uuid.UUID(str(s)) for s in c.student_ids or []] or None,
             verified=verified,
+            locked=c.locked_at is not None, locked_at=c.locked_at,
+            locked_by_name=self.db.scalar(select(User.name).where(
+                User.id == c.locked_by)) if c.locked_by else None,
+            lock_history=self._lock_history(m, c.id),
             avg_pct=round(tot_s / tot_x * 100, 1) if tot_x else None,
             rows=rows,
             pages=[CapturePageOut(id=p.id, page_no=p.page_no,
                                   url=storage.url_for(p.object_key),
                                   content_type=p.content_type) for p in page_rows])
+
+    def _lock_history(self, m: CurrentMember, cycle_id: uuid.UUID) -> list[ExamLockRow]:
+        rows = self.db.execute(
+            select(ExamLockEvent, User.name)
+            .outerjoin(Membership, Membership.id == ExamLockEvent.actor_member_id)
+            .outerjoin(User, User.id == Membership.user_id)
+            .where(ExamLockEvent.org_id == m.org_id, ExamLockEvent.cycle_id == cycle_id)
+            .order_by(ExamLockEvent.created_at.desc())).all()
+        return [ExamLockRow(action=e.action, reason=e.reason, by_name=name,
+                            at=e.created_at) for e, name in rows]
 
     # ── save (create or edit) ────────────────────────────────────────────────
     def save(self, m: CurrentMember, body: ExamSaveIn) -> ExamDetail:
@@ -244,10 +320,20 @@ class ExamService:
             raise ValidationError("No term covers that date — set up terms first.",
                                   code="no_term")
 
+        exam_type_id, scale = ExamTypeService(self.db).resolve(
+            m, body.exam_type_id, body.type)
+        if body.exam_event_id is not None and not self.db.scalar(select(CalendarEvent.id).where(
+                CalendarEvent.id == body.exam_event_id, CalendarEvent.org_id == m.org_id)):
+            raise NotFoundError("Exam block")
+
         if body.cycle_id is not None:
             cycle = self._cycle(m, body.cycle_id)
             if cycle.class_id != body.class_id:
                 raise ValidationError("An exam cannot move to another class.")
+            # `D-53`/`S-136`: the whole point of the lock. Without this the full
+            # delete-and-reinsert below would silently replace July's confirmed
+            # mark in November, with no record that they ever differed.
+            self._assert_unlocked(cycle)
             cycle.type = body.type
             cycle.name = body.name
             cycle.date = body.date
@@ -256,12 +342,17 @@ class ExamService:
             cycle.topic = body.topic
             cycle.total_marks = body.total_marks
             cycle.student_ids = student_ids
+            cycle.exam_type_id = exam_type_id
+            cycle.scale = scale
+            cycle.exam_event_id = body.exam_event_id
         else:
             cycle = AssessmentCycle(
                 org_id=m.org_id, term_id=term_id, type=body.type, name=body.name,
                 date=body.date, class_id=body.class_id, subject_id=body.subject_id,
                 topic=body.topic, total_marks=body.total_marks,
-                student_ids=student_ids, created_by_member_id=m.membership.id)
+                student_ids=student_ids, created_by_member_id=m.membership.id,
+                exam_type_id=exam_type_id, scale=scale,
+                exam_event_id=body.exam_event_id)
             self.db.add(cycle)
             self.db.flush()
 
@@ -276,11 +367,99 @@ class ExamService:
                 org_id=m.org_id, cycle_id=cycle.id, student_id=r.student_id,
                 subject_id=body.subject_id, score=r.score,
                 max_score=r.max_score if r.max_score is not None else body.total_marks,
+                question_marks=[q.model_dump() for q in r.question_marks]
+                               if r.question_marks else None,
                 entered_by=m.user_id))
         self.db.flush()
 
         if body.capture_id is not None:
             from app.services.score_capture import ScoreCaptureService  # noqa: PLC0415
-            ScoreCaptureService(self.db).finalize_for_exam(m, body.capture_id, cycle)
+            # `S-119`: the page↔student map comes from the CONFIRMED grid, so a
+            # paper is filed against a child only once a human has said so.
+            page_students = {r.page_id: r.student_id for r in body.rows if r.page_id}
+            ScoreCaptureService(self.db).finalize_for_exam(
+                m, body.capture_id, cycle, page_students)
 
         return self.detail(m, cycle.id)
+
+    # ── verify & lock (D-53) ─────────────────────────────────────────────────
+    @staticmethod
+    def _assert_unlocked(cycle: AssessmentCycle) -> None:
+        if cycle.locked_at is not None:
+            raise ValidationError(
+                "This exam is locked. An admin can unlock it with a reason.",
+                code="exam_locked")
+
+    def lock(self, m: CurrentMember, cycle_id: uuid.UUID) -> ExamDetail:
+        """The teacher verifies the reviewed marks and locks them. After this
+        the exam **is** the record — for the analytics, the report card, and (per
+        `D-54`) as the training label.
+
+        This is also what finally gives `assessment_scores.verified_by` the
+        meaning it has never had: the exam flow never wrote it, so the feed's
+        *"· verified"* badge could not light up for any exam recorded through
+        SC-5 (module §4.5)."""
+        c = self._cycle(m, cycle_id)
+        if c.class_id:
+            assert_can_take_class(self.db, m, c.class_id, None)
+        self._assert_unlocked(c)
+        scores = list(self.db.scalars(select(AssessmentScore).where(
+            AssessmentScore.org_id == m.org_id, AssessmentScore.cycle_id == c.id)))
+        if not scores:
+            raise ValidationError("There are no marks to lock yet.", code="no_scores")
+        for sc in scores:
+            sc.verified_by = m.user_id
+        c.locked_at = datetime.now(UTC)
+        c.locked_by = m.user_id
+        self.db.add(ExamLockEvent(org_id=m.org_id, cycle_id=c.id, action="lock",
+                                  actor_member_id=m.membership.id))
+        self.db.flush()
+        self._write_training_pair(m, c, scores)
+        return self.detail(m, cycle_id)
+
+    def unlock(self, m: CurrentMember, cycle_id: uuid.UUID, reason: str | None) -> ExamDetail:
+        """Admin-only, with a reason, **appended** (`Q-62`) — the
+        `plan_approvals` / `leave_request_events` shape, where status is a
+        derived cache of the newest event. The frozen training pair is left
+        exactly as it was and flagged by the event, never rewritten (`S-139`):
+        a corpus whose labels drift is worse than no corpus, because you cannot
+        tell which rows moved."""
+        if not m.is_coordinator_up:
+            raise ForbiddenError("Only an admin can unlock an exam.", code="admin_only")
+        c = self._cycle(m, cycle_id)
+        if c.locked_at is None:
+            raise ValidationError("This exam is not locked.", code="not_locked")
+        if not (reason or "").strip():
+            raise ValidationError("Say why this is being unlocked.", code="reason_required")
+        c.locked_at = None
+        c.locked_by = None
+        self.db.add(ExamLockEvent(org_id=m.org_id, cycle_id=c.id, action="unlock",
+                                  reason=reason.strip(), actor_member_id=m.membership.id))
+        self.db.flush()
+        return self.detail(m, cycle_id)
+
+    def _write_training_pair(self, m: CurrentMember, cycle: AssessmentCycle,
+                             scores: list[AssessmentScore]) -> None:
+        """`D-54`/A-4 — capture in v1, use in v2, **no export path here.**
+
+        Only when the school has opted in (`S-138`), and only at lock, because
+        that is the one moment the human's answer stops moving."""
+        if not getattr(m.org, "training_data_opt_in", False):
+            return
+        from app.services.exam_corpus import build_pair  # noqa: PLC0415
+
+        names = dict(self.db.execute(
+            select(Student.id, Student.full_name)
+            .where(Student.id.in_([s.student_id for s in scores]))).all()) if scores else {}
+        final_rows = [{"student_id": s.student_id, "full_name": names.get(s.student_id),
+                       "score": float(s.score), "max_score": float(s.max_score),
+                       "question_marks": s.question_marks} for s in scores]
+        captures = list(self.db.scalars(select(ScoreCapture).where(
+            ScoreCapture.cycle_id == cycle.id, ScoreCapture.status != "discarded")))
+        for cap in captures:
+            locked_rows, corrections = build_pair(
+                cap.parsed_rows, cap.parsed_meta, final_rows,
+                float(cycle.total_marks) if cycle.total_marks is not None else None)
+            cap.locked_rows = locked_rows
+            cap.corrections = corrections
+        self.db.flush()

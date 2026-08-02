@@ -82,6 +82,15 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     # whether an emergency is worth the allowance).
     leaves_per_year: Mapped[int] = mapped_column(Integer, nullable=False, server_default="8")
     leaves_per_month: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # V1-8 (`D-54`/`S-138`, A-4): keep the model-read-vs-human-locked diff on
+    # locked exam captures, for training our own marks reader later. **Default
+    # off, and asked for** — this is the first data in the product whose purpose
+    # is not running the school that entered it: it is children's handwriting
+    # with their names on it, and it is the school's. There is no export path in
+    # v1; de-identification has to exist before the first export, not before the
+    # first row (`Q-61`).
+    training_data_opt_in: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"))
 
     __table_args__ = (
         CheckConstraint("plan IN ('free', 'pro')", name="plan_valid"),

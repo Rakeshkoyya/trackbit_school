@@ -14,6 +14,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ClassReportCard } from "@/components/school/class-report-card";
 import { ExamCapture } from "@/components/school/exam-capture";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,7 +66,7 @@ function RecordTestInner() {
   const { classId } = useParams<{ classId: string }>();
   const router = useRouter();
   const { yearId } = useYear();
-  const [tab, setTab] = useState<"class" | "few">("class");
+  const [tab, setTab] = useState<"class" | "few" | "cards">("class");
   const [subset, setSubset] = useState<string[] | null>(null);
 
   const { data: classes = [] } = useQuery({ queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId!), enabled: !!yearId });
@@ -79,13 +80,15 @@ function RecordTestInner() {
           <Link href="/students/scores" className="rounded-md border border-border bg-card p-2 hover:bg-muted/40">
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <PageHeader title={label ? `Record a test · Class ${label}` : "Record a test"}
-            subtitle="Drop the evaluated papers or type the marks — review, then save" />
+          <PageHeader title={label ? `Class ${label}` : "Scores"}
+            subtitle="Photograph the marked papers or type the marks — review, then save" />
         </div>
       </div>
 
       <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-sm font-medium w-fit">
-        {([["class", "Whole class"], ["few", "Few students"]] as const).map(([key, text]) => (
+        {/* V1-8 `D-81`: the class report card lives beside capture, because it
+            is the same marks read the other way round. */}
+        {([["class", "Whole class"], ["few", "Few students"], ["cards", "Report cards"]] as const).map(([key, text]) => (
           <button key={key} type="button"
             className={`rounded-md px-3.5 py-1.5 transition-colors ${tab === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40"}`}
             onClick={() => { setTab(key); setSubset(null); }}>
@@ -94,7 +97,9 @@ function RecordTestInner() {
         ))}
       </div>
 
-      {tab === "class" ? (
+      {tab === "cards" ? (
+        <ClassReportCard classId={classId} />
+      ) : tab === "class" ? (
         <ExamCapture classId={classId}
           onSaved={(exam) => router.push(`/students/scores/exam/${exam.id}`)} />
       ) : subset === null ? (

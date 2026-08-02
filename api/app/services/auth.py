@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import AuthError, ConflictError
+from app.core.school_code import new_school_code
 from app.core.security import (
     create_access_token,
     generate_raw_token,
@@ -104,7 +105,12 @@ class AuthService:
         self.db.add(user)
         self.db.flush()
 
-        org = Organization(name=org_name, timezone=tz)
+        # V1-11: mint the school code here too, not only on the platform path
+        # (`platform.py::create`). `D-13` makes it the first thing a parent
+        # types, so an org created without one has a parent portal that
+        # cannot be entered at all — and nothing would have said so.
+        org = Organization(name=org_name, timezone=tz,
+                           school_code=new_school_code(self.db))
         self.db.add(org)
         self.db.flush()
 
@@ -187,7 +193,12 @@ class AuthService:
     def create_org(self, user: User, *, org_name: str, tz: str) -> dict:
         """Create a new org owned by an already-signed-in user, then switch into it.
         Mirrors register_org's tail but reuses the existing user (no new account)."""
-        org = Organization(name=org_name, timezone=tz)
+        # V1-11: mint the school code here too, not only on the platform path
+        # (`platform.py::create`). `D-13` makes it the first thing a parent
+        # types, so an org created without one has a parent portal that
+        # cannot be entered at all — and nothing would have said so.
+        org = Organization(name=org_name, timezone=tz,
+                           school_code=new_school_code(self.db))
         self.db.add(org)
         self.db.flush()
         # The seed rows below belong to the NEW org; point RLS there so the
@@ -209,10 +220,21 @@ class AuthService:
         analytics.track(self.db, event=analytics.ORG_REGISTERED, org_id=org.id, user_id=user.id)
         return self._build_session(user, org, membership)
 
-    def update_profile(self, user: User, *, name: str) -> None:
-        """Update the signed-in user's display name. Name isn't in the JWT, so no
-        re-auth is needed — /me returns the new value immediately."""
+    def update_profile(self, user: User, *, name: str, membership=None,
+                       date_of_birth=None, set_dob: bool = False) -> None:
+        """Update the signed-in user's display name — and, V1-7 `D-56`, their own
+        date of birth.
+
+        DOB lives on the MEMBERSHIP, not the user: it is a school-facing fact
+        (the birthday feed), and a person who works at two schools should not
+        have one school's record of them follow them into the other. It is
+        **self-entered and never imported** — a teacher's DOB is not a field an
+        admin fills in on their behalf, and `Q-57` fences it away from anything
+        payroll-shaped and from every parent surface.
+        """
         user.name = name.strip()
+        if set_dob and membership is not None:
+            membership.date_of_birth = date_of_birth
         self.db.flush()
 
     def change_password(self, user: User, *, current_password: str, new_password: str) -> None:

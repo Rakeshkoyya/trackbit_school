@@ -24,6 +24,7 @@ from app.schemas.insights import (
     FollowupRow,
     HomeworkBoard,
     OverviewBoard,
+    ReachBoard,
     StaffBoard,
     StaffImpact,
     StreakBoard,
@@ -36,6 +37,7 @@ from app.services.insights.attendance import STREAK_ALERT_DAYS, AttendanceInsigh
 from app.services.insights.exams import ExamInsights
 from app.services.insights.homework import HomeworkInsights
 from app.services.insights.overview import OverviewService
+from app.services.insights.reach import ReachInsights
 from app.services.insights.syllabus import SyllabusInsights
 from app.services.insights.tasks import TaskInsights
 from app.services.insights.workload import WorkloadInsights
@@ -76,6 +78,18 @@ def attendance_calls(year_id: uuid.UUID | None = None,
     """V1-3 (S-08): the tab's questions — needs a call (D-86 coloured), the
     drifting band, chronic late, left after lunch."""
     return AttendanceInsights(db).call_board(m, year_id)
+
+
+@router.get("/attendance/reach", response_model=ReachBoard)
+def attendance_reach(on_date: date | None = None,
+                     m: CurrentMember = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    """V1-11 (`S-62`): which families the school's own alerts did not reach.
+
+    Lives under attendance because the absence alert is the message this
+    actually protects — removing WhatsApp did not remove the reach problem, it
+    made it visible, and this is where it becomes visible."""
+    return ReachInsights(db).board(m, on_date)
 
 
 # ── M3 staff (presence · leave · live board · load) ──────────────────────────
@@ -125,9 +139,13 @@ def tasks_board(window_days: int = Query(14, ge=1, le=60),
 # ── M6 exams ─────────────────────────────────────────────────────────────────
 @router.get("/exams", response_model=ExamsBoard)
 def exams_board(year_id: uuid.UUID | None = None, type: str | None = None,
+                scale: str | None = None,
                 m: CurrentMember = Depends(require_admin),
                 db: Session = Depends(get_db)):
-    return ExamInsights(db).board(m, year_id, type)
+    """V1-8: `type` filters on the school's own word for the exam type (`D-55`)
+    and `scale` on minor/major. Nothing in the payload is pooled across scales —
+    the board names the bucket every figure came from (`S-114`)."""
+    return ExamInsights(db).board(m, year_id, type, scale)
 
 
 # ── the action rail ──────────────────────────────────────────────────────────

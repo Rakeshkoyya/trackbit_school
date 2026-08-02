@@ -69,6 +69,33 @@ def _render(db: Session, n: Notification) -> tuple[str, str, str]:
     return title, body, url
 
 
+def push_to_user(db: Session, user_id: uuid.UUID, *, title: str, body: str,
+                 url: str) -> tuple[bool, bool]:
+    """Web-push every device this user registered. Returns (sent, had_devices).
+
+    The one push path in the app — staff notifications and V1-11's guardian
+    messages both come through here, so a dead subscription is purged once and
+    the delivery rules can never drift apart. `had_devices` is what lets the
+    caller tell "we tried and the browser refused" from "there was nothing to
+    try", which is the whole of `S-62`.
+    """
+    tokens = list(db.scalars(select(DeviceToken).where(DeviceToken.user_id == user_id)))
+    had_devices = bool(tokens)
+    for tok in tokens:
+        try:
+            subscription = json.loads(tok.token)
+        except (ValueError, TypeError):
+            continue
+        ok, gone = push_adapter.push_send(
+            subscription=subscription, title=title, body=body, url=url)
+        if gone:
+            db.execute(delete(DeviceToken).where(DeviceToken.id == tok.id))
+            continue
+        if ok:
+            return True, had_devices
+    return False, had_devices
+
+
 def deliver(db: Session, n: Notification) -> bool:
     """Deliver one notification. Updates its status/channel/sent_at. Returns success."""
     user = db.get(User, n.user_id)
@@ -78,19 +105,10 @@ def deliver(db: Session, n: Notification) -> bool:
     title, body, url = _render(db, n)
 
     # Try push first if the user has any device tokens.
-    tokens = list(db.scalars(select(DeviceToken).where(DeviceToken.user_id == n.user_id)))
-    for tok in tokens:
-        try:
-            subscription = json.loads(tok.token)
-        except (ValueError, TypeError):
-            continue
-        ok, gone = push_adapter.push_send(subscription=subscription, title=title, body=body, url=url)
-        if gone:
-            db.execute(delete(DeviceToken).where(DeviceToken.id == tok.id))
-            continue
-        if ok:
-            _mark_sent(n, "push")
-            return True
+    sent, _ = push_to_user(db, n.user_id, title=title, body=body, url=url)
+    if sent:
+        _mark_sent(n, "push")
+        return True
 
     # Email fallback — only for the report-style types (overdue / digest /
     # report_card). reminders, assigned, passed, unassigned and nudge are

@@ -72,6 +72,13 @@ class MyDayOut(BaseModel):
     classes: list[MyDayClass]
     periods: list[MyDayPeriod] = []
     homework_pending: list[HomeworkPending]
+    # V1-7 `S-145`: when the school has locked today (or some of its periods),
+    # those period cards are GONE from `periods` — not sitting there red. The
+    # teacher is told why instead, in one line she is asked nothing about.
+    # `S-132`: this is the one thing on My Day that gives without asking.
+    day_closed: bool = False
+    locked_periods: list[int] = []
+    lock_reason: str | None = None
     # D-41/D-43: the narrow task window BELOW the periods — rail follow-ups from
     # the last 3 working days ∪ due today, tickable in place, capped at 5.
     tasks: list[TaskOut] = []

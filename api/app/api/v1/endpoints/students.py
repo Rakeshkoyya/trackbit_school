@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_member, require_coordinator_up
 from app.schemas.common import MessageResponse
 from app.schemas.growth import StudentGrowthOut
+from app.schemas.report_card import ReportCard, StudentAnalysis
 from app.schemas.students import (
     CategoryCreate,
     CategoryOut,
@@ -34,6 +35,7 @@ from app.schemas.students import (
 from app.schemas.timeline import StudentTimelineOut
 from app.services import roster_import, templates
 from app.services.growth import GrowthService
+from app.services.report_card import ReportCardService
 from app.services.roster_import import RosterImporter
 from app.services.students import StudentService
 from app.services.timeline import StudentTimelineService
@@ -54,6 +56,27 @@ def student_growth(student_id: uuid.UUID, m: CurrentMember = Depends(get_current
     """Chapter-level growth report with topic drill-down. Staff-only; the service
     limits teachers to students in classes they teach (admin sees all)."""
     return GrowthService(db).growth(m, student_id)
+
+
+# ── report card + analysis (V1-8, `D-81`) ────────────────────────────────────
+# Two levels, deliberately: the card is numbers only; the analysis is the
+# narrative over the SAME figures. Both use the growth report's access rule —
+# admin any student, a teacher only students in a class they teach.
+@router.get("/{student_id}/report-card", response_model=ReportCard)
+def student_report_card(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_member),
+                        db: Session = Depends(get_db)):
+    """Level 1 — the standard report card: this child's subjects and the exams
+    they sat, numbers only, never a band (P4)."""
+    return ReportCardService(db).for_student(m, student_id)
+
+
+@router.get("/{student_id}/analysis", response_model=StudentAnalysis)
+def student_analysis(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_member),
+                     db: Session = Depends(get_db)):
+    """Level 2 — per topic, skill abilities and a per-subject narrative written
+    over figures the product already computes (AI-off writes the deterministic
+    version, so the page is never empty)."""
+    return ReportCardService(db).analysis(m, student_id)
 
 
 # ── roster xlsx import (SPRD §5.6) ───────────────────────────────────────────

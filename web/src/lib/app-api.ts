@@ -2,14 +2,12 @@ import { api } from "@/lib/api-client";
 import type {
   AdminResetResult,
   Attachment,
-  Billing,
   Board,
   BulkMemberInput,
   BulkMembersResult,
   BoardReport,
   BoardsList,
   BoardTable,
-  Checkout,
   CompleteResult,
   History,
   Home,
@@ -63,8 +61,6 @@ export const appApi = {
   updateBoard: (id: string, body: Record<string, unknown>) =>
     api.patch<Board>(`/boards/${id}`, body),
   deleteBoard: (id: string) => api.del<{ message: string }>(`/boards/${id}`),
-  boardTasks: (id: string, includeDone = true) =>
-    api.get<Task[]>(`/boards/${id}/tasks?include_done=${includeDone}`),
   // D-44: default = open + last-7-days done; the date range reaches older done rows.
   boardTable: (id: string, range?: { doneFrom?: string; doneTo?: string }) => {
     const params = new URLSearchParams();
@@ -140,11 +136,9 @@ export const appApi = {
     address?: string | null; state?: string | null; board?: string | null;
     phone?: string | null;
     attendance_mode?: string; min_attendance_pct?: number; homework_gap_days?: number;
+    training_data_opt_in?: boolean;
     work_categories?: { key?: string | null; label: string; active: boolean }[];
   }) => api.patch<OrgSettings>("/org/settings", body),
-  billing: () => api.get<Billing>("/billing"),
-  startCheckout: () => api.post<Checkout>("/billing/checkout"),
-
   // Members
   members: () => api.get<{ members: Member[] }>("/org/members"),
   inviteMember: (body: { name: string; email: string; role: string }) =>

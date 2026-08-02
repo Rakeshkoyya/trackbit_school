@@ -3,7 +3,12 @@
 The school's social calendar: whose birthday it is, what the school has planned, and which
 festival or observance is coming — on one card, in time to do something about it.
 
-**Sessions:** 7 (2026-08-01)
+**Sessions:** 7 (2026-08-01) · **BUILT as V1-7 (2026-08-02)** — migration `d6e7f8a9b0c1`.
+Build-order steps **1–7 are done**; step 8's wishes are not built (`Q-58` is still open) and there
+is no month/agenda grid beyond the dashboard card (`Q-60` answered (a)+(b)). §4's defect 1 is
+closed by `services/whats_on.py`, defect 2 by the approval sheet, defect 3 by V1-2's DOB.
+🔴 **The catalogue table ships EMPTY** — `Q-63` is unanswered and inventing dates is the one thing
+this module must never do. See `docs/v1/PROGRESS.md` (session 5) for what that means in practice.
 **Related:** [`syllabus.md`](syllabus.md) *(the same `calendar_events` rows drive the
 effective-days engine)* · [`parent-access.md`](parent-access.md) *(`S-130`)* ·
 [`class-teacher.md`](class-teacher.md) *(whose class the birthday is in)*

@@ -979,8 +979,16 @@ class PlannerService:
         ).all()
         return self._forecast_rows(m, rows)
 
-    def forecast_org(self, m: CurrentMember, year_id: uuid.UUID) -> list[ForecastOut]:
+    def forecast_org(self, m: CurrentMember, year_id: uuid.UUID,
+                     extra_events: list[tuple] | None = None) -> list[ForecastOut]:
         """Every class-subject in the year, in ONE batch (DASH3 PR-6).
+
+        `extra_events` is V1-7's cost preview (`S-143`): the same computation run
+        against the calendar the school WOULD have if it locked a date, so the
+        approval sheet can say "removes 8 periods, 6-B Maths goes green→amber"
+        *before* the admin commits. It never touches the database — the rows are
+        the engine's own (start, end, affects_teaching, blocks_periods) tuples,
+        substituted for what `_calendar` would have loaded.
 
         `forecast(class_id)` is already batched within a class, but the dashboard
         used to call it in a loop over classes — one calendar read, two IN()
@@ -997,9 +1005,10 @@ class PlannerService:
                    SchoolClass.academic_year_id == year_id)
             .order_by(SchoolClass.name, SchoolClass.section, Subject.name)
         ).all()
-        return self._forecast_rows(m, rows)
+        return self._forecast_rows(m, rows, extra_events=extra_events)
 
-    def _forecast_rows(self, m: CurrentMember, rows) -> list[ForecastOut]:
+    def _forecast_rows(self, m: CurrentMember, rows,
+                       extra_events: list[tuple] | None = None) -> list[ForecastOut]:
         """The shared computation — see `forecast`. `rows` is
         (ClassSubject, subject_name, SchoolClass), all in ONE academic year."""
         if not rows:
@@ -1036,7 +1045,11 @@ class PlannerService:
         }
 
         year = self.db.get(AcademicYear, rows[0][2].academic_year_id)
-        blocked, partial = self._calendar(m.org_id, year.id) if year else (set(), {})
+        if extra_events is not None:
+            blocked = expand_blocked_dates(extra_events)
+            partial = expand_partial_blocks(extra_events)
+        else:
+            blocked, partial = self._calendar(m.org_id, year.id) if year else (set(), {})
         floor = self._tracking_floor(year) if year else None
         terms = list(self.db.scalars(
             select(Term).where(Term.org_id == m.org_id,

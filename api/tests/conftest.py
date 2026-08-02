@@ -61,7 +61,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.core.rate_limit import limiter  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import Organization, User  # noqa: E402
+from app.models import Observance, Organization, User  # noqa: E402
 
 # Privileged session for setup/teardown (bypasses RLS) — never used by app code.
 # One connection at a time is plenty: this engine only runs the cleanup deletes, and
@@ -140,10 +140,16 @@ def cleanup():
     """Track org/user ids created during a test and hard-delete them afterwards."""
     org_ids: list[uuid.UUID] = []
     user_ids: list[uuid.UUID] = []
-    yield {"orgs": org_ids, "users": user_ids}
+    # V1-7: `observances` is PLATFORM data — no org_id, so deleting the org does
+    # not take it with it, and its UNIQUE(key, date) would collide on the next
+    # run. Anything a test puts in the catalogue is tracked here.
+    observance_ids: list[uuid.UUID] = []
+    yield {"orgs": org_ids, "users": user_ids, "observances": observance_ids}
 
     db = AdminSession()
     try:
+        for oid in observance_ids:
+            db.execute(delete(Observance).where(Observance.id == oid))
         # Orgs first (cascades boards/tasks/memberships), then global users.
         for oid in org_ids:
             db.execute(delete(Organization).where(Organization.id == oid))

@@ -9,12 +9,13 @@
 // where they are missing the room (attendance per subject).
 
 import { AlertTriangle, Sparkles } from "lucide-react";
+import { useState } from "react";
 
 import {
   AbilityRadar, ChartCard, RowBars, StatTile, TrendLine,
   SERIES_COLORS, toneForPct, type ChartRow, type Series,
 } from "@/components/charts";
-import type { StudentGrowth } from "@/lib/school-types";
+import type { GrowthSubject, StudentGrowth } from "@/lib/school-types";
 
 const pct = (score: number, max: number) => (max ? Math.round((score / max) * 100) : null);
 
@@ -160,21 +161,37 @@ export function StrengthsAndGrowth({ data }: { data: StudentGrowth }) {
   );
 }
 
-/** Score history — one line per subject across the cycles this student sat.
- * Subjects without two scores are dropped: a single dot is not a trend. */
+/** Score history — one line per subject (V1-8, `S-114`).
+ *
+ * **The two scales are never drawn as one series.** Before V1-8 this chart put
+ * a 5-mark slip test and an 80-mark final on the same line, so a child at 40%
+ * on slips and 85% in the finals read as *erratic* — and a flat-60% child read
+ * the same whether that 60% came from slip tests or from the exams that matter.
+ * Minor tests show movement, major exams show standing; the toggle says which
+ * one you are looking at, and defaults to whichever the child actually has.
+ *
+ * Subjects without two scores **in the chosen bucket** are dropped: a single
+ * dot is not a trend. */
 export function ScoreHistory({ data }: { data: StudentGrowth }) {
-  const withHistory = data.subjects.filter((s) => s.scores.length >= 2).slice(0, SERIES_COLORS.length);
+  const has = (scale: "minor" | "major") =>
+    data.subjects.some((s) => s.scores.filter((sc) => sc.scale === scale).length >= 2);
+  const [scale, setScale] = useState<"minor" | "major">(has("minor") ? "minor" : "major");
+  const inScale = (s: GrowthSubject) => s.scores.filter((sc) => sc.scale === scale);
+
+  const withHistory = data.subjects
+    .filter((s) => inScale(s).length >= 2)
+    .slice(0, SERIES_COLORS.length);
   if (!withHistory.length) return null;
 
   // Cycle names ordered by date across every subject — the shared x axis.
   const seen = new Map<string, string>();   // cycle_name → date
-  for (const s of data.subjects) for (const sc of s.scores) seen.set(sc.cycle_name, sc.date);
+  for (const s of data.subjects) for (const sc of inScale(s)) seen.set(sc.cycle_name, sc.date);
   const cycles = [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([name]) => name);
 
   const rows: ChartRow[] = cycles.map((name) => {
     const row: ChartRow = { x: name };
     for (const s of withHistory) {
-      const hit = s.scores.find((sc) => sc.cycle_name === name);
+      const hit = inScale(s).find((sc) => sc.cycle_name === name);
       row[s.class_subject_id] = hit ? pct(hit.score, hit.max_score) : null;
     }
     return row;
@@ -184,7 +201,22 @@ export function ScoreHistory({ data }: { data: StudentGrowth }) {
   }));
 
   return (
-    <ChartCard title="Score history" hint="Percentage in each test, subject by subject.">
+    <ChartCard
+      title="Score history"
+      hint={scale === "minor"
+        ? "Minor tests — these show which way a child is moving."
+        : "Major exams — these show where a child stands."}
+      action={has("minor") && has("major") ? (
+        <div className="flex items-center gap-1 rounded-md border border-border p-0.5 text-xs">
+          {(["minor", "major"] as const).map((sc) => (
+            <button key={sc} type="button" onClick={() => setScale(sc)}
+              className={`rounded px-2 py-1 capitalize ${scale === sc
+                ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}>
+              {sc === "minor" ? "Minor tests" : "Major exams"}
+            </button>
+          ))}
+        </div>
+      ) : undefined}>
       <TrendLine rows={rows} series={series} yUnit="%" yDomain={[0, 100]} height={240} />
     </ChartCard>
   );

@@ -26,7 +26,17 @@ class PeriodOpenIn(BaseModel):
 
 
 class PeriodNotHeldIn(BaseModel):
+    """V1-7 `S-147`: the reason POINTS AT THE EVENT, not at free text.
+
+    "Not held — Independence Day rehearsal" typed by forty teachers in forty
+    spellings answers nothing. With `event_id` set, the school can ask what
+    Diwali cost it in periods and which classes lost the most to functions this
+    term. Free text stays available as the note — it is what she types when the
+    reason is not on the calendar at all, which is `S-146`'s per-class case
+    (8-A went to the rehearsal while 8-B carried on teaching).
+    """
     reason: str = Field(min_length=1)
+    event_id: uuid.UUID | None = None
 
 
 class PeriodOut(BaseModel):
@@ -38,6 +48,7 @@ class PeriodOut(BaseModel):
     teacher_member_id: uuid.UUID | None = None
     status: str
     not_held_reason: str | None = None
+    not_held_event_id: uuid.UUID | None = None
     opened_at: datetime
     closed_at: datetime | None = None
     attendance_marked_at: datetime | None = None
@@ -90,6 +101,15 @@ class PeriodHomeworkOut(BaseModel):
     due_date: date | None = None
 
 
+class PeriodEventOut(BaseModel):
+    """One approved calendar row running on this date, offered as the reason."""
+    id: uuid.UUID
+    title: str
+    type: str
+    affects_teaching: bool
+    blocks_periods: list[int] | None = None
+
+
 class PeriodCardOut(BaseModel):
     """Everything the period-detail page renders in one call.
 
@@ -108,6 +128,17 @@ class PeriodCardOut(BaseModel):
     period_id: uuid.UUID | None = None
     status: str = "held"
     not_held_reason: str | None = None
+    not_held_event_id: uuid.UUID | None = None
+    # The approved events running on this date — the picker behind "not held,
+    # because" (`S-147`). Empty on an ordinary day, and the teacher types
+    # instead.
+    day_events: list["PeriodEventOut"] = []
+    # V1-7 `S-145`: the admin already locked this period school-wide, so the
+    # teacher is never ASKED about it. `S-146`: the admin's lock and the
+    # teacher's block are different scopes and must not both be recorded, or the
+    # day is subtracted from capacity twice.
+    locked: bool = False
+    lock_reason: str | None = None
     opened: bool = False
     closed: bool = False
 

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { WhatsOnCard } from "@/components/school/whats-on";
 import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { dayLabel } from "@/lib/format";
+import { eventsApi } from "@/lib/events-api";
 import { schoolApi } from "@/lib/school-api";
 import type { MyDayClass, MyDayPeriod } from "@/lib/school-types";
 import type { Task } from "@/lib/types";
@@ -250,6 +252,13 @@ function MyDayInner() {
   const toCheck = queue?.to_check ?? 0;
   const overdue = queue?.overdue ?? 0;
 
+  // S-132 — the one thing on this screen that asks her for nothing. It is
+  // absent entirely when there is nothing on, never an empty state.
+  const { data: whatsOn } = useQuery({
+    queryKey: ["whats-on"],
+    queryFn: () => eventsApi.whatsOn({ horizon: 7 }),
+  });
+
   // Classes already covered by a period row don't need a second card below.
   const periodCsIds = new Set((data?.periods ?? []).map((p) => p.class_subject_id));
   const otherClasses = (data?.classes ?? []).filter((c) => !periodCsIds.has(c.class_subject_id));
@@ -276,6 +285,31 @@ function MyDayInner() {
         </Link>
       ) : null}
 
+      <div className="mb-6"><WhatsOnCard data={whatsOn} variant="strip" /></div>
+
+      {/* S-145 — the school locked today, so there is nothing to capture and
+          she is told why rather than shown eight rows saying "not logged".
+          What was already recorded is untouched (Q-65); it simply stops being
+          asked for. */}
+      {data?.day_closed ? (
+        <div className="mb-6 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+          <span className="font-medium">School is closed today</span>
+          {data.lock_reason ? (
+            <span className="text-muted-foreground"> · {data.lock_reason}</span>
+          ) : null}
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Nothing to mark or log. Enjoy it.
+          </p>
+        </div>
+      ) : data?.locked_periods?.length ? (
+        <p className="mb-4 text-xs text-muted-foreground">
+          {data.lock_reason ? `${data.lock_reason} — ` : ""}
+          period{data.locked_periods.length > 1 ? "s" : ""}{" "}
+          {data.locked_periods.join(", ")} {data.locked_periods.length > 1 ? "are" : "is"} off
+          today.
+        </p>
+      ) : null}
+
       {data && data.periods.length > 0 ? (
         <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold">Today’s periods</h2>
@@ -290,7 +324,7 @@ function MyDayInner() {
       {/* D-41: below the periods, never above them (D-24). */}
       {data ? <TasksSection tasks={data.tasks ?? []} olderCount={data.older_task_count ?? 0} /> : null}
 
-      {!data || (data.periods.length === 0 && otherClasses.length === 0) ? (
+      {!data || (!data.day_closed && data.periods.length === 0 && otherClasses.length === 0) ? (
         data && data.homework_pending.length === 0 ? (
           <EmptyState icon={BookOpen} title="No classes assigned to you"
             body="Ask your admin to assign your subjects on the Setup → class page." />

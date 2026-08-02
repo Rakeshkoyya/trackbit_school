@@ -13,6 +13,7 @@ What matters here:
 The model is always scripted (chat_tools is monkeypatched) — no network."""
 
 import json
+import re
 import types
 import uuid
 
@@ -107,12 +108,18 @@ def test_registry_role_filtering_and_schemas():
     teacher_tools = {t["function"]["name"] for t in registry.to_openai_tools(teacher)}
     admin_tools = {t["function"]["name"] for t in registry.to_openai_tools(admin)}
     # Teachers never even see the fee/admin surfaces (P: teachers never see fees).
-    assert "get_fee_summary" not in teacher_tools
-    assert "get_overdue_fees" not in teacher_tools
+    # Asserted on the WHOLE teacher surface rather than two names, so a fee tool
+    # added later cannot slip past this test by being called something else —
+    # which is exactly what happened when V1-12 renamed the pair below.
+    # Word-boundary, not a substring: `get_exam_feed` contains "fee" and is a
+    # perfectly legitimate teacher tool.
+    assert not [n for n in teacher_tools if re.search(r"(^|_)fees?(_|$)", n)],         "no fee tool may be visible to a teacher, whatever it is named"
     assert "get_school_overview" not in teacher_tools
     assert {"get_attendance_roster", "get_student_growth",
             "search_students"} <= teacher_tools
-    assert {"get_fee_summary", "get_dashboard"} <= admin_tools
+    # V1-12: one fee tool, and it is the SAME computation `/fees` renders
+    # (`CollectionService.board`) — quarters and carried dues included.
+    assert {"get_fee_collection", "get_dashboard"} <= admin_tools
     # Valid function-tool schemas throughout.
     for t in registry.to_openai_tools(admin):
         assert t["type"] == "function"

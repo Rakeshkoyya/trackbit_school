@@ -16,21 +16,27 @@ check in get_current_parent + _assert_child here.
 """
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session, selectinload
 
 from app.core import homework_verdict as verdicts
 from app.core.context import CurrentParent
 from app.core.exceptions import ForbiddenError
-from app.models import Organization, Student
+from app.models import CalendarEvent, Guardian, GuardianMessage, Organization, Student
 from app.schemas.parent import (
+    ParentCalendarItem,
+    ParentCalendarOut,
+    ParentFeeLine,
     ParentHomeworkDay,
     ParentHomeworkItem,
     ParentMonthDay,
+    ParentNotification,
+    ParentNotificationsOut,
     ParentReportOut,
     ParentReportSubject,
+    ParentScore,
     ParentSessionItem,
     ParentTaughtItem,
     ParentTodayOut,
@@ -99,7 +105,49 @@ class ParentPortalService:
                             if status in ("absent", "left_after_lunch") else None),
             school_phone=p.org.phone,
             taught=taught, homework=homework, sessions=sessions,
-            yesterday=yesterday, pending=pending, missed=missed)
+            yesterday=yesterday, pending=pending, missed=missed,
+            fee=self._fee_line(p, student_id))
+
+    def _fee_line(self, p: CurrentParent, student_id: uuid.UUID) -> ParentFeeLine | None:
+        """V1-10 (`D-66`/`Q-69`) — *how much, and by when*, or nothing at all.
+
+        Three rules, and the third is the one that matters most:
+
+        * **One line, never a ledger** (`S-160`). The transaction history is the
+          office's screen.
+        * **Field by field** — this returns a `ParentFeeLine`, not a slice of the
+          admin's payload, so a new fee field cannot reach a family by accident
+          (the `ParentScore` lesson from V1-8).
+        * **It does not render when nothing is due.** A family that has paid
+          sees no money message at all, and the tone is never dunning: a
+          reminder, not a demand.
+        """
+        from app.core.collection import reminder_line  # noqa: PLC0415
+        from app.models import StudentFee  # noqa: PLC0415
+        from app.services.fee_math import q  # noqa: PLC0415
+
+        sf = self.db.scalar(
+            select(StudentFee).options(selectinload(StudentFee.installments))
+            .where(StudentFee.org_id == p.org.id, StudentFee.student_id == student_id)
+            .order_by(StudentFee.created_at.desc()).limit(1))
+        if sf is None:
+            return None
+        due_total, earliest, paid = 0.0, None, 0.0
+        for inst in sf.installments:
+            paid += float(q(inst.paid_amount))
+            unpaid = float(q(inst.amount) - q(inst.paid_amount))
+            if unpaid <= 0:
+                continue
+            due_total += unpaid
+            if inst.due_date and (earliest is None or inst.due_date < earliest):
+                earliest = inst.due_date
+        if due_total <= 0:
+            return None      # nothing due → no line at all
+        return ParentFeeLine(
+            amount_due=round(due_total, 2), due_date=earliest,
+            paid_so_far=round(paid, 2),
+            line=reminder_line(due_total, earliest, paid),
+            school_phone=p.org.phone)
 
     def _month_pattern(self, p: CurrentParent, student_id: uuid.UUID, today: date,
                        ) -> tuple[list["ParentMonthDay"], int, int]:
@@ -246,7 +294,11 @@ class ParentPortalService:
                     chapters=s.chapters,
                     homework_assigned=s.homework_assigned,
                     homework_personal=s.homework_personal,
-                    scores=s.scores,
+                    # Field by field, never `scores=s.scores` — see ParentScore.
+                    scores=[ParentScore(
+                        cycle_name=sc.cycle_name, date=sc.date, score=sc.score,
+                        max_score=sc.max_score, type_label=sc.type_label,
+                        scale=sc.scale) for sc in s.scores],
                     # `S-51`/`S-54`: the coverage figure, computed once in
                     # `core.coverage` and named here deliberately. The basis is
                     # the WHOLE syllabus — the only denominator that cannot
@@ -267,3 +319,122 @@ class ParentPortalService:
             strengths=g.strengths,
             growth_areas=g.growth_areas,
         )
+
+    # ── D-08/D-14 · the notifications archive ────────────────────────────
+    def _guardian_ids(self, p: CurrentParent) -> list[uuid.UUID]:
+        """The guardian rows this login owns, in this org.
+
+        Not `p.child_ids()` — a message is addressed to a *guardian*, and a
+        family can have two of them with different opt-out choices. Reading by
+        guardian row is what keeps one parent's archive their own."""
+        return list(self.db.scalars(select(Guardian.id).where(
+            Guardian.org_id == p.org.id, Guardian.user_id == p.user_id)))
+
+    def notifications(self, p: CurrentParent, limit: int = 50) -> ParentNotificationsOut:
+        """`S-61` — the archive, not the delivery mechanism.
+
+        Everything here has already appeared on Today; this tab exists for the
+        parent who was out on Tuesday and wants to know what they missed. Scoped
+        to this login's guardian rows, so a message about one family never
+        reaches another (`_assert_child`'s rule, applied at the row level)."""
+        gids = self._guardian_ids(p)
+        if not gids:
+            return ParentNotificationsOut()
+        rows = self.db.execute(
+            select(GuardianMessage, Student.full_name)
+            .join(Student, Student.id == GuardianMessage.student_id)
+            .where(GuardianMessage.guardian_id.in_(gids))
+            .order_by(GuardianMessage.created_at.desc()).limit(limit)
+        ).all()
+        unread = self.db.scalar(select(func.count(GuardianMessage.id)).where(
+            GuardianMessage.guardian_id.in_(gids),
+            GuardianMessage.read_at.is_(None))) or 0
+        return ParentNotificationsOut(
+            unread=int(unread),
+            items=[ParentNotification(
+                # Field by field, never a spread — a column added to
+                # `guardian_messages` for the office (`unreachable_reason` is
+                # exactly such a column) must not reach a family by accident.
+                id=gm.id, kind=gm.kind, title=gm.title, body=gm.body, url=gm.url,
+                student_id=gm.student_id, student_name=name,
+                created_at=gm.created_at, read=gm.read_at is not None)
+                for gm, name in rows])
+
+    def mark_read(self, p: CurrentParent) -> int:
+        """Stamp this login's unread messages as read.
+
+        The single write a parent may perform, and deliberately not content:
+        the read-only fence is about a family contributing data about the school
+        or the child. An unread badge that cannot clear is just a broken
+        archive, and a parent who cannot clear it stops opening the tab — which
+        would cost the school the channel that carries the absence alert."""
+        gids = self._guardian_ids(p)
+        if not gids:
+            return 0
+        res = self.db.execute(
+            update(GuardianMessage)
+            .where(GuardianMessage.guardian_id.in_(gids),
+                   GuardianMessage.read_at.is_(None))
+            .values(read_at=datetime.now(UTC)))
+        self.db.flush()
+        return int(res.rowcount or 0)
+
+    # ── Q-56 · the school calendar ───────────────────────────────────────
+    _CALENDAR_WORDS = {
+        "holiday": "School closed", "exam_block": "Exam",
+        "celebration": "Celebration", "event": "Event",
+    }
+
+    def calendar(self, p: CurrentParent, student_id: uuid.UUID,
+                 on_date: date | None = None, horizon: int = 60) -> ParentCalendarOut:
+        """*"Is school open on Monday?"* — read-only, zero new capture.
+
+        The rows already exist and are already maintained; this is the cheapest
+        win available to the portal. Two constraints, both load-bearing:
+
+        * the same curated allowlist as every other parent surface — the event's
+          title, its dates and whether school is closed, and nothing else. Not
+          who approved it, not what it cost the plan, not the periods it blocks.
+        * **only this child's birthday.** The staff feed (`whats_on.py`) lists
+          every student's and every colleague's, which is why it is not reused
+          here: a list of classmates' birthdays is a roster leak wearing a party
+          hat.
+        """
+        self._assert_child(p, student_id)
+        today = on_date or date.today()
+        end = today + timedelta(days=horizon)
+        events = self.db.scalars(
+            select(CalendarEvent)
+            .where(CalendarEvent.org_id == p.org.id,
+                   CalendarEvent.end_date >= today, CalendarEvent.start_date <= end)
+            .order_by(CalendarEvent.start_date))
+        items = [
+            ParentCalendarItem(
+                date=e.start_date,
+                end_date=e.end_date if e.end_date != e.start_date else None,
+                title=e.title, kind=e.type,
+                # `affects_teaching` is the school's own switch and already
+                # drives the planner; here it is simply the answer to the
+                # question the parent came with.
+                closed=bool(e.affects_teaching and not e.blocks_periods),
+                detail=self._CALENDAR_WORDS.get(e.type, e.type))
+            for e in events
+        ]
+
+        student = self.db.get(Student, student_id)
+        if student is not None and student.date_of_birth is not None:
+            dob = student.date_of_birth
+            for year in (today.year, today.year + 1):
+                try:
+                    this_year = dob.replace(year=year)
+                except ValueError:      # 29 Feb in a non-leap year
+                    this_year = date(year, 3, 1)
+                if today <= this_year <= end:
+                    items.append(ParentCalendarItem(
+                        date=this_year, title=f"{student.full_name}'s birthday",
+                        # `S-133` — the day, never the age.
+                        kind="birthday", closed=False, detail="Birthday"))
+                    break
+
+        items.sort(key=lambda i: i.date)
+        return ParentCalendarOut(items=items)

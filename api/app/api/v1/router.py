@@ -7,12 +7,14 @@ from app.api.v1.endpoints import (
     assessments,
     attendance,
     auth,
+    bands,
     billing,
     boards,
     checks,
     classroom,
     daily_report,
     dashboard,
+    events,
     fees,
     homework,
     insights,
@@ -60,6 +62,8 @@ api_router.include_router(my_class.router, prefix="/my-class", tags=["my-class"]
 api_router.include_router(periods.router, prefix="/periods", tags=["periods"])
 api_router.include_router(overview.router, prefix="/overview", tags=["overview"])
 api_router.include_router(checks.router, prefix="/checks", tags=["checks"])
+# V1-7 — the read side of the school calendar, and the approval sheet
+api_router.include_router(events.router, prefix="/events", tags=["events"])
 api_router.include_router(classroom.router, prefix="/classroom", tags=["classroom"])
 # HW-1 homework analytics (capture stays on /classroom)
 api_router.include_router(homework.router, prefix="/homework", tags=["homework"])
@@ -71,6 +75,9 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 api_router.include_router(insights.router, prefix="/insights", tags=["insights"])
 api_router.include_router(daily_report.router, prefix="/reports", tags=["reports"])
 api_router.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
+# V1-9 the support programme — bands, promotion, ownership and the weekly
+# check-in. Its own prefix because it is a programme, not an assessment surface.
+api_router.include_router(bands.router, prefix="/bands", tags=["bands"])
 api_router.include_router(students.router, prefix="/students", tags=["students"])
 api_router.include_router(fees.router, prefix="/fees", tags=["fees"])
 api_router.include_router(lucy.router, prefix="/lucy", tags=["lucy"])

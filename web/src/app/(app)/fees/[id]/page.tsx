@@ -7,6 +7,7 @@ import { use, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { FeeConversation } from "@/components/school/fee-conversation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -117,6 +118,11 @@ function FeeDetailInner({ id }: { id: string }) {
         <div className="flex-1"><Label>Update discount</Label><Input type="number" placeholder={data.discount} value={discount} onChange={(e) => setDiscount(e.target.value)} /></div>
         <Button variant="outline" onClick={() => discount && setDisc.mutate()} disabled={setDisc.isPending || !discount}>Apply</Button>
       </div>
+
+      {/* V1-10 (`D-84`): the conversation, above the ledger — because the
+          question at the counter is "what did they say", not "what did we
+          record". */}
+      <div className="mb-6"><FeeConversation studentFeeId={id} /></div>
 
       <h2 className="mb-2 text-sm font-semibold">Ledger</h2>
       <div className="space-y-1">

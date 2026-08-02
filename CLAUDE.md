@@ -85,8 +85,14 @@ ruff clean; web tsc + eslint + `next build` clean). Migration head = **`d3f4a5b6
   `notify_guardian.py` (WhatsApp console stub); `/classroom/*`; web `/classroom` (My Day, CL-1/2/3)
   + `/classroom/compliance` (CL-4).
 
-Demo logins (all `demo1234`): `kc@` (director), `priya@` (coordinator), `ramesh@`/`anil@` (teachers)
-— all `@demo.trackbit.app`.
+Demo logins (all `demo1234`, all `@demo.trackbit.app` unless noted):
+- **admin** `kc@` · `priya@`
+- **teacher** `ramesh@` (6-A Maths/Science, 6-A class teacher — the richest teacher walk) ·
+  `anil@` (6-A English/Social/Hindi) · `sunita@`/`farhan@` (6-B) · `meera@`/`kavya@` (7-A)
+- **super-admin** `super@trackbit.app` → lands on `/platform`
+- **parent** — school code `DEMO123`, then class → section → child → date of birth
+- **mid-year school** (`scripts/seed_midyear.py`, school code `MIDYR26`):
+  `head@midyear.trackbit.app` (admin) · `asha@midyear.trackbit.app` (teacher, 8-A)
 
 - **P1.5** — `models/sessions.py` (sessions, session_students, session_meetings, session_attendance;
   migration `d7d8e9fab0c1`); `SessionService`; `/sessions/*`; web `/sessions` (SS-1) +
@@ -629,6 +635,351 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     filtered) + `/planner/class-syllabus/{id}` (class teacher or admin, 403 `not_your_class`).
     Web: `/plan/my-subjects` (a teacher's Plan nav points here), `components/school/subject-pace-list.tsx`
     shared with My Class's new syllabus block. `test_syllabus_v1_6.py` (12).
+- **V1-7 (events, dates & birthdays, 2026-08-02)** — migration **`d6e7f8a9b0c1`** (head)
+  **on dev + test; prod still needs it and `c5d6e7f8a9b0`.** `calendar_events` had had a write
+  side for a year and **no reader**: its only consumer was the function that *subtracts* it from
+  the teaching total, so the most-asked question about a calendar — what is on this week — had no
+  surface anywhere.
+  - **`services/whats_on.py`** is the read side: **one computation, three sources** (`S-121`) —
+    student birthdays and staff birthdays **DERIVED** from `date_of_birth` (V1-2), never stored as
+    events, plus the school's own `calendar_events`. `GET /events/whats-on` (`require_academic`)
+    serves the admin card and the teacher strip from one endpoint; `components/school/whats-on.tsx`
+    is built once and mounted twice. `S-128` rolls a vacation birthday to the nearest working day
+    **and says so**; `S-133` renders the day, never the age; `S-124` carries the denominator
+    ("birthdays known for 13 of 15").
+  - **`calendar.day_lock()` / `day_locks()` is THE "is this period still expected?"** (`S-145`) —
+    now read by My Day, `jobs.run_teacher_reminder`, the capture heatmap and the daily report.
+    Before it, a declared holiday showed every teacher eight unlogged period rows, pushed her at
+    16:00, and read as the year's worst capture day. ⚠️ `Q-65`: it removes a period from what is
+    **asked for**, never from what was **recorded** — a school that shut at 11am did teach
+    period 1, and the period card still opens on a locked period.
+  - **The approval sheet is the module** (`D-57`/`D-58`/`D-79`): the date is **editable**,
+    pre-filled from the suggestion, so *"Christmas — closed, 25 Dec"* and *"Christmas celebration
+    — open, 22 Dec"* are two approvals from one row. Three lock levels map onto the existing
+    `affects_teaching` + `blocks_periods`, which `effective_periods` has prorated since V2-P7 —
+    no new engine. **`S-143`** prices it first: `PlannerService.forecast_org` gained
+    `extra_events`, so `POST /events/cost` runs the identical computation against the calendar the
+    school *would* have and names the RAG moves.
+  - **`observances` is PLATFORM data** (`D-60`/`S-149`) — no `org_id`, no RLS, `require_super_admin`
+    on every write, the `demo_requests`/EN-1 shape; scoped per school by **`state` + `board`**
+    (`D-61`), both already collected at setup. `source` is **NOT NULL** (`S-150`).
+    `event_decisions` is the school's **append-only** record (`S-148`), and a dismissal keys on the
+    stable `key` so next year's entry does not return. `/platform/catalogue` is the curation tab
+    (3rd, beside Schools · Enquiries) with an annual paste-import that upserts on (key, date).
+  - 🔴 **The catalogue ships EMPTY and that is correct.** `Q-63` (what the real sources are, and
+    the annual cycle) is unanswered; filling the table by asking a model when Diwali is would be
+    `S-123`'s rejected row wearing a table for a hat. Steps 1–6 of the module run on the school's
+    own dates and birthdays alone.
+  - `S-147` `class_periods.not_held_event_id` — the teacher's "not held, because" points at the
+    approved event, so *"what did Diwali cost us in periods?"* is a query. `S-146`: **if the admin
+    locked it, the teacher is never asked** (both would subtract the day twice). `D-56` staff DOB
+    is self-entered on Account via `PATCH /auth/me` (`set_date_of_birth` guards it). `Q-64`
+    answered (a) — the teacher's strip is never provisional. `Q-60` answered (a)+(b) — the feed
+    lives on Plan → Year, the card is an agenda list, **no third month view**.
+    `test_events_v1_7.py` (10).
+- **V1-8 (exams, scores & reports, 2026-08-02)** — migration **`e7f8a9b0c1d2`** (head, revises
+  `d6e7f8a9b0c1`) **on dev + test; prod needs `c5d6e7f8a9b0` → `d6e7f8a9b0c1` → this.** The module
+  recorded exams and did not **organise** them: a 5-mark slip test and an 80-mark term exam were
+  added into one fraction on three screens, a school running **CET** could not record one, and the
+  feed's *"· verified"* badge could not light up for any exam saved through SC-5.
+  - **`core/exams.py` is now THE exam vocabulary** — import it, never re-decide it. `minor` |
+    `major` and **never pooled** (`S-114`/`Q-50`): trajectory is drawn from minor, standing read
+    from major, and `ScaleTally` **has no method that returns a blended number**, so a caller who
+    wants one must write the addition where a reviewer can see it. `ScoreFigure` cannot render
+    without its denominator (`S-118`) — *"61% across 5 of the 9 tests"* — plus
+    `clean_question_marks` and `sum_mismatch` (`S-116`'s surviving half: **the marks don't add
+    up**, arithmetic about the teacher's paper, never a claim about a child).
+  - **`services/exam_marks.py::load_class_marks` is the one batched marks read** (4 queries for a
+    whole class): the growth report, the student report card and the class card all go through it,
+    which is what lets a test assert two screens agree.
+  - **`D-55`/`S-135` `exam_types`** — the school's own word (*CET*, *pre-board*), a table not free
+    text because it is the grouping key for a year of trend lines. It carries the `scale`, so the
+    teacher picks **one** thing. `assessment_cycles.type` stays the **system kind code branches
+    on** and is never rendered; if an analytic groups by `type`, the two have diverged. Retire,
+    never delete. Seeded on first read (write-on-GET, the `RecommendationsService.ensure` shape).
+  - **`D-53`/`Q-62` verify & lock** — locking stamps `verified_by` on every score (the meaning it
+    never had) and makes the exam the record: `ExamService.save` **and**
+    `AssessmentService.save_scores` both refuse a locked cycle, so the full delete-and-reinsert
+    can no longer replace July's confirmed mark in November. Unlock is **admin-only, reasoned and
+    appended** (`exam_lock_events`; `locked_at`/`locked_by` are its derived cache) — the
+    `plan_approvals` shape a fifth time.
+  - **`D-80`/`D-82` per-student script capture** — `score_captures.mode='scripts'`, one photo per
+    marked paper; `ai/scores.py::extract_script` transcribes identity, total **and the per-question
+    marks already written on the page** (stored as `assessment_scores.question_marks`: no new
+    table, no new capture surface, `Q-51`'s answer-judging stays out). `score_match.py` still
+    decides identity. An **unreadable page is kept as its own row** and mapped by hand — losing 39
+    good pages to a blurred 40th was the old behaviour. `S-119` the page↔student link is written
+    from the **confirmed** grid, never at parse time, and puts the paper one tap from the mark on
+    the exam page, the report card and growth.
+  - **`D-80` two tabs** — Score (`ExamDetail`) and **Report** (`services/exam_report.py`): a
+    sentence, the distribution, **named rows against a stated criterion** (±15 points from the
+    class average — never a rank), most-often-lost questions where a photo gave them, and coverage
+    from `services/coverage.py`. Question analysis absent is **a word** ("needs a photo of the
+    marked paper"), never a zero.
+  - **`D-81` two report levels** (`services/report_card.py`) — the card (numbers only, per student
+    and, batched, per class) and the analysis (per topic, skill abilities, per-subject narrative
+    via `ai/exam_analysis.py`, deterministic fallback so it is never empty). Neither carries a band
+    (P4). `S-115` `exam_event_id` links the recorded exam to its planned block.
+  - **`D-54`/A-4 the training pair** (`services/exam_corpus.py`) — `parsed_rows` vs `locked_rows`
+    plus the **diff with reason buckets**, written once **at lock** and only when
+    `organizations.training_data_opt_in` is on (default off, asked for in Settings). **No export
+    path in v1**; de-identification must exist before the first export, not the first row.
+  - Web: the exam page is two tabs + verify/lock + lock history; `ExamCapture` is scripts-first
+    with hand-mapping and the sum-mismatch flag; `/students/[id]` gains the report card and the
+    analysis; the score history splits minor/major; `/dashboard/exams` leads with **standing** and
+    **trajectory** side by side and names the basis; Settings gains exam types + the opt-in.
+    `test_exams_v1_8.py` (11).
+- **V1-9 (bands / the support programme, 2026-08-02)** — migration **`f8a9b0c1d2e3`** (head,
+  revises `e7f8a9b0c1d2`) **on dev + test; prod now needs four.** Bands stop being a letter
+  stamped on a child and become a **programme**: assess against a written standard, group, give
+  every C child an owner, work, re-assess on evidence, measure the **movement**.
+  - **Step 0 first — four fixes, and nothing else was honest until they landed** (`S-180`):
+    an intervention could **never be finished**, and `RecommendationsService` filters on
+    `status == 'active'`, so a goal achieved in July kept injecting a targeted daily check in
+    March · every intervention was created **unassigned** (the assignee came from
+    `class_teacher_member_id`, which no screen set until V1-2) · `studentInterventions` was wired
+    into the client and **called by nothing** · and **`apply_band_suggestions` +
+    `categorize_from_cycle` are DELETED** (`S-183`) — the first re-banded a class from *each
+    child's most recent cycle, whatever it was*, so a Tuesday slip test could move eleven children
+    between support tiers.
+  - **`core/bands.py` is THE vocabulary** — `chip()` renders **"C · Hindi"** (`S-186`: the lowest
+    band with the subject that earned it, never a bare letter and never an average),
+    `tier_for`/`movement`/`size_warnings`, and the **pre-written descriptors** (`S-175`: 27 empty
+    boxes get filled in by nobody). **`services/bands.py::BandService` is the only place a band is
+    read or written** — `placements()` is the per-subject read the directory chip, the class
+    donut, the daily-check generator and growth all go through.
+  - **`D-75` the band is per subject and there is no overall letter.** One letter for a child who
+    reads two years below grade and is fine at arithmetic described neither — and the check
+    generator then handed him easier *maths*. Rows with `subject_id IS NULL` are the retired
+    letter: kept as history, read by nothing. This also makes the daily checks more accurate for
+    free, because `_generate` already ran per class-subject.
+  - **`D-69`/`D-74` descriptors** (`band_descriptors`, seeded pre-written, editable) carry each
+    subject's **own** threshold — before this, two org-wide numbers assumed English and Maths grade
+    alike. `S-166`: **the letter never renders without its sentence**, on every staff surface.
+  - **`D-70`/`S-185` entry may be judgement; movement is a test.** `/bands/class` pre-fills from a
+    chosen locked test and the teacher moves only what she disagrees with (`Q-79`); a child who
+    did not sit it is **not assessed** — a word, never a C.
+  - **`D-76` promotion** — *"use this as the band test"* at the bottom of an exam she just locked:
+    a **flag, never a type change** (`S-182` — re-typing would trade the test for the band),
+    **locked only** (`S-184`/`D-53`), size shown with **warn-never-block**, **one subject**
+    (`S-187`), and the moves **reviewed before they commit** (`Q-81`) because `student_bands` is
+    append-only and a child slipping B → C is the most consequential thing this module does.
+    Deliberately **teacher-allowed**: the guard that matters is `locked`, not the role.
+  - **`D-77`/`D-87` one owner per subject + the weekly check-in.** `/support` (her children grouped
+    by subject) and `/support/[id]`, which **opens already written** (`S-164`) from five tables
+    other teachers already fill — attendance, observations, checks, homework, evening study — so
+    she is asked only for what nobody else knows. Four fields, once a week (`S-165`), append-only.
+    She proposes readiness; **a test moves the band**.
+  - **`D-73`/`S-169` the admin board**: movement is the headline, every stuck row names its
+    **subject** (`S-188`), the distribution is not on the screen at all, and **no ranking of
+    teachers by children moved** (`S-170`).
+  - New: `services/bands.py`, `services/support.py`, `endpoints/bands.py`, `schemas/bands.py`; web
+    `/support` + `/support/[id]` (new nav item), the rewritten `/students/bands` (+ `[classId]`),
+    `band-assess.tsx`, `band-promote.tsx`, `support-block.tsx`, Settings → Support programme.
+    `test_bands_v1_9.py` (11); `test_exams.py` / `test_assessments.py` /
+    `test_recommendations.py` updated to the new contract.
+- **V1-10 (fees — the collection board, 2026-08-02)** — migration **`a9b0c1d2e3f4`**
+  (`fee_notes` · `notifications.notif_type` gains `fee_reminder`) on dev + test. `D-62`: **read
+  and remind only** — the money math, the append-only ledger and the counter screen `/fees/[id]`
+  are untouched. What did not exist was the read a principal needs, plus one list that did exist
+  and **nothing ever called**.
+  - **`core/collection.py` is the vocabulary.** A quarter is a **due-date window** (`Q-67`):
+    `installment_number` breaks the moment juniors pay in 2 instalments and seniors in 4, and
+    `label` is free text that fragments into *"Q1" / "Quarter 1" / "1st term" / "April"*. An
+    instalment with no due date is **`unscheduled`** — a word, never silently bucketed into Q1.
+    `Collection` has **no `outstanding` property** (`S-163`): pending is a forecast, overdue is a
+    phone call, and the blend has no name — the `ScaleTally` device a third time.
+  - **`services/collection.py::board()` is the one computation every fee screen renders**
+    (`S-152`) — the quarter strip, the collection curve against the previous quarter (`S-155`),
+    the class table, the defaulter list and the dashboard block. Do not add a second roll-up
+    beside it; two screens about the same subject will disagree.
+  - **Defect 1 closed:** `overdue_students` has returned name + class + amount + earliest due
+    date since P0-D and `school-api.ts` had no function for it. `S-158` the list is built from
+    what is **owed**, so a child on a full concession never appears; `S-157` the row names the
+    **family** and hands you the number; `S-159` every class row carries **both denominators**
+    (*"14 of 38 families · ₹1.4L"*), sorted by families because a morning of calls is
+    denominated in calls.
+  - **`D-88` years never pool.** `opening_dues` used to be missing from `summary`,
+    `overdue_students` **and** `status` — so a child carrying ₹20,000 from last year with this
+    year paid read as `paid`. It is now its own labelled line, still outside this year's totals,
+    with the year switcher as the route to the year that owns it.
+  - **`D-84` the fee conversation history** (`fee_notes`, append-only, the `demo_request_notes`
+    shape a sixth time). `said` is the load-bearing column: *"reminded"* is an event, *"spoke to
+    the mother — paying after the 15th"* is what makes the row go away (`S-161`) — and it travels
+    into the follow-up task so the next caller is not the fourth person this month.
+  - **`S-156` the reminder has money-specific manners**, reusing `followup_actions` for
+    idempotence (no new table): one per week however many staff press it, **quiet hours**,
+    **primary guardian only** (`Q-70` — deliberately unlike the absence alert, which reaches
+    everyone), never to an opt-out, and it **stops the moment the payment lands**. Every reminder
+    is a human press: no scheduler, because money messages that fire themselves eventually reach
+    a family in the week of a bereavement.
+  - **`D-83` the one place a teacher sees fee data** — `GET /fees/followup/{task_id}`, guarded on
+    being the assignee of that task, rendering the amount, the date and the conversation log for
+    **that student only**. The narrowing is asserted by tests in both directions, including a
+    sweep of `growth` / `report-card` / `timeline` / `analysis` proving no fee word reaches an
+    academic surface (`S-157`).
+  - **`Q-69` the parent gets one line**, through the curated allowlist as its own `ParentFeeLine`
+    — how much and by when — and **nothing at all when nothing is due**. Never red, never the
+    word defaulter.
+  - Web: `/fees` leads with the board (the four bare numbers on three denominators are gone),
+    `/fees/[id]` gains the conversation above the ledger, the task detail gains the follow-up
+    card, and the parent's Today gains the fee line. `test_fees_v1_10.py` (7).
+
+- **V1-11 (parent access: login, notifications, calendar, 2026-08-02)** — migration
+  **`b0c1d2e3f4a5`** (`parent_login_attempts` · `guardian_messages`). Two halves of one problem:
+  *a notification is worthless if the parent cannot log in to act on it, and a login is worthless
+  if nothing ever tells them to open the app.*
+  - **`D-13` the front door is school code → class → section → child → date of birth.** Phone-OTP
+    could not survive `D-08` removing WhatsApp: a login that depends on message delivery is one
+    the school cannot hand out, and it excluded every family whose number the office recorded
+    wrong. **`S-55` the child step is type-to-search, never a list** — code → class → section
+    would otherwise return every child's name *before any password*, so anyone holding a code
+    could harvest the roster; 3+ characters, capped results, rate-limited. **`S-56` the lock is
+    keyed per STUDENT**, because a date of birth is ~5,500 guesses and the picker names the
+    target; it bumps in its **own committed session** (the `otp_codes` trick) so it survives the
+    rollback of the request that raised the error — the test asserts the *correct* DOB is refused
+    after five wrong ones.
+  - **`Q-29` phone-OTP is kept, not deleted** — moved to `/parent/login/otp` as the recovery
+    path. It is the more secure credential and the only way in for a family whose child has no
+    DOB on record; `Q-24` that case **burns no attempt** and links straight to it, because it is
+    the school's gap and not the parent's mistake.
+  - **`Q-25` (b) *"Add another child"*** — each child proved once with their own DOB, then the
+    existing sibling switcher works unchanged. Proving one child buys **exactly one child**, even
+    when siblings share a phone: deliberately narrower than `verify_otp`, where the phone *is*
+    the proof. (`Q-27`: the guardian-phone link stays and stays the notification target — the
+    login method changing does not rewrite the account model.)
+  - **`D-08`/`D-14` guardian messaging finally has a destination.** `notify_guardian.py` was a
+    WhatsApp stub that logged to a file whatever keys were set, so the absence alert, the
+    homework notification and the Saturday note all ended their life in a log line.
+    **`guardian_messages` is the inbox** (org-scoped + RLS) and all five callers are rewritten to
+    it; delivery is web push, which parents can now register for (`/push/subscribe` takes
+    `get_current_principal` — a `DeviceToken` is keyed on the User and a parent IS a User, so the
+    table needed nothing; only the guard was wrong). **`dispatcher.push_to_user` is the ONE push
+    path** — staff and guardian messages share it, so a dead subscription is purged once and the
+    rules cannot drift. Deliberately NOT the `notifications` table: its `user_id` is NOT NULL and
+    most guardians have never logged in — precisely the families the office most needs to know
+    about, which a table that cannot represent them would have hidden.
+  - **`S-62` is the honest half of removing WhatsApp.** Push is best-effort (iOS wants the site
+    on the home screen, permission can be denied, phones are off) and the absence alert is not.
+    So `push_sent_at`/`unreachable_reason` are recorded, and `services/insights/reach.py` +
+    `GET /insights/attendance/reach` turn them into **named rows carrying the phone number** on
+    the attendance tab and the overview rail. *The reach problem does not disappear; it becomes
+    visible.* An **opted-out family is counted apart** and never joins the list the office is told
+    to clear — chasing someone who asked not to be messaged is how a school loses the channel.
+    `GuardianDelivery.notified` therefore excludes them (two existing tests encode that rule).
+  - **`Q-56` the school calendar** — read-only, **zero new capture**, the cheapest win available
+    to the portal (*"is school open on Monday?"* is the most-asked question in a school office).
+    `whats_on.py` is **not** reused: it lists every student's and every colleague's birthday, and
+    a parent sees **only their own child's** — a list of classmates' birthdays is a roster leak
+    wearing a party hat.
+  - **`S-61` Today is the delivery surface; `Updates` is the archive**, so a parent who opens the
+    app once a day has already seen everything and nobody checks two places. Marking-read is the
+    one write a parent makes — session bookkeeping, never content; an unread badge that cannot
+    clear is just a broken archive. **No replies** (`Q-01` holds): a notification a parent can
+    answer is a messaging product.
+  - Also shipped: **`S-94`'s `missed` list**, which the server has returned since V1-5 and no
+    page rendered, plus `late`/`carried` counts on Today (`S-99`/`D-35`); three drifted
+    `parent-api.ts` types repaired against the Python schemas. **Defect found and fixed:**
+    `register_org` never minted a `school_code`, so every self-registered org had a parent portal
+    that literally could not be entered — and nothing said so.
+  - Web: `/parent/login` (the 5-step stepper), `/parent/login/otp`, `/parent/notifications`,
+    `/parent/calendar`, `components/parent/{notification-settings,add-child}.tsx`, and the
+    "Not reached" block on `/dashboard/attendance`. Seed: the demo org gets school code
+    **`DEMO123`** plus a reached and an unreached guardian message. `test_parent_v1_11.py` (9).
+
+- **V1-12 (dashboard visual layer + Lucy reconcile, 2026-08-02)** — **no migration.** Two halves of
+  one law: *one computation, many renderings.*
+  - **§7's sentence, on the three tabs that lacked it.** Overview, Attendance, Staff and Syllabus
+    already led with a computed headline; **Homework, Exams and Tasks opened on a static subtitle
+    and went straight to charts**. All three now carry a server-composed `headline` — composed
+    server-side, following V1-6's precedent and for exactly its reason: so the tab, the overview
+    block and Lucy cannot describe the same week differently. Each sentence keeps its own module's
+    rule: homework **never renders an unchecked set as "0% done"** (a percentage with nothing
+    behind it blames children for a teacher who has not opened the notebooks — `not_checked` is the
+    teacher's gap, always), and reports `late` beside completion rather than inside it (`S-99`);
+    exams **names the scale its figure came from** and needs two rated classes before claiming a
+    weakest (`S-114`/`S-118`); tasks names **who** the overdue work sits with, because nine overdue
+    across nine people is a busy week and nine with one person is a conversation.
+  - **The Lucy reconcile, and what it found.** `get_fee_summary` / `get_overdue_fees` still read
+    the OLD `FeeService` roll-up — **no quarter windows at all, and `opening_dues` absent from
+    every figure** (`B-2`, the defect V1-10 existed to close). So *"how much of Q2 is in?"* got a
+    year total that silently dropped the school's worst debtors, while `/fees` beside her showed
+    both the quarter strip and the carried line. That is the 44th place a fact gets computed
+    differently, and it is precisely what this packet exists to stop. Both are replaced by one
+    **`get_fee_collection`** over `CollectionService.board()` — the same computation the screen
+    renders (`S-152`) — and the old pair is subsumed, because the board already carries the named
+    defaulter list. Registry **43 → 42**, still `role="admin"`: teachers never see fees, in any
+    surface.
+  - **Verified rather than assumed:** all 42 tool→service calls resolve (nine packets rewrote the
+    services underneath Lucy since LU shipped), V1-9 had already made `get_band_board` per-subject
+    (`D-75`), and `services/overview.py` was already reading `services/coverage.py` from V1-6.
+    A test now **mechanises** that check, so a tool calling a vanished method fails in CI rather
+    than the first time a human asks that question.
+  - **Charts: no change was the correct answer.** Every chart on those tabs is one §7 explicitly
+    prescribes (completion trend → by-class bars · open work by assignee · trajectories →
+    distribution · the slack profile · coverage-over-time → RAG donut), so folding any behind
+    **More** would remove what the spec asks for. The "no-decision charts" instruction was aimed at
+    the old overview's five-chart grid, which DASH3-OV already deleted, and at attendance, which
+    already has its toggle. The one-palette grep is clean.
+  - ⚠️ **The fee-fence test was strengthened**: it asserted two tool *names* were absent from the
+    teacher surface, so renaming the pair would have silently retired the guard. It now checks the
+    whole teacher surface with a word-boundary regex (`get_exam_feed` contains "fee" and is
+    legitimate). `test_dashboard_v1_12.py` (7).
+
+- **V1-13 (hardening & release, 2026-08-02)** — **no migration.** The release gate, run rather
+  than asserted: full suite **492 passed** on real local Postgres, ruff/tsc/eslint/`next build`
+  clean, and a **route sweep driving the running server** — 131 GET routes × 3 roles against the
+  seeded org (admin 117×200, **0 404s, 0 5xx**; teacher 38×403; **0 `/fees` routes reachable by a
+  teacher**). The suite cannot catch a guard that is wrong in the *wired* direction; this can.
+  - **The no-dead-ends grep, client side: 30 orphan methods → 0.** Four were not dead code but
+    **missing UI**, and one was load-bearing: **`createTerm`/`deleteTerm` had no caller anywhere**,
+    so the only terms that could ever exist were the seed's — while `BandService.assign_owner`
+    refuses with *"Set up a term first"*, `syllabus_units.term_id` files every chapter under one,
+    and `draft`/`approve`/`unapprove` all take one. **A school set up through the wizard could not
+    plan term by term at all.** Setup → Academics now has a Terms card. Also wired: **guardian
+    add / remove / make-primary / `notify_opt_out`** on the student sheet (a guardian could only be
+    set at creation — no second parent, no corrected number, no way to honour a family asking to
+    stop being messaged, and every guardian-facing thing in the product keys on those rows); the
+    **timetable clash banner** (`/timetable/validate` has existed since V2-P1 and returned its
+    verdict to nobody, so the one thing the grid can be *wrong* about was invisible); and clearing
+    an exam portion, which feeds `exam_fit` and could be set but never un-set.
+  - **19 superseded client methods deleted**, each with its replacement recorded in
+    `strip_orphans`' table — e.g. `feeSummary`/`markPaid` (V1-10: `board()` is the only fee read a
+    screen may use, and the counter screen records through `pay`), `bandConfig`/`setBand`
+    (V1-9 replaced org thresholds with per-subject descriptors and deleted the direct write),
+    `skillProfile`/`bandHistory` (the growth payload already carries both).
+  - ⚠️ **31 GET routes still have no web caller, and that is reported, not hidden.** Three groups:
+    **not web surfaces** (`/billing/webhook`, `/ops/*`); **reached through Lucy, whose tools call
+    the service and not the route**; and **genuinely superseded** — which should be deleted, but
+    each is covered by a test, so it is a ~17-route change across 8 test files and belongs to a
+    deliberate pass, not the end of a session. See `docs/v1/PROGRESS.md` for the list.
+  - 🔴 **`topic_progress` (`services/planner.py`) is a SIXTH coverage definition** — it decides
+    "done / in progress / pending" from lesson logs on its own rules instead of `core/coverage.py`.
+    No screen calls it; **Lucy does**. That is `S-51` wearing a tool for a hat, and it is the first
+    thing to fix next.
+  - **The demo seed's timetable was unrunnable and every staff screen inherited it.** Anil was in
+    three rooms at once on Monday period 4 (the known V1-4 defect, deferred here). The cause was
+    not the rotation — V1-4 already offset it — but the subject→teacher map: the three classes are
+    always on three *different* subjects, so one teacher owning two subjects collides by
+    construction. Fixed **structurally**: each class has its own pair of teachers, so a teacher
+    never appears in two classes and no rotation can collide. 6 teaching staff now (also the
+    smallest roster on which leave, cover and the slack profile say anything). Today's periods are
+    stamped with the teacher who actually holds them. `/timetable/validate` returns `[]`.
+  - **`scripts/seed_midyear.py`** — plan §5's acceptance fixture, and the case no other fixture
+    exercised: a school adopting part-way through a running year (`tracking_start_date` = the start
+    of Term 2). **Three states coexist on one screen, and that IS the test** — Term 1 pre-tracking
+    and never planned, Term 2 sized + approved, Term 3 chapters known but unsized. Verified live:
+    no red rows, no data claimed before the tracking date, the syllabus board showing the planned
+    basis (30%) beside the whole-syllabus basis (16.7%), and `₹18,000 carried from before 2026-27,
+    across 3 families — not counted in the figures above` on its own line (`D-88`). Do not "tidy"
+    it by sizing Term 1 or Term 3.
+  - **`api/.env` was switched from PRODUCTION back to LOCAL**, because this session clicked through
+    the app and every tap is a write. `PROD_*_BACKUP` comments are intact — read the
+    `# ─── ACTIVE:` banner before running Alembic.
+  - 🔴 **Still open, and it is a founder decision:** production runs as `doadmin`
+    (`rolbypassrls = true`), so **law 2 is decorative in the one environment that matters**.
+    `scripts/provision_app_role.py` exists; swapping prod onto the restricted role is the last v1
+    release item.
 
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
@@ -746,9 +1097,25 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: local dev DB and **DO prod are both at head `e0f1a2b3c4d5`** (SF-1 + HW-1 + DASH3,
-applied 2026-07-29); 55 tables carry an `org_isolation` policy. Full suite **375 passing in
-~4.5 min**.
+Current state: test DB and **DO prod are both at head `b0c1d2e3f4a5`** (V1-11), applied
+2026-08-02; 57 tables carry an `org_isolation` policy. **The LOCAL dev DB
+(`localhost/trackbit_school`) was brought to the same head at V1-13 close** — it had been left one
+migration behind, so anything run against it before then was missing `guardian_messages` and
+`parent_login_attempts`.
+
+⚠️ **`.env` is now in `ACTIVE: LOCAL` mode** (switched at V1-13 close, 2026-08-02): the app was
+being clicked through by hand and every tap is a write, which against the prod URLs would edit a
+real school's data. It is also the only mode in which law 2 is real — locally the app runs as
+`trackbit_school_app` (NOBYPASSRLS). The `PROD_*_BACKUP` comments are intact; **flip the banner
+back before running Alembic against DigitalOcean.**
+
+🚨 **`.env` was in `ACTIVE: PRODUCTION` mode when that ran, and `alembic upgrade head` therefore
+applied V1-5 → V1-11 (`c5d6e7f8a9b0`, `d6e7f8a9b0c1`, `e7f8a9b0c1d2`, `f8a9b0c1d2e3`,
+`a9b0c1d2e3f4`, `b0c1d2e3f4a5`) straight to DigitalOcean.** All six are additive — new tables,
+new nullable columns, widened CHECK constraints — so prod code that predates them is unaffected,
+and this is the normal migrate-then-deploy order. But **read the `# ─── ACTIVE:` banner in
+`api/.env` before running Alembic**: in prod mode there is no confirmation step and no dry run.
+Prod schema is now AHEAD of prod code until the next deploy.
 
 ⚠️ **In PRODUCTION `DATABASE_URL` still points at `doadmin`**, not a restricted app role — so
 `rolbypassrls = true` and every RLS policy is inert there. Locally the app role is correct, so law

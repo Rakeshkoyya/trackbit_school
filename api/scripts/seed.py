@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.bands import starter_descriptors
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models import (
@@ -16,6 +17,7 @@ from app.models import (
     AssessmentCycle,
     AssessmentScore,
     AttendanceException,
+    BandDescriptor,
     Board,
     BoardMember,
     CalendarEvent,
@@ -23,9 +25,13 @@ from app.models import (
     ClassPeriod,
     ClassSubject,
     DailyCheck,
+    ExamLockEvent,
+    ExamType,
     FeeInstallmentTemplate,
+    FeeNote,
     FeeStructure,
     Guardian,
+    GuardianMessage,
     HomeworkAssignment,
     HomeworkCheck,
     HomeworkResult,
@@ -36,6 +42,7 @@ from app.models import (
     LeaveRequestEvent,
     LessonLog,
     Membership,
+    Observance,
     Organization,
     Plan,
     PlanApproval,
@@ -54,6 +61,7 @@ from app.models import (
     StudentCategory,
     StudentFee,
     Subject,
+    SupportCheckpoint,
     SyllabusTopic,
     SyllabusUnit,
     TaskEvent,
@@ -86,6 +94,8 @@ def _today_at(hour: int, minute: int = 0) -> datetime:
 
 DEMO_EMAILS = ["kc@demo.trackbit.app", "priya@demo.trackbit.app",
                "ramesh@demo.trackbit.app", "anil@demo.trackbit.app",
+               "sunita@demo.trackbit.app", "farhan@demo.trackbit.app",
+               "meera@demo.trackbit.app", "kavya@demo.trackbit.app",
                "super@trackbit.app"]
 DEMO_PHONES = ["+919800000001", "+919800000002"]
 
@@ -107,6 +117,8 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     so every academic + fee screen renders meaningfully on review."""
     teachers = [u for u, m in mships.items() if m.org_role == "teacher"]
     ramesh, anil = teachers[0], teachers[1]
+    # V1-13: 6 teaching staff, so each class can have its own pair (see below).
+    extra_teachers = teachers[2:6]
     priya = next(u for u in mships if u.email == "priya@demo.trackbit.app")
 
     year = AcademicYear(org_id=org.id, label="2026-27", start_date=date(2026, 4, 1),
@@ -142,8 +154,30 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
                       end_date=date(2026, 10, 23)),
     ])
 
+    # V1-13: teachers are now assigned so the demo grid is CLASH-FREE.
+    #
+    # The rotation below puts the three classes on three different subjects in
+    # every slot, so the only way to double-book is for one teacher to own two
+    # subjects that can come up together — which is exactly what the old
+    # `ramesh if sname in ("Mathematics", "Science") else anil` did. It put Anil
+    # in three rooms at once on Monday period 4, and the seed writes rows
+    # directly, bypassing TimetableService's clash validator that would have
+    # refused it. My Day, the cover sheet, /staff/today and the slack profile
+    # were all rendering a grid no school could actually run.
+    #
+    # The fix is structural rather than arithmetic: **each class has its own
+    # pair of teachers**, so a teacher never appears in two classes at all and
+    # no rotation can collide. Ramesh and Anil keep exactly their 6-A subjects,
+    # which is what every other piece of seeded demo data is anchored to.
+    sunita, farhan, meera, kavya = extra_teachers
+    class_staff = {
+        "6-A": (ramesh, anil),     # Ramesh: Maths+Science · Anil: English/Social/Hindi
+        "6-B": (sunita, farhan),
+        "7-A": (meera, kavya),
+    }
+
     classes = {}
-    for cname, section, teacher in [("6", "A", ramesh), ("6", "B", anil), ("7", "A", priya)]:
+    for cname, section, teacher in [("6", "A", ramesh), ("6", "B", sunita), ("7", "A", meera)]:
         c = SchoolClass(org_id=org.id, academic_year_id=year.id, name=cname, section=section,
                         class_teacher_member_id=mships[teacher].id)
         db.add(c)
@@ -153,8 +187,9 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     periods = {"English": 6, "Mathematics": 6, "Science": 5, "Social Studies": 4, "Hindi": 4}
     class_subjects: dict[tuple, ClassSubject] = {}
     for ckey, c in classes.items():
+        sci_teacher, arts_teacher = class_staff[ckey]
         for sname, pw in periods.items():
-            teacher = ramesh if sname in ("Mathematics", "Science") else anil
+            teacher = sci_teacher if sname in ("Mathematics", "Science") else arts_teacher
             cs = ClassSubject(org_id=org.id, class_id=c.id, subject_id=subjects[sname].id,
                               teacher_member_id=mships[teacher].id, periods_per_week=pw)
             db.add(cs)
@@ -268,8 +303,16 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     for i, name in enumerate(first):
         ckey = class_keys[i % 3]
         cat = cats["Hosteller"] if i % 4 == 0 else cats["Day Scholar"]
+        # V1-7 (`D-56`/`S-124`): DOB comes in with the roster. Two are left
+        # blank ON PURPOSE — the what's-on card must show its denominator
+        # ("birthdays known for n of m") rather than looking complete.
+        dob = None if i % 7 == 3 else (
+            date(2014 - (i % 3), 1, 1) + timedelta(days=(i * 37) % 364))
+        if i == 0:            # somebody has a birthday today, so the card is alive
+            dob = date(2014, today_ist.month, today_ist.day)
         st = Student(org_id=org.id, admission_no=f"A{601 + i}", full_name=f"{name} Kumar",
-                     class_id=classes[ckey].id, roll_no=str(i + 1), category_id=cat.id)
+                     class_id=classes[ckey].id, roll_no=str(i + 1), category_id=cat.id,
+                     date_of_birth=dob)
         db.add(st)
         db.flush()
         db.add(Guardian(org_id=org.id, student_id=st.id, name=f"Mr. {name}'s Father",
@@ -311,6 +354,18 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
             db.add(Transaction(org_id=org.id, student_fee_id=sf.id, installment_id=inst.id,
                                amount=q(10000), type="payment", mode="cash",
                                created_by=kc.id, created_by_name=kc.name))
+        # V1-10: one family carries dues from before this year (`D-88` — their
+        # own labelled line, never inside this year's totals), and one has a
+        # conversation on the record so the board shows what was SAID rather
+        # than only that a button was pressed (`D-84`/`S-161`).
+        if idx == 2:
+            sf.opening_dues = q(8500)
+        if idx == 3:
+            db.add(FeeNote(
+                org_id=org.id, student_fee_id=sf.id, kind="call",
+                said="spoke to the mother — paying after the 15th",
+                promised_date=today_ist + timedelta(days=9),
+                author_member_id=mships[priya].id))
         recompute_student_fee(sf)
         enrolled += 1
     db.flush()
@@ -334,15 +389,118 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
             db.add(AssessmentScore(org_id=org.id, cycle_id=diag.id, student_id=st.id,
                                    skill_area_id=sk.id, score=min(base + ki * 4, 95), max_score=100,
                                    entered_by=kc.id, verified_by=kc.id))
-    if sixa:
-        db.add(StudentBand(org_id=org.id, student_id=sixa[0].id, term_id=term1.id, tier="C",
-                           set_by=kc.id, note="Weak on reading — needs support"))
-        iv = Intervention(org_id=org.id, student_id=sixa[0].id, term_id=term1.id,
-                          goal_text="Move C→B in reading this term", target_tier="B")
+    # ── V1-9: the support programme, per subject ─────────────────────────────
+    # Two monitored subjects with their pre-written descriptors, and a child who
+    # is **C in English and A in Mathematics** — the case one overall letter
+    # described neither of, and the reason `D-75` retires it. He has an owner
+    # (`D-71`), an exit criterion (`S-167`) and one weekly check-in (`D-87`), so
+    # `/support` and the programme board both render with real work in them.
+    english = subjects.get("English")
+    monitored = [s for s in (english, subjects.get("Mathematics")) if s is not None]
+    for subj in monitored:
+        subj.band_monitored = True
+        texts = starter_descriptors(subj.name)
+        for tier in ("A", "B", "C"):
+            db.add(BandDescriptor(
+                org_id=org.id, subject_id=subj.id, tier=tier, text=texts[tier],
+                min_pct=75 if tier == "A" else 50 if tier == "B" else None))
+    db.flush()
+
+    if sixa and english is not None:
+        maths_subj = subjects.get("Mathematics")
+        for i, st in enumerate(sixa[:3]):
+            db.add(StudentBand(
+                org_id=org.id, student_id=st.id, term_id=term1.id,
+                subject_id=english.id, tier="C" if i == 0 else "B" if i == 1 else "A",
+                source="observation", set_by=kc.id,
+                note="teacher assessment: Priya"))
+            if maths_subj is not None:
+                db.add(StudentBand(
+                    org_id=org.id, student_id=st.id, term_id=term1.id,
+                    subject_id=maths_subj.id, tier="A" if i == 0 else "B",
+                    source="observation", set_by=kc.id,
+                    note="teacher assessment: Ramesh"))
+        iv = Intervention(
+            org_id=org.id, student_id=sixa[0].id, term_id=term1.id,
+            subject_id=english.id, owner_member_id=mships[anil].id,
+            goal_text=f"Move {sixa[0].full_name} from C to B in English",
+            exit_criterion="reads a grade-level passage at 60 wpm with ≤3 errors, twice running",
+            target_tier="B")
         db.add(iv)
         db.flush()
         for text in ["Daily hard-words drill", "15 min reading practice", "Weekly reading check"]:
             db.add(InterventionItem(org_id=org.id, intervention_id=iv.id, text=text))
+        db.add(SupportCheckpoint(
+            org_id=org.id, intervention_id=iv.id,
+            week_start=today_ist - timedelta(days=today_ist.weekday() + 7),
+            worked_on="flashcards, 10 minutes a day",
+            what_changed="read a full paragraph unaided on Thursday",
+            next_step="move to the Chapter 5 passage",
+            ready_to_retest=False, author_member_id=mships[anil].id))
+    db.flush()
+
+    # ── V1-8: the school's own exam vocabulary, and one exam of each SCALE ────
+    # Two exams on purpose: a 5-mark slip test and a 50-mark term exam. Pooled
+    # (the pre-V1-8 behaviour) they read as one meaningless average; kept apart
+    # they are a trajectory and a standing. Every V1-8 screen needs both to show
+    # anything true, so the seed ships both.
+    exam_types = {}
+    for etname, sys_type, scale, pos in (
+            ("Slip test", "slip_test", "minor", 10),
+            ("Class test", "class_test", "minor", 20),
+            ("CET", "class_test", "minor", 25),   # the school's OWN word (D-55)
+            ("Unit test", "unit_test", "major", 80),
+            ("Term exam", "term_exam", "major", 90)):
+        et = ExamType(org_id=org.id, name=etname, system_type=sys_type,
+                      scale=scale, position=pos)
+        db.add(et)
+        exam_types[etname] = et
+    db.flush()
+
+    maths = subjects.get("Mathematics")
+    if sixa and maths is not None:
+        slip = AssessmentCycle(
+            org_id=org.id, term_id=term1.id, type="slip_test",
+            exam_type_id=exam_types["Slip test"].id, scale="minor",
+            name="Slip test 3 — Fractions", date=today_ist - timedelta(days=9),
+            class_id=classes["6-A"].id, subject_id=maths.id, topic="Fractions",
+            total_marks=5, created_by_member_id=mships[ramesh].id)
+        term_exam = AssessmentCycle(
+            org_id=org.id, term_id=term1.id, type="term_exam",
+            exam_type_id=exam_types["Term exam"].id, scale="major",
+            name="Term 1 — Maths", date=today_ist - timedelta(days=3),
+            class_id=classes["6-A"].id, subject_id=maths.id,
+            topic="Chapters 1–4", total_marks=50,
+            created_by_member_id=mships[ramesh].id)
+        db.add_all([slip, term_exam])
+        db.flush()
+        for i, st in enumerate(sixa):
+            db.add(AssessmentScore(
+                org_id=org.id, cycle_id=slip.id, student_id=st.id,
+                subject_id=maths.id, score=min(5, 2 + i), max_score=5,
+                entered_by=mships[ramesh].user_id))
+            # The last child did not sit the term exam — so every average on
+            # screen has a denominator that is not the roster (S-118).
+            if i == len(sixa) - 1:
+                continue
+            db.add(AssessmentScore(
+                org_id=org.id, cycle_id=term_exam.id, student_id=st.id,
+                subject_id=maths.id, score=min(48, 22 + i * 7), max_score=50,
+                entered_by=mships[ramesh].user_id,
+                verified_by=mships[ramesh].user_id,
+                # Read off the marked script (D-80) — this is what makes the
+                # Report tab's "most-often-lost question" real on review.
+                question_marks=[{"q": "1", "score": min(10, 4 + i), "max": 10},
+                                {"q": "2", "score": min(10, 3 + i), "max": 10},
+                                {"q": "3", "score": max(1, 2 + i), "max": 10},
+                                {"q": "4", "score": min(10, 6 + i), "max": 10},
+                                {"q": "5", "score": min(10, 7 + i), "max": 10}]))
+        # The term exam is locked — it is the record (D-53), and the feed's
+        # "· verified" badge finally has something behind it.
+        term_exam.locked_at = datetime.now(UTC)
+        term_exam.locked_by = mships[ramesh].user_id
+        db.add(ExamLockEvent(org_id=org.id, cycle_id=term_exam.id, action="lock",
+                             actor_member_id=mships[ramesh].id))
     db.flush()
 
     # Ramesh's after-school homework class (Flow 6): 6-A roster + today's meeting with
@@ -437,11 +595,17 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
     # present except one absent + one late on the first period.
     sixa_students = [s for s in students if s.class_id == classes["6-A"].id]
     sixa_periods: dict[int, ClassPeriod] = {}
+    # V1-13: the period's teacher is the one who actually holds it. Stamping
+    # every period with Ramesh made 6-A's English/Hindi periods look like his,
+    # so My Day showed him lessons he does not teach and the workload board
+    # credited him for Anil's work.
+    cs_teacher = {cs.id: cs.teacher_member_id for cs in class_subjects.values()}
     for slot in sixa_today_slots:
+        holder = cs_teacher.get(slot.class_subject_id, mships[ramesh].id)
         period = ClassPeriod(
             org_id=org.id, class_id=classes["6-A"].id, date=today_ist, period_no=slot.period_no,
-            class_subject_id=slot.class_subject_id, marked_by_member_id=mships[ramesh].id,
-            teacher_member_id=mships[ramesh].id, opened_at=_now(), status="held",
+            class_subject_id=slot.class_subject_id, marked_by_member_id=holder,
+            teacher_member_id=holder, opened_at=_now(), status="held",
             attendance_marked_at=_now())
         db.add(period)
         db.flush()
@@ -583,6 +747,28 @@ def _seed_school(db: Session, org: Organization, kc: User, mships: dict) -> dict
                                   period_no=period_no, work_type=work_type))
     db.flush()
 
+    # V1-11 (`D-08`/`S-62`): the family's inbox. Seeded directly rather than by
+    # re-running the alert, so the demo shows BOTH halves of the decision —
+    # a message that reached a phone, and one that did not and therefore lands
+    # on the admin's "not reached" list as a name with a number to ring.
+    for i, st in enumerate(students[:3]):
+        guardian = db.scalar(select(Guardian).where(Guardian.student_id == st.id))
+        if guardian is None:
+            continue
+        reached = i == 0
+        db.add(GuardianMessage(
+            org_id=org.id, guardian_id=guardian.id, student_id=st.id,
+            kind="absence" if i < 2 else "homework_set",
+            title=(f"{st.full_name} was marked absent" if i < 2
+                   else "Homework · English"),
+            body=(f"{st.full_name} was marked absent at {org.name} today "
+                  f"({today_ist.isoformat()})." if i < 2 else
+                  "Homework for 6-A English: read chapter 3 and answer Q1–Q4."),
+            url="/parent",
+            push_sent_at=datetime.now(UTC) if reached else None,
+            unreachable_reason=None if reached else "no_login"))
+    db.flush()
+
     # The 8 AM daily report — generated from the day we just seeded (leads Dashboard).
     DailyReportService(db).generate(org, today_ist, include_fees=True)
     db.flush()
@@ -595,7 +781,12 @@ def seed() -> None:
     try:
         wipe_demo(db)
 
-        org = Organization(name=DEMO_ORG_NAME, timezone="Asia/Kolkata", plan="pro")
+        # V1-11 (`D-13`): the school code is the first thing a parent types, so
+        # the demo org needs a FIXED one — a random code would be unguessable
+        # for whoever is reviewing the portal. Real schools get a random 6–8
+        # characters (`S-57`, `core/school_code.py`), never a readable word.
+        org = Organization(name=DEMO_ORG_NAME, timezone="Asia/Kolkata", plan="pro",
+                           school_code="DEMO123")
         db.add(org)
         db.flush()
 
@@ -612,19 +803,40 @@ def seed() -> None:
         # hands over creds. The demo org doubles as their default org.
         superadmin = User(name="TrackBit Ops", email="super@trackbit.app",
                           password_hash=hash_password("demo1234"), is_super_admin=True)
-        db.add_all([kc, priya, ramesh, anil, superadmin])
+        # V1-13: four more teachers. Two staff could not cover three classes
+        # without one of them standing in two rooms at once — the demo grid was
+        # unrunnable, and every staff screen inherited it. Six teachers is also
+        # the smallest roster on which leave, cover and the slack profile say
+        # anything: with two people, "who is free" has one answer.
+        extra = [
+            User(name=n, email=e, password_hash=hash_password("demo1234"))
+            for n, e in [("Sunita", "sunita@demo.trackbit.app"),
+                         ("Farhan", "farhan@demo.trackbit.app"),
+                         ("Meera", "meera@demo.trackbit.app"),
+                         ("Kavya", "kavya@demo.trackbit.app")]
+        ]
+        db.add_all([kc, priya, ramesh, anil, superadmin, *extra])
         db.flush()
 
         # School roles (SPRD v2 §2): KC + Priya run the school (admins); the rest teach.
         mships: dict[User, Membership] = {}
         for role, user in [
             ("admin", kc), ("admin", priya), ("teacher", ramesh), ("teacher", anil),
+            *[("teacher", u) for u in extra],
             ("admin", superadmin),
         ]:
             mem = Membership(org_id=org.id, user_id=user.id, org_role=role, last_active_at=_now())
             db.add(mem)
             mships[user] = mem
         db.flush()
+        # V1-7 (`D-56`/`S-127`): staff DOB is self-entered on the Account screen
+        # and NEVER imported. The seed stands in for two people having done so —
+        # one of them today, so the admin's card has a colleague on it. `Q-57`:
+        # it never reaches a parent surface and never sits beside anything
+        # payroll-shaped.
+        _t = datetime.now(IST).date()
+        mships[ramesh].date_of_birth = date(1988, _t.month, _t.day)
+        mships[priya].date_of_birth = date(1985, 3, 14)
 
         # --- School master data + academics (M1) + fees (M6) ----------------
         counts = _seed_school(db, org, kc, mships)
@@ -751,9 +963,31 @@ def seed() -> None:
         add_task(maintenance, "Fix broken fan in 6-B", assignee=anil, due=_today_at(12, 0))
         add_task(housekeeping, "Clean science lab", assignee=ramesh, due=_today_at(17, 0))
 
+        # ── V1-7: the observance catalogue (platform data, D-60/S-149) ──────
+        # DELIBERATELY NOT real festival dates. `Q-63` — what the real sources
+        # are and what the annual curation cycle is — is an open research task,
+        # and inventing a Diwali date here would be exactly the rejected row of
+        # `S-123`'s table: an unverifiable claim, stored, that a school then
+        # decorates on. These are dated relative to today, say so in `source`,
+        # and exist only so the approval flow has something to approve.
+        _today = datetime.now(IST).date()
+        for key, name, offset, kind, tier in [
+            ("demo-founders-day", "Founder's Day", 9, "festival", "major"),
+            ("demo-sports-meet", "Annual Sports Meet", 18, "observance", "major"),
+            ("demo-reading-day", "Reading Day", 26, "observance", "minor"),
+        ]:
+            if db.scalar(select(Observance).where(
+                    Observance.key == key,
+                    Observance.date == _today + timedelta(days=offset))) is None:
+                db.add(Observance(
+                    key=key, name=name, date=_today + timedelta(days=offset),
+                    kind=kind, tier=tier, prep_days=14,
+                    source="Demo catalogue — replace with a curated source (Q-63)"))
+
         db.commit()
         print(f"Seeded '{DEMO_ORG_NAME}': org={org.id}")
-        print("  users=4 (admins KC/Priya, teachers Ramesh/Anil)")
+        print("  users=8 (admins KC/Priya · teachers Ramesh, Anil, "
+              "Sunita, Farhan, Meera, Kavya)")
         print("  boards=5 (Daily Ops, Admissions, Maintenance, Housekeeping, Follow-ups)")
         print(f"  tasks={len(instances)}")
         print(f"  school: {counts['classes']} classes, {counts['students']} students, "

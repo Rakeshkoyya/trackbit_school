@@ -146,6 +146,48 @@ function GenerateSheet({ yearId, open, onOpenChange }: { yearId: string; open: b
   );
 }
 
+const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** The clash check, finally on screen (V1-13).
+ *
+ *  `TimetableService` has had a deterministic teacher-clash validator since
+ *  V2-P1 and `/timetable/validate` returned its verdict to nobody — so the one
+ *  thing the grid can be *wrong* about was invisible. It is school-wide on
+ *  purpose: a clash is always between two classes, so checking only the class
+ *  on screen would report half of them and hide the other half.
+ *
+ *  §11 still holds — there is no solver here. This names the cell and the two
+ *  classes and leaves the fix to the person who knows which one moves.
+ */
+function ClashBanner() {
+  const { data: clashes = [] } = useQuery({
+    queryKey: ["timetable-clashes"],
+    queryFn: schoolApi.validateTimetable,
+  });
+  if (clashes.length === 0) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2.5">
+      <p className="text-sm font-medium text-warning">
+        {clashes.length === 1
+          ? "One teacher is in two rooms at once"
+          : `${clashes.length} periods put a teacher in two rooms at once`}
+      </p>
+      <ul className="mt-1.5 space-y-0.5">
+        {clashes.slice(0, 6).map((c, i) => (
+          <li key={i} className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{c.teacher_name ?? "A teacher"}</span>
+            {" · "}{WEEKDAY[c.weekday] ?? `Day ${c.weekday}`} period {c.period_no}
+            {" · "}{c.class_labels.join(" and ")}
+          </li>
+        ))}
+      </ul>
+      {clashes.length > 6 ? (
+        <p className="mt-1 text-xs text-muted-foreground">…and {clashes.length - 6} more</p>
+      ) : null}
+    </div>
+  );
+}
+
 function TimetableAdmin() {
   const { yearId } = useYear();
   const { classes, classId, setClassId } = useClassSubjectPick(yearId);
@@ -189,6 +231,7 @@ function TimetableAdmin() {
               <Sparkles className="h-4 w-4" /> Generate all classes
             </Button>
           </div>
+          <ClashBanner />
           <TimetableGrid classId={classId} canEdit />
           <ImportSheet classId={classId} open={importOpen} onOpenChange={setImportOpen} />
           {yearId ? <GenerateSheet yearId={yearId} open={generateOpen} onOpenChange={setGenerateOpen} /> : null}

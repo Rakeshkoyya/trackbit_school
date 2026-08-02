@@ -74,6 +74,10 @@ function ExamsInner() {
     <div>
       <PageHeader title="Exams" subtitle="How the school is scoring, and where it is slipping." />
 
+      {/* §7: the sentence names which scale its figure came from — minor and
+          major are never pooled (`S-114`). */}
+      {data.headline ? <p className="mb-5 text-base">{data.headline}</p> : null}
+
       <div className="mb-5 flex flex-wrap items-center gap-1 rounded-lg border border-border p-0.5">
         <button type="button" onClick={() => setType("")}
           className={cn("rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
@@ -93,12 +97,25 @@ function ExamsInner() {
         <Empty>No tests recorded{type ? ` of this type` : ""} in this academic year yet.</Empty>
       ) : (
         <>
+          {/* V1-8 `S-114`/`Q-50`: the two buckets, side by side and NEVER added.
+              Until V1-8 this tile read the mean of an April diagnostic, twelve
+              slip tests and one final — a fact about nothing. Trajectory is what
+              minor tests are for; standing is what major exams are for. */}
           <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatTile label="School average"
-              value={data.avg_pct != null ? `${data.avg_pct}%` : "—"}
-              sub={`${data.exams} test${data.exams === 1 ? "" : "s"} · ${data.scored} marks`}
-              tone={data.avg_pct == null ? "neutral"
-                : data.avg_pct >= 65 ? "green" : data.avg_pct >= 45 ? "amber" : "red"} />
+            <StatTile label={data.standing?.label ?? "Major exams"}
+              value={data.standing?.avg_pct != null ? `${data.standing.avg_pct}%` : "—"}
+              sub={data.standing?.exams
+                ? `${data.standing.exams} exam${data.standing.exams === 1 ? "" : "s"} · where they stand`
+                : "no major exams yet"}
+              tone={data.standing?.avg_pct == null ? "neutral"
+                : data.standing.avg_pct >= 65 ? "green" : data.standing.avg_pct >= 45 ? "amber" : "red"} />
+            <StatTile label={data.trajectory?.label ?? "Minor tests"}
+              value={data.trajectory?.avg_pct != null ? `${data.trajectory.avg_pct}%` : "—"}
+              sub={data.trajectory?.exams
+                ? `${data.trajectory.exams} test${data.trajectory.exams === 1 ? "" : "s"} · which way they're moving`
+                : "no minor tests yet"}
+              tone={data.trajectory?.avg_pct == null ? "neutral"
+                : data.trajectory.avg_pct >= 65 ? "green" : data.trajectory.avg_pct >= 45 ? "amber" : "red"} />
             <StatTile label="Best class"
               value={best?.avg_pct != null ? `${best.avg_pct}%` : "—"}
               sub={best?.label ?? "not enough marks"} tone="green" />
@@ -106,13 +123,21 @@ function ExamsInner() {
               value={worst?.avg_pct != null ? `${worst.avg_pct}%` : "—"}
               sub={worst && worst !== best ? worst.label : "only one class scored"}
               tone={worst?.avg_pct != null && worst.avg_pct < 45 ? "red" : "amber"} />
-            <StatTile label="Subjects tracked" value={String(data.by_subject.length)}
-              sub={`${data.trends.length} with a trajectory`} />
           </div>
+          <p className="-mt-3 mb-6 text-xs text-muted-foreground">
+            Class and subject figures below are read from{" "}
+            <span className="font-medium text-foreground">
+              {data.scale_basis === "major" ? "major exams" : "minor tests"}
+            </span>{" "}
+            — the two are never averaged together. Each row also carries the other bucket.
+          </p>
 
           <div className="mb-6 grid gap-4 lg:grid-cols-2">
             <ChartCard title="Subject trajectories" className="lg:col-span-2"
-              hint="Class average per test, over time. A subject with a single test has no trajectory and is left out.">
+              hint={`Class average per test, over time, from ${
+                data.trend_scale === "minor" ? "minor tests — that is what frequent tests are for"
+                  : "major exams, because no minor tests are recorded yet"
+              }. A subject with a single test has no trajectory and is left out.`}>
               {trendRows.length > 1 && trendKeys.length ? (
                 <TrendLine rows={trendRows}
                   series={trendKeys.map((t, i) => ({
@@ -124,7 +149,8 @@ function ExamsInner() {
               )}
             </ChartCard>
 
-            <ChartCard title="Average by class" hint="Across every test in scope.">
+            <ChartCard title="Average by class"
+              hint={`Across the ${data.scale_basis === "major" ? "major exams" : "minor tests"} in scope.`}>
               {classRows.length ? (
                 <RowBars rows={classRows} dataKey="pct" unit="%" max={100}
                   height={Math.max(140, classRows.length * 26)}
@@ -132,7 +158,8 @@ function ExamsInner() {
               ) : <Empty>No class-scoped tests in scope.</Empty>}
             </ChartCard>
 
-            <ChartCard title="Average by subject" hint="Across every class that sat it.">
+            <ChartCard title="Average by subject"
+              hint={`Across every class that sat the ${data.scale_basis === "major" ? "major exams" : "minor tests"}.`}>
               {subjectRows.length ? (
                 <RowBars rows={subjectRows} dataKey="pct" unit="%" max={100}
                   height={Math.max(140, subjectRows.length * 26)}
@@ -169,7 +196,10 @@ function ExamsInner() {
                       <td className="py-2 pr-3">
                         <a href={`/students/scores/exam/${e.cycle_id}`} className="hover:underline">{e.name}</a>
                       </td>
-                      <td className="py-2 pr-3 text-muted-foreground">{label(e.type)}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">
+                        {e.type_label || label(e.type)}
+                        {e.scale === "major" ? <span className="ml-1 text-[10px] uppercase">major</span> : null}
+                      </td>
                       <td className="py-2 pr-3">{e.class_label ?? <StateChip>whole school</StateChip>}</td>
                       <td className="py-2 pr-3">{e.subject_name ?? "—"}</td>
                       <td className="py-2 pr-3 text-muted-foreground">{dayLabel(e.date)}</td>

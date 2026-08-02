@@ -202,6 +202,18 @@ class Settings(BaseSettings):
     MSG91_AUTH_KEY: str = ""
     MSG91_OTP_TEMPLATE_ID: str = ""
 
+    # ── V1-11 parent DOB login (D-13/S-56) ──────────────────────────────────
+    # A date of birth is roughly 5,500 guesses and the child picker names the
+    # target, so the lock is the credential's only real defence. Same numbers as
+    # the OTP lock — one rule for parent auth, not two.
+    PARENT_LOGIN_MAX_ATTEMPTS: int = 5
+    PARENT_LOGIN_LOCK_MINUTES: int = 60
+    # S-55: how few characters may name a child, and how many names may come
+    # back. Both are the roster-leak dial — a 1-character search over a section
+    # is a browsable list wearing a search box.
+    PARENT_CHILD_SEARCH_MIN_CHARS: int = 3
+    PARENT_CHILD_SEARCH_MAX_RESULTS: int = 8
+
     @property
     def msg91_configured(self) -> bool:
         return bool(self.MSG91_AUTH_KEY and self.MSG91_OTP_TEMPLATE_ID)

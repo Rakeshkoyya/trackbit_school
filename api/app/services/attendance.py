@@ -342,17 +342,22 @@ class AttendanceService:
             return 0
         sent = 0
         rows = self.db.execute(
-            select(Student.full_name, Guardian.phone, Guardian.notify_opt_out)
+            select(Student.id, Student.full_name, Guardian)
             .join(Guardian, Guardian.student_id == Student.id)
             .where(Student.org_id == m.org_id, Student.id.in_(absent_ids))
         ).all()
         # Group guardians by student so each family gets one message.
-        by_student: dict[str, list[tuple[str | None, bool]]] = {}
-        for full_name, phone, opt_out in rows:
-            by_student.setdefault(full_name, []).append((phone, opt_out))
-        for full_name, recipients in by_student.items():
+        by_student: dict[uuid.UUID, tuple[str, list[Guardian]]] = {}
+        for sid, full_name, guardian in rows:
+            by_student.setdefault(sid, (full_name, []))[1].append(guardian)
+        for sid, (full_name, guardians) in by_student.items():
             message = f"{full_name} was marked absent at {m.org.name} today ({d.isoformat()})."
-            sent += notify_guardians(recipients, message)
+            sent += notify_guardians(
+                self.db, org_id=m.org_id, student_id=sid, guardians=guardians,
+                kind="absence", title=f"{full_name} was marked absent", body=message,
+                # One absence alert per child per day, however many periods are
+                # marked after it — the family is told once, not eight times.
+                dedupe_key=f"absence:{sid}:{d.isoformat()}").notified
         return sent
 
     def _maybe_alert_left_after_lunch(self, m: CurrentMember, class_id: uuid.UUID,
@@ -385,16 +390,20 @@ class AttendanceService:
             return 0
         sent = 0
         rows = self.db.execute(
-            select(Student.full_name, Guardian.phone, Guardian.notify_opt_out)
+            select(Student.id, Student.full_name, Guardian)
             .join(Guardian, Guardian.student_id == Student.id)
             .where(Student.org_id == m.org_id, Student.id.in_(left))).all()
-        by_student: dict[str, list[tuple[str | None, bool]]] = {}
-        for full_name, phone, opt_out in rows:
-            by_student.setdefault(full_name, []).append((phone, opt_out))
-        for full_name, recipients in by_student.items():
+        by_student: dict[uuid.UUID, tuple[str, list[Guardian]]] = {}
+        for sid, full_name, guardian in rows:
+            by_student.setdefault(sid, (full_name, []))[1].append(guardian)
+        for sid, (full_name, guardians) in by_student.items():
             message = (f"{full_name} was present this morning at {m.org.name} but was "
                        f"marked absent after lunch today ({d.isoformat()}).")
-            sent += notify_guardians(recipients, message)
+            sent += notify_guardians(
+                self.db, org_id=m.org_id, student_id=sid, guardians=guardians,
+                kind="left_after_lunch", title=f"{full_name} left after lunch",
+                body=message,
+                dedupe_key=f"left_after_lunch:{sid}:{d.isoformat()}").notified
         period.alerted_at = datetime.now(UTC)
         self.db.flush()
         return sent

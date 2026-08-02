@@ -131,6 +131,7 @@ def me(principal=Depends(get_current_principal), db: Session = Depends(get_db)) 
         org_role=member.org_role, must_set_password=member.user.must_set_password,
         is_super_admin=member.user.is_super_admin,
         is_class_teacher=is_ct,
+        date_of_birth=member.membership.date_of_birth if member.membership else None,
         user=member.user, org=member.org,
         orgs=AuthService(db).list_user_orgs(member.user_id),
     )
@@ -169,10 +170,15 @@ def update_me(
     member=Depends(get_current_member),
     db: Session = Depends(get_db),
 ) -> MeResponse:
-    AuthService(db).update_profile(member.user, name=body.name)
+    AuthService(db).update_profile(
+        member.user, name=body.name,
+        membership=member.membership,
+        date_of_birth=body.date_of_birth if body.set_date_of_birth else None,
+        set_dob=body.set_date_of_birth)
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
         is_super_admin=member.user.is_super_admin,
+        date_of_birth=member.membership.date_of_birth if member.membership else None,
         user=member.user, org=member.org,
     )
 

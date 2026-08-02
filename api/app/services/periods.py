@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
-from app.models import ClassPeriod, ClassSubject, SchoolClass
+from app.models import CalendarEvent, ClassPeriod, ClassSubject, SchoolClass
 
 
 def today_for(m: CurrentMember) -> date:
@@ -133,12 +133,32 @@ class PeriodService:
         self.db.flush()
         return period
 
-    def not_held(self, m: CurrentMember, period_id: uuid.UUID, reason: str) -> ClassPeriod:
+    def not_held(self, m: CurrentMember, period_id: uuid.UUID, reason: str,
+                 event_id: uuid.UUID | None = None) -> ClassPeriod:
         """The class did not happen. Keeps the period row (so the day's coverage
-        arithmetic still balances) and closes it out with a reason."""
+        arithmetic still balances) and closes it out with a reason.
+
+        V1-7 `S-147`: when the reason is an approved calendar event, it is
+        RECORDED as that event rather than as one of forty spellings of
+        "independance day rehersal" — which is what makes "what did Diwali cost
+        us in periods?" a query. `S-146`: this is the per-class block (8-A went
+        to the rehearsal, 8-B carried on). If the ADMIN locked the period
+        school-wide, the teacher is never asked in the first place — the day is
+        already out of the capacity calculation, and recording it here too would
+        subtract it twice.
+        """
         period = self._period(m, period_id)
         period.status = "not_held"
         period.not_held_reason = reason
+        if event_id is not None:
+            event = self.db.scalar(select(CalendarEvent).where(
+                CalendarEvent.id == event_id, CalendarEvent.org_id == m.org_id))
+            if event is None:
+                raise NotFoundError("Event")
+            period.not_held_event_id = event.id
+            period.not_held_reason = reason or event.title
+        else:
+            period.not_held_event_id = None
         if period.closed_at is None:
             period.closed_at = datetime.now(UTC)
         self.db.flush()

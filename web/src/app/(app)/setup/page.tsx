@@ -124,6 +124,75 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+/** Terms — the missing half of the year (V1-13).
+ *
+ *  Terms were readable on five screens and creatable on none, so the only terms
+ *  that ever existed were the seed's. That is not cosmetic: `syllabus_units.
+ *  term_id` files a chapter under a term (V2-P11), band assessment refuses with
+ *  *"Set up a term first"*, and `approve`/`draft` take a `term_id` — so a real
+ *  school set up through the wizard could not plan term by term at all.
+ *
+ *  Deleting is guarded server-side (a term with plan approvals under it stays),
+ *  which is why this offers no "edit dates": moving a term's window after its
+ *  plans are approved would silently re-scope a locked baseline (P2).
+ */
+function TermsCard({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { yearId } = useYear();
+  const [name, setName] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const { data: terms = [] } = useQuery({
+    queryKey: ["terms", yearId],
+    queryFn: () => schoolApi.terms(yearId ?? undefined),
+    enabled: !!yearId,
+  });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["terms"] });
+
+  const create = useMutation({
+    mutationFn: () => schoolApi.createTerm({
+      academic_year_id: yearId!, name: name.trim(), start_date: start, end_date: end,
+    }),
+    onSuccess: () => { invalidate(); setName(""); setStart(""); setEnd(""); toast.success("Term added"); },
+    onError: (e) => showApiError(e, "Could not add term"),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => schoolApi.deleteTerm(id),
+    onSuccess: () => { invalidate(); toast.success("Term removed"); },
+    onError: (e) => showApiError(e, "Could not remove term"),
+  });
+
+  return (
+    <Card title="Terms">
+      {terms.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No terms yet. A school that sizes each chapter when its term begins needs these —
+          syllabus chapters, plan approval and band assessment are all filed under a term.
+        </p>
+      ) : null}
+      {terms.map((t) => (
+        <Row key={t.id} onDelete={canEdit ? () => remove.mutate(t.id) : undefined}>
+          <span className="font-medium">{t.name}</span>
+          <span className="ml-2 text-xs text-muted-foreground">{t.start_date} → {t.end_date}</span>
+        </Row>
+      ))}
+      {canEdit ? (
+        <form className="mt-3 flex flex-wrap gap-2" onSubmit={(e) => {
+          e.preventDefault();
+          if (yearId && name && start && end) create.mutate();
+        }}>
+          <Input className="w-32" placeholder="Term 1" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input className="w-40" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+          <Input className="w-40" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+          <Button size="sm" type="submit" disabled={create.isPending || !yearId || !name || !start || !end}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </form>
+      ) : null}
+    </Card>
+  );
+}
+
 const classLabel = (c: SchoolClass) => c.name + (c.section ? `-${c.section}` : "");
 
 /** D-03 (V1-2): who owns this class. The field has existed since P0-C and no
@@ -498,6 +567,7 @@ function AcademicsInner() {
         <AssignmentsCard canEdit={canEdit} />
         <div className="grid gap-4 lg:grid-cols-2">
           <YearsCard canEdit={canEdit} />
+          <TermsCard canEdit={canEdit} />
           <SimpleListCard
             title="Subjects" queryKey={["subjects"]} placeholder="Mathematics" canEdit={canEdit}
             list={schoolApi.subjects} create={schoolApi.createSubject} remove={schoolApi.deleteSubject}

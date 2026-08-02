@@ -58,12 +58,14 @@ from app.schemas.classroom import (
 )
 from app.schemas.periods import (
     PeriodCardOut,
+    PeriodEventOut,
     PeriodHomeworkOut,
     PeriodLogOut,
     PeriodPlanOut,
 )
 from app.schemas.timetable import TeacherSlot
 from app.services.attendance import AttendanceService, day_absence_maps, is_day_absent
+from app.services.calendar import day_lock
 from app.services.notify_guardian import notify_guardians
 from app.services.periods import assert_can_take_class, find_period, get_or_create_period
 from app.services.planner import PlannerService
@@ -198,6 +200,16 @@ class ClassroomService:
         # its OWN period row (V2-P6) — two Maths periods on one day are independent
         # cards with independent topics, not two views of one class-subject.
         day_slots = TimetableService(self.db).teacher_day(m, today)
+        # V1-7 `S-145`: a period the school itself locked is no longer EXPECTED,
+        # so it leaves her surface entirely rather than sitting there unlogged.
+        # Leaving it would invent work on a holiday and make the capture rate
+        # lie. What was already recorded against it is untouched (`Q-65`) — this
+        # drops the ask, never the record.
+        lock = day_lock(self.db, m.org_id, today, year.id)
+        if lock.closed:
+            day_slots = []
+        elif lock.periods:
+            day_slots = [ts for ts in day_slots if ts.period_no not in lock.periods]
         # …plus any period I'm covering for someone who is away (DASH3 PR-2). The
         # grid says who *usually* takes it; today's cover says who is taking it.
         # Skipped when a slot for the same (class, period) is already mine — a
@@ -257,7 +269,10 @@ class ClassroomService:
         periods.sort(key=lambda p: p.period_no)
         tasks, older = self._my_day_tasks(m, today, year)
         return MyDayOut(date=today, classes=classes, periods=periods,
-                        homework_pending=pending, tasks=tasks, older_task_count=older)
+                        homework_pending=pending, tasks=tasks, older_task_count=older,
+                        day_closed=lock.closed,
+                        locked_periods=sorted(lock.periods),
+                        lock_reason=lock.title)
 
     def _my_day_tasks(self, m: CurrentMember, today: date, year: AcademicYear | None):
         """D-41/D-43: the narrow task window under the periods — rail follow-ups
@@ -564,12 +579,26 @@ class ClassroomService:
                         HomeworkAssignment.class_subject_id == cs_id,
                         HomeworkAssignment.date == d).order_by(HomeworkAssignment.created_at))]
 
+        # V1-7 `S-147`/`S-145`: the day's approved events, which are both the
+        # reason picker behind "not held, because" and the answer to whether
+        # this period is still being asked for at all.
+        lock = day_lock(self.db, m.org_id, d)
+        day_events = [PeriodEventOut(
+            id=e.id, title=e.title, type=e.type,
+            affects_teaching=e.affects_teaching, blocks_periods=e.blocks_periods)
+            for e in lock.events]
+        locked = not lock.expects(period_no)
+
         return PeriodCardOut(
             class_id=class_id, class_label=sheet.class_label, period_no=period_no, date=d,
             class_subject_id=cs_id, subject_name=subject_name,
             period_id=period.id if period else None,
             status=period.status if period else "held",
             not_held_reason=period.not_held_reason if period else None,
+            not_held_event_id=period.not_held_event_id if period else None,
+            day_events=day_events,
+            locked=locked,
+            lock_reason=lock.title if locked else None,
             opened=period is not None,
             closed=period is not None and period.closed_at is not None,
             attendance_marked=sheet.marked,
@@ -720,15 +749,24 @@ class ClassroomService:
         subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
         # Notify the one student's guardians for a per-student note, else the class.
         guardian_q = (
-            select(Guardian.phone, Guardian.notify_opt_out)
-            .join(Student, Student.id == Guardian.student_id)
+            select(Student.id, Guardian)
+            .join(Guardian, Guardian.student_id == Student.id)
             .where(Student.org_id == m.org_id))
         guardian_q = (guardian_q.where(Student.id == body.student_id) if body.student_id
                       else guardian_q.where(Student.class_id == cs.class_id))
-        guardians = list(self.db.execute(guardian_q).all())
         due = f" (due {body.due_date})" if body.due_date else ""
         message = f"Homework for {_label(klass)} {subject}: {body.text}{due}"
-        count = notify_guardians([(p, o) for p, o in guardians], message)
+        # Grouped by child: with siblings on one login, a homework note that
+        # doesn't say whose it is is unreadable.
+        by_student: dict[uuid.UUID, list[Guardian]] = {}
+        for sid, guardian in self.db.execute(guardian_q).all():
+            by_student.setdefault(sid, []).append(guardian)
+        count = 0
+        for sid, guardians in by_student.items():
+            count += notify_guardians(
+                self.db, org_id=m.org_id, student_id=sid, guardians=guardians,
+                kind="homework_set", title=f"Homework · {subject}", body=message,
+                dedupe_key=f"homework_set:{hw.id}:{sid}").notified
         hw.notified_at = datetime.now(UTC)
         self.db.flush()
         return HomeworkOut(id=hw.id, class_subject_id=cs.id, date=d, text=hw.text,

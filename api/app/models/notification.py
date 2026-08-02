@@ -22,6 +22,11 @@ NOTIF_TYPES = (
     # decided minutes before the bell, and an email that lands after the period
     # is worse than nothing.
     "substitute",
+    # V1-10 (`D-66`): a fee reminder to a guardian. Deliberately its own type —
+    # it is throttled per instalment per week, respects quiet hours, stops the
+    # moment the payment lands, and goes to the PRIMARY guardian only (`Q-70`),
+    # none of which is true of the absence alert.
+    "fee_reminder",
 )
 
 

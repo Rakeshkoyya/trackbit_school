@@ -73,6 +73,10 @@ function TasksInner() {
     <div>
       <PageHeader title="Tasks" subtitle="What is waiting, and who it is waiting on." />
 
+      {/* §7: nine overdue across nine people is a busy week; nine with one
+          person is a conversation. The sentence names which. */}
+      {data.headline ? <p className="mb-5 text-base">{data.headline}</p> : null}
+
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Open" value={String(data.open)}
           sub={data.unassigned ? `${data.unassigned} unassigned` : "all assigned"}

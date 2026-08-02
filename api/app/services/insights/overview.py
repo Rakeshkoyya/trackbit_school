@@ -37,6 +37,7 @@ from app.schemas.insights import (
 from app.services.insights.attendance import AttendanceInsights
 from app.services.insights.exams import ExamInsights
 from app.services.insights.homework import HomeworkInsights
+from app.services.insights.reach import ReachInsights
 from app.services.insights.tasks import TaskInsights
 from app.services.insights.workload import WorkloadInsights
 from app.services.school_clock import today_in
@@ -85,6 +86,10 @@ class OverviewService:
         now = workload.now(m)
         leave = workload._leave_pulse(m, today)
         homework = HomeworkInsights(self.db).board(m)
+        # V1-11 `S-62`: whether the school's own alerts actually landed. Cheap
+        # (one day's messages) and it belongs beside attendance, because the
+        # absence alert is the message it protects.
+        reach = ReachInsights(self.db).board(m, today)
         tasks = TaskInsights(self.db).board(m)
         rag = ds._rag_rows(m, year.id) if year else []
         exams = ExamInsights(self.db).board(m, yid)
@@ -93,7 +98,7 @@ class OverviewService:
             date=today, phase=now.phase, period_no=now.period_no,
             period_label=self._period_label(now))
         out.sections = [
-            self._attendance(pulse, capture, streaks),
+            self._attendance(pulse, capture, streaks, reach),
             self._staff(presence, leave, now),
             self._syllabus(rag),
             self._homework(homework),
@@ -101,7 +106,7 @@ class OverviewService:
             self._exams(exams),
         ]
         out.actions = self._actions(capture, presence, leave, streaks, homework,
-                                    tasks, rag, now)
+                                    tasks, rag, now, reach)
         return out
 
     # ── the school clock ─────────────────────────────────────────────────────
@@ -116,7 +121,7 @@ class OverviewService:
         }.get(now.phase)
 
     # ── M1 attendance ────────────────────────────────────────────────────────
-    def _attendance(self, pulse, capture, streaks) -> OverviewSection:
+    def _attendance(self, pulse, capture, streaks, reach) -> OverviewSection:
         today = pulse.today if pulse else None
         present = today.present_pct if today else None
         pending = max(0, capture.expected - capture.marked)
@@ -162,6 +167,15 @@ class OverviewService:
                 tone="red", href=f"/students/{r.student_id}")
             for r in streaks.rows[:MAX_NOTES]
         ]
+        # `S-62` — a family the alert never reached, named with the reason. It
+        # sits here rather than in its own block because "absent, and nobody
+        # told them" is one fact, not two.
+        for r in reach.rows[:2]:
+            if len(notes) >= MAX_NOTES:
+                break
+            notes.append(OverviewNote(
+                text=f"{r.student_name}'s family wasn't reached — {r.reason}",
+                tone="amber", href="/dashboard/attendance"))
         if len(notes) < MAX_NOTES:
             for row in capture.rows:
                 gap = sum(1 for c in row.cells if c.state == "pending")
@@ -518,7 +532,7 @@ class OverviewService:
 
     # ── the rail ─────────────────────────────────────────────────────────────
     def _actions(self, capture, presence, leave, streaks, homework, tasks, rag,
-                 now) -> list[QuickAction]:
+                 now, reach) -> list[QuickAction]:
         """What is waiting, and the screen that clears it.
 
         Each entry is conditional on its own count, so the rail empties itself as
@@ -537,6 +551,20 @@ class OverviewService:
                 detail=(f"{uncovered} {_plural(uncovered, 'period')} today have no "
                         "teacher assigned"),
                 href="/dashboard/staff"))
+        # `S-62`: push is best-effort and the absence alert is not, so the few
+        # families it did not reach become a short call list rather than a
+        # silence the school never learns about.
+        if reach.unreachable:
+            first = reach.rows[0] if reach.rows else None
+            actions.append(QuickAction(
+                key="reach", label="Phone these families", count=reach.unreachable,
+                tone="amber",
+                detail=(f"{first.student_name}'s family — {first.reason}"
+                        + (f" · {reach.unreachable - 1} more"
+                           if reach.unreachable > 1 else "")
+                        if first else
+                        f"{reach.unreachable} could not be reached today"),
+                href="/dashboard/attendance"))
         if not presence.marked and now.phase in ("period", "break", "after"):
             actions.append(QuickAction(
                 key="staff_attendance", label="Take staff attendance", tone="amber",

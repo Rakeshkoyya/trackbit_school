@@ -8,6 +8,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { CollectionBoard } from "@/components/school/collection-board";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,14 +25,6 @@ const STATUS_TONE: Record<string, "success" | "neutral" | "warning" | "outline">
   paid: "success", partial: "outline", overdue: "warning", pending: "neutral",
 };
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-xl font-semibold">{value}</p>
-    </div>
-  );
-}
 
 function EnrollSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
@@ -91,7 +84,6 @@ function FeesInner() {
   const { yearId } = useYear();
   const [query, setQuery] = useState("");
   const [enrollOpen, setEnrollOpen] = useState(false);
-  const { data: summary } = useQuery({ queryKey: ["fee-summary", yearId], queryFn: () => schoolApi.feeSummary(yearId ?? undefined), enabled: !!yearId });
   const { data: rows = [] } = useQuery({
     queryKey: ["student-fees", yearId, query],
     queryFn: () => schoolApi.studentFees({ year_id: yearId ?? undefined, search: query.trim() || undefined }),
@@ -109,13 +101,12 @@ function FeesInner() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Net fee (year)" value={money(summary?.total_fee ?? "0")} />
-        <Stat label="Collected" value={money(summary?.collected_fee ?? "0")} />
-        <Stat label="Overdue" value={money(summary?.overdue_amount ?? "0")} />
-        <Stat label="Pending installments" value={String(summary?.pending_installments ?? 0)} />
-      </div>
+      {/* V1-10 (`S-152`): the collection board replaces the four bare numbers
+          that used to lead this page — two amounts, one amount-past-a-date and a
+          COUNT of instalments, with no sentence and nothing named. */}
+      <CollectionBoard yearId={yearId} />
 
+      <h2 className="mb-2 mt-8 text-sm font-semibold">Every student</h2>
       <div className="relative mb-4">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input className="pl-9" placeholder="Search student…" value={query} onChange={(e) => setQuery(e.target.value)} />

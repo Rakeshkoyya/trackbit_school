@@ -858,7 +858,13 @@ exists in the importer — and showing coverage with its denominator everywhere 
 
 **Blocks:** the birthday half of the module, which is most of it.
 
-### Q-60 · One calendar or two?
+### Q-60 · One calendar or two? — **ANSWERED (a)+(b)**, built V1-7
+> **Built as recommended, and no third month view exists.** The suggestion feed and the
+> approve-this-date sheet sit on **Plan → Year**, beside the grid an approval writes to; the card
+> is an **agenda list** on the dashboard (`components/school/whats-on.tsx`) and on My Day as a
+> strip. Worth a founder confirm — this was Claude's call, not an explicit decision. If a month
+> view is ever wanted, it belongs on `/plan`, not a new route.
+
 Plan → Year **is already a year calendar**. If this module adds a month grid, the school has two
 calendar screens that disagree about what a calendar is for (`S-134`).
 
@@ -922,8 +928,20 @@ cache of the newest appended event. There is a well-worn pattern to copy.*
 
 `D-56`–`D-60` closed `Q-57` and `Q-59` and reshaped `Q-54`. Three new ones.
 
-### Q-63 · What are the real sources for the catalogue, and what is the annual cycle? 🔴
-**The research task, and the last thing standing between this module and a build.** `D-60` decided
+### Q-63 · What are the real sources for the catalogue, and what is the annual cycle? 🔴 STILL OPEN
+> **V1-7 shipped everything except the answer to this, and the catalogue table is therefore
+> EMPTY — which is the correct state, not a gap.** Built and tested: the platform table
+> (`observances`), scoping by `state`+`board` (`D-61`), required provenance (`S-150`), the
+> `/platform/catalogue` curation tab, and an annual paste-import that **upserts on (key, date)**
+> so re-running a corrected file fixes every school rather than double-suggesting.
+>
+> What is missing is only the data. Filling it by asking a model when Diwali is would be exactly
+> the rejected row of `S-123`'s table — an unverifiable claim, stored, that a school then
+> decorates on. An empty catalogue means "no suggestions", which is honest; the school's own dates
+> and birthdays carry the module without it. **When this is answered, no code needs to change** —
+> paste the year in, or POST it to `/platform/observances/bulk`.
+
+**The research task, and the last thing standing between this module and its DATA.** `D-60` decided
 the *storage* (fetch, store in our database, platform-owned per `S-149`). It did not decide the
 *source*, and the four kinds of date asked for do not come from one place:
 
@@ -953,7 +971,12 @@ discovering the fragmentation in month three is the expensive order to find out.
 **Blocks:** the catalogue only — steps 1–6 of the build order run on the school's own dates and
 birthdays without it.
 
-### Q-64 · Do teachers see suggestions, or only approved dates?
+### Q-64 · Do teachers see suggestions, or only approved dates? — **ANSWERED (a)**, built V1-7
+> **Built as (a), the recommendation.** `/events/suggestions` is `require_admin`, so a provisional
+> row cannot reach a teacher even by accident — this is a guard, not a filter. The strip renders
+> `/events/whats-on`, which reads `calendar_events` and birthdays only. Worth a founder confirm,
+> since it was Claude's call rather than an explicit decision.
+
 `D-57` puts approval in the admin's hands. It doesn't say whether a teacher's My Day strip shows
 *"Guru Purnima (suggested)"* before anyone approves it.
 
@@ -969,7 +992,14 @@ information is worth. The admin's screen is where provisional belongs.*
 **Blocks:** the My Day strip's query, and whether `D-57`'s decision row is read on the teacher
 path at all.
 
-### Q-65 · Locking a past or current day — what happens to what was already captured?
+### Q-65 · Locking a past or current day — **ANSWERED (b)**, built V1-7
+> **Built as (b), the recommendation, and it is now load-bearing in code.**
+> `calendar.day_lock()` removes a period from what is **expected** — My Day, the 16:00 reminder,
+> the capture heatmap, the daily report — and touches nothing that was **recorded**. The period
+> card still opens on a locked period and still shows what is in it; it simply stops asking.
+> Anyone "simplifying" this into a delete is committing a law-3 violation and a data loss at once.
+> Locking is allowed on any date, past or future.
+
 `D-57` is written for future dates: a suggestion arrives, the admin approves, the day locks. But
 holidays are also declared **at 7am the same morning** (a bandh, a flood, a death), and the record
 for that day may already contain marked attendance, a logged topic, or set homework.

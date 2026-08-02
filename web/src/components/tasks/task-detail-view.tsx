@@ -11,6 +11,7 @@ import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { TaskAttachments } from "@/components/tasks/task-attachments";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { FeeFollowupCard } from "@/components/school/fee-followup-card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Sheet } from "@/components/ui/sheet";
@@ -138,6 +139,12 @@ export function TaskDetailView({ taskId }: { taskId: string }) {
         <Button variant="outline" size="sm" onClick={() => setRecurOpen(true)}>
           <Repeat2 className="h-4 w-4" /> Make recurring
         </Button>
+      </div>
+
+      {/* V1-10 (`D-83`): the ONE place a teacher sees fee data — this student,
+          inside this task. Renders nothing for any other kind of task. */}
+      <div className="mb-3">
+        <FeeFollowupCard taskId={taskId} category={task.category} />
       </div>
 
       {/* Editable name */}

@@ -1,6 +1,7 @@
 """Auth request/response schemas."""
 
 import uuid
+from datetime import date
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -31,6 +32,14 @@ class SetPasswordRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    # V1-7 `D-56`: staff DOB is **self-entered from the profile screen and never
+    # imported**. `S-127` — an admin who wishes a teacher by name on the morning
+    # of costs nothing and is felt for a year, and staff turnover is a school's
+    # most expensive problem. Fence (`Q-57`): it must never reach a parent
+    # surface, and must never sit next to anything payroll-shaped.
+    # An explicit null clears it; omitting the field leaves it alone.
+    date_of_birth: date | None = None
+    set_date_of_birth: bool = False
 
 
 class ChangePasswordRequest(BaseModel):
@@ -100,6 +109,10 @@ class SessionResponse(BaseModel):
 
 class MeResponse(BaseModel):
     org_role: str
+    # V1-7 (`D-56`): the signed-in member's own DOB, for the profile screen that
+    # sets it. Never rendered on a class list (`S-133`) and never sent to a
+    # parent surface (`Q-57`).
+    date_of_birth: date | None = None
     must_set_password: bool = False
     is_super_admin: bool = False
     # V1-3 (D-03): this member is class teacher of at least one class — the nav

@@ -221,6 +221,12 @@ function AttendanceInner() {
     queryKey: ["insights", "calls", yearId],
     queryFn: () => insightsApi.attendanceCalls(yearId ?? undefined),
   });
+  // `S-62` — the honest half of removing WhatsApp: which of today's own alerts
+  // never landed on a phone. Not year-scoped; it is a today question.
+  const reach = useQuery({
+    queryKey: ["insights", "reach"],
+    queryFn: () => insightsApi.attendanceReach(),
+  });
 
   if (isLoading || !data) {
     return <><PageHeader title="Attendance" subtitle="Who is here, and was it even taken?" /><BoardSkeleton /></>;
@@ -268,6 +274,50 @@ function AttendanceInner() {
           <NeedsCall rows={board?.needs_call ?? []} onReason={setReasonFor} />
         )}
       </Section>
+
+      {reach.data?.rows.length ? (
+        <Section
+          title="Not reached"
+          hint="Alerts are delivered in the app and by notification. These families got neither — a phone call is the fallback the school controls."
+        >
+          <div className="space-y-2">
+            {reach.data.rows.map((r) => (
+              <RedRow
+                key={`${r.student_id}-${r.kind}`}
+                tone="amber"
+                href={`/students/${r.student_id}`}
+                title={
+                  <>
+                    {r.student_name}{" "}
+                    <span className="font-normal text-muted-foreground">
+                      · {r.guardian_name}
+                    </span>
+                  </>
+                }
+                subtitle={`${r.title} — ${r.reason}`}
+                meta={
+                  r.phone ? (
+                    <a
+                      href={`tel:${r.phone}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="whitespace-nowrap text-xs font-medium text-primary"
+                    >
+                      {r.phone}
+                    </a>
+                  ) : null
+                }
+              />
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {reach.data.summary}
+            {/* Opted-out families are counted, never listed for chasing. */}
+            {reach.data.opted_out
+              ? ` ${reach.data.opted_out} ${reach.data.opted_out === 1 ? "family has" : "families have"} asked not to be messaged.`
+              : ""}
+          </p>
+        </Section>
+      ) : null}
 
       {board?.left_after_lunch.length ? (
         <Section

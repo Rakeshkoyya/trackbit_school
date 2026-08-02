@@ -11,8 +11,13 @@ import { cn } from "@/lib/utils";
 
 import { ParentProvider, useParentPortal } from "./parent-context";
 
+// `S-61`: Today is the delivery surface — a parent who opens it once a day has
+// seen everything. Notifications is the ARCHIVE, for the parent who was out on
+// Tuesday, and Calendar answers the question a school office is asked most.
 const TABS = [
   { label: "Today", href: "/parent" },
+  { label: "Updates", href: "/parent/notifications" },
+  { label: "Calendar", href: "/parent/calendar" },
   { label: "Progress", href: "/parent/progress" },
   { label: "Report", href: "/parent/report" },
   { label: "Profile", href: "/parent/profile" },

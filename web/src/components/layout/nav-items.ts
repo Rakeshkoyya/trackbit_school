@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   Clock,
   GraduationCap,
+  HeartHandshake,
   Settings2,
   Sparkles,
   Sun,
@@ -51,6 +52,10 @@ const timesheet: NavItem = { label: "My time", href: "/timesheet", icon: Clock }
 // V1-3 (D-03). Only for the teacher who owns a class + section: her children,
 // her register, who to call. Everyone else never sees it.
 const myClass: NavItem = { label: "My Class", href: "/my-class", icon: Users };
+// V1-9 (D-71/D-87). The owner of a handful of Band C children: her list, and
+// the weekly check-in. The 9:02 teacher never opens it — her band-aware surface
+// is the checks section of the period card, which differentiates already.
+const support: NavItem = { label: "Support", href: "/support", icon: HeartHandshake };
 
 // Role-aware primary nav — the full ordered list, used by the DESKTOP sidebar.
 // SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
@@ -73,7 +78,7 @@ export function navForRole(
       // actually lives in (D-03). Absent entirely for a subject teacher.
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
-        lucy, sessions, planForTeacher, homework, students, timesheet, tasks,
+        lucy, sessions, planForTeacher, homework, students, support, timesheet, tasks,
       ];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent

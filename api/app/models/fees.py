@@ -166,3 +166,39 @@ class Transaction(Base, UUIDPKMixin, CreatedAtMixin):
     receipt_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = _actor_fk()
     created_by_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+FEE_NOTE_KINDS = ("call", "visit", "message", "reminder", "assigned", "note")
+
+
+class FeeNote(Base, UUIDPKMixin, CreatedAtMixin):
+    """The fee conversation history, per student (V1-10, `D-84`) — **append-only**
+    (law 3), the `demo_request_notes` shape a sixth time.
+
+    The founder's requirement in his own words: *"I know — conversation history.
+    I want you to maintain this in the fee management system for every student."*
+
+    What makes it worth a table rather than a free-text field on the student fee:
+    the **next caller**. Without it the same family is rung every week by a
+    different person, each of them opening with the same question — and the
+    school looks disorganised to exactly the people it is asking for money.
+
+    `said` is the load-bearing column. *"Reminded"* is an event; *"spoke to the
+    mother — paying after the 15th"* is what makes a row go away (`S-161`), and
+    it is what travels into the follow-up task so the teacher who rings knows
+    what was already agreed.
+
+    Nothing here is ever edited or deleted, and `author_member_id` is SET NULL so
+    the conversation outlives the account that recorded it."""
+
+    __tablename__ = "fee_notes"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    student_fee_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("student_fees.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="call")
+    said: Mapped[str | None] = mapped_column(Text, nullable=True)
+    promised_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    author_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True)

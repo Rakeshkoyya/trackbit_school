@@ -15,6 +15,9 @@ import { authApi } from "@/lib/auth-api";
 export function AccountScreen() {
   const { me, updateProfile } = useAuth();
   const [name, setName] = useState<string | null>(null);
+  // V1-7 (D-56): staff DOB is self-entered — a teacher's birthday is not a
+  // field an admin fills in on their behalf, and the importer never touches it.
+  const [dob, setDob] = useState<string | null>(null);
   const [savingName, setSavingName] = useState(false);
 
   const [current, setCurrent] = useState("");
@@ -25,15 +28,19 @@ export function AccountScreen() {
   if (!me) return <div className="h-64 animate-pulse rounded-xl bg-muted" />;
   const user = me.user;
   const nameVal = name ?? user.name;
-  const nameDirty = name !== null && name.trim().length > 0 && name.trim() !== user.name;
+  const dobVal = dob ?? me.date_of_birth ?? "";
+  const nameChanged = name !== null && name.trim().length > 0 && name.trim() !== user.name;
+  const dobChanged = dob !== null && dob !== (me.date_of_birth ?? "");
+  const nameDirty = nameChanged || dobChanged;
 
   async function saveName() {
     if (!nameDirty) return;
     setSavingName(true);
     try {
-      await updateProfile(name!.trim());
+      await updateProfile(nameVal.trim(), dobChanged ? (dobVal || null) : undefined);
       setName(null);
-      toast.success("Name updated");
+      setDob(null);
+      toast.success("Profile updated");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Could not update name");
     } finally {
@@ -79,6 +86,15 @@ export function AccountScreen() {
           <div>
             <Label htmlFor="acc-name">Name</Label>
             <Input id="acc-name" value={nameVal} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="acc-dob">Date of birth</Label>
+            <Input id="acc-dob" type="date" value={dobVal}
+                   onChange={(e) => setDob(e.target.value)} />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Optional. Only your school&apos;s staff see it, and only as the day —
+              never your age, and never on anything a parent can open.
+            </p>
           </div>
           {user.username ? (
             <div>

@@ -76,8 +76,13 @@ def test_c_band_students_get_the_richer_check(client, cleanup):
     h, year, klass, cs, org_id = _setup(client, cleanup)
     s = _add_student(client, h, klass["id"], "Bala")
     term = _make_term(client, h, year["id"])
+    # V1-9 (`D-75`): a band belongs to a SUBJECT. An overall letter no longer
+    # reaches the generator — which is the point: the Hindi period hands the
+    # easier route to the children who cannot read, not to whoever the blended
+    # letter happened to catch.
     set_band = client.post("/api/v1/assessments/bands", headers=h, json={
-        "student_id": s["id"], "term_id": term["id"], "tier": "C"})
+        "student_id": s["id"], "term_id": term["id"], "tier": "C",
+        "subject_id": cs["subject_id"]})
     assert set_band.status_code == 200, set_band.text
 
     body = client.get(f"/api/v1/checks?class_subject_id={cs['id']}", headers=h).json()

@@ -60,6 +60,46 @@ WINDOW_DAYS = 14
 MAX_RED_ROWS = 25
 
 
+def _plural(n: int, word: str) -> str:
+    return word if n == 1 else word + "s"
+
+
+def _headline(out: TaskBoardOut) -> str:
+    """§7 rule 3 — *"9 open, 3 overdue, all with Priya."*
+
+    The third clause is the one that changes what the admin does: nine overdue
+    tasks spread across nine people is a busy week, and nine sitting with one
+    person is a conversation with that person. A bare count cannot tell the two
+    apart, so the concentration is named whenever it is real.
+    """
+    if not out.open and not out.overdue:
+        return "Nothing is open." if not out.unassigned else (
+            f"Nothing is open, but {out.unassigned} "
+            f"{_plural(out.unassigned, 'task')} {'has' if out.unassigned == 1 else 'have'} "
+            "nobody assigned.")
+
+    parts = [f"{out.open} open"]
+    if out.overdue:
+        parts[0] += f", {out.overdue} overdue"
+    sentence = parts[0] + "."
+
+    # Who is the overdue work actually sitting with? Only claim concentration
+    # when one person genuinely holds most of it.
+    if out.overdue:
+        holders = sorted((r for r in out.by_assignee if r.overdue),
+                         key=lambda r: r.overdue, reverse=True)
+        if holders:
+            top = holders[0]
+            if len(holders) == 1:
+                sentence += f" All of it with {top.label}."
+            elif top.overdue * 2 >= out.overdue:
+                sentence += f" {top.overdue} of them with {top.label}."
+    if out.unassigned:
+        sentence += (f" {out.unassigned} {_plural(out.unassigned, 'task')} "
+                     f"{'has' if out.unassigned == 1 else 'have'} nobody assigned.")
+    return sentence
+
+
 class TaskInsights:
     def __init__(self, db: Session):
         self.db = db
@@ -136,6 +176,7 @@ class TaskInsights:
         if rated:
             out.duty_completion = round(
                 sum(d.completion or 0 for d in rated) / len(rated), 3)
+        out.headline = _headline(out)
         return out
 
     @staticmethod

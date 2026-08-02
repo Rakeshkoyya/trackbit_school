@@ -89,6 +89,13 @@ class Subject(Base, UUIDPKMixin, CreatedAtMixin):
 
     org_id: Mapped[uuid.UUID] = _org_fk()
     name: Mapped[str] = mapped_column(Text, nullable=False)  # "Mathematics"
+    # V1-9 (`D-68`): is this subject part of the support programme? A **flag,
+    # not a table** — the monitored set is configuration, so a school adds
+    # Science later without a code change. An unmonitored subject has no bands
+    # and no programme, and **nothing else about it changes**: it is absent from
+    # the band grid entirely rather than showing as an empty column.
+    band_monitored: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"))
 
     __table_args__ = (UniqueConstraint("org_id", "name", name="uq_subjects_org_id"),)
 

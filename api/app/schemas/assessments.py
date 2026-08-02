@@ -85,6 +85,14 @@ class ScoreGrid(BaseModel):
     cells: list[GridCell]
 
 
+class QuestionMark(BaseModel):
+    """One question's marks, transcribed off the marked script. A transcription,
+    never a judgement about the answer (`Q-51`/`S-117`)."""
+    q: str
+    score: float
+    max: float | None = None
+
+
 # ── photo score capture (SC-1) ───────────────────────────────────────────────
 class CaptureCreate(BaseModel):
     # NULL cycle = draft exam capture (SC-5): the cycle is created on exam save.
@@ -92,6 +100,9 @@ class CaptureCreate(BaseModel):
     class_id: uuid.UUID
     subject_id: uuid.UUID | None = None      # at most one of subject/skill
     skill_area_id: uuid.UUID | None = None
+    # V1-8 (D-80): `scripts` = one page per student's marked paper, the primary
+    # exam flow. `register` = the SC-1 mark register, one page listing many.
+    mode: str = Field(default="register", pattern="^(register|scripts)$")
     # Few-students capture: only these students sat the test.
     student_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)
 
@@ -111,11 +122,22 @@ class CaptureCandidate(BaseModel):
 class CaptureParsedRow(BaseModel):
     name_text: str
     roll_text: str | None = None
-    score: float
+    # V1-8: nullable, because an unreadable page is still a row — the teacher
+    # attaches the student and the marks herself (D-80 step 5). A page we cannot
+    # read must never become a page we discard.
+    score: float | None = None
     max_score: float | None = None
     student_id: uuid.UUID | None = None
     confidence: str | None = None            # roll | exact | fuzzy | None
     candidates: list[CaptureCandidate] = Field(default_factory=list)
+    # V1-8 `scripts` mode: which photographed paper this row came off, so the
+    # review grid can show it, and so the confirmed row files the paper against
+    # the student (S-119).
+    page_no: int | None = None
+    page_id: uuid.UUID | None = None
+    unreadable: bool = False
+    question_marks: list[QuestionMark] | None = None
+    sum_mismatch: float | None = None        # S-116: the marks don't add up
 
 
 class CaptureRosterRow(BaseModel):
@@ -140,6 +162,7 @@ class CaptureOut(BaseModel):
     class_id: uuid.UUID
     subject_id: uuid.UUID | None
     skill_area_id: uuid.UUID | None
+    mode: str = "register"
     status: str
     parse_error: str | None
     pages: list[CapturePageOut]
@@ -171,12 +194,45 @@ class CaptureConfirmIn(BaseModel):
     rows: list[CaptureConfirmRow] = Field(min_length=1, max_length=5000)
 
 
+# ── exam types (V1-8, D-55) — the school's own word ──────────────────────────
+class ExamTypeOut(BaseModel):
+    id: uuid.UUID
+    name: str            # what every screen displays and groups by
+    system_type: str     # the code's kind — never rendered
+    scale: str           # minor | major (S-114)
+    position: int
+    active: bool
+    exams: int = 0       # how many exams already carry it (retire, never delete)
+
+
+class ExamTypeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    system_type: str = Field(pattern=_TYPE_PATTERN)
+    scale: str | None = Field(default=None, pattern="^(minor|major)$")
+    position: int | None = None
+
+
+class ExamTypeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    scale: str | None = Field(default=None, pattern="^(minor|major)$")
+    position: int | None = None
+    active: bool | None = None
+
+
 # ── exams (SC-5) — the scores screen's exam-first surface ────────────────────
 class ExamRowIn(BaseModel):
     student_id: uuid.UUID
     score: float = Field(ge=0)
     # Omitted = the exam's total_marks.
     max_score: float | None = Field(default=None, gt=0)
+    # V1-8: read off the marked paper when the exam was captured by photo.
+    # Absent for a hand-typed exam — which the report says as a word, not a zero.
+    question_marks: list[QuestionMark] | None = Field(default=None, max_length=100)
+    # V1-8 (`D-80`/`S-119`): the photographed script this mark came off. Set on
+    # save — the page↔student link is written when a HUMAN confirms the grid,
+    # never by the matcher on its own (§8). It is also how an unreadable page
+    # gets mapped by hand: the teacher picks the student, and the page follows.
+    page_id: uuid.UUID | None = None
 
 
 class ExamSaveIn(BaseModel):
@@ -189,6 +245,12 @@ class ExamSaveIn(BaseModel):
     date: Date
     topic: str | None = Field(default=None, max_length=200)
     total_marks: float = Field(default=100, gt=0)
+    # V1-8 (D-55): the school's own type — it carries the scale, so the teacher
+    # picks one thing, not two.
+    exam_type_id: uuid.UUID | None = None
+    # V1-8 (S-115): the planned exam block this belongs to. None for a Tuesday
+    # slip test, which has no calendar block and never will.
+    exam_event_id: uuid.UUID | None = None
     # Few-students test: only these students sat it. None = the whole class.
     student_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)
     # A draft photo capture to file as this exam's evidence.
@@ -199,6 +261,14 @@ class ExamSaveIn(BaseModel):
 class ExamSummary(BaseModel):
     id: uuid.UUID
     type: str
+    # V1-8: the school's own word (D-55) and the never-pool bucket (S-114).
+    # `type_label` is the fallback for exams recorded before a school named its
+    # own types — a fallback, never the primary rendering.
+    exam_type_id: uuid.UUID | None = None
+    exam_type_name: str | None = None
+    type_label: str = ""
+    scale: str = "minor"
+    locked: bool = False
     name: str
     date: Date
     class_id: uuid.UUID | None
@@ -225,11 +295,35 @@ class ExamRosterRow(BaseModel):
     roll_no: str | None
     score: float | None
     max_score: float | None
+    # V1-8: the per-question marks read off this student's script, and the
+    # paper itself — `S-119`, one tap from the mark, which is the one question a
+    # parent meeting actually produces.
+    question_marks: list[QuestionMark] | None = None
+    paper_url: str | None = None
+    # `S-116`'s surviving half: the per-question marks don't sum to the total
+    # written on the paper. Arithmetic about the TEACHER's paper, never a claim
+    # about the child. Signed difference, or None when there is nothing to check.
+    sum_mismatch: float | None = None
+
+
+class ExamLockRow(BaseModel):
+    """One appended lock/unlock (law 3 — the history is the record, the columns
+    on the cycle are its cache)."""
+    action: str          # lock | unlock
+    reason: str | None
+    by_name: str | None
+    at: object
 
 
 class ExamDetail(BaseModel):
     id: uuid.UUID
     type: str
+    exam_type_id: uuid.UUID | None = None
+    exam_type_name: str | None = None
+    type_label: str = ""
+    scale: str = "minor"
+    exam_event_id: uuid.UUID | None = None
+    exam_event_name: str | None = None
     name: str
     date: Date
     class_id: uuid.UUID
@@ -240,9 +334,21 @@ class ExamDetail(BaseModel):
     total_marks: float | None
     student_ids: list[uuid.UUID] | None
     verified: bool
+    # V1-8 (D-53): locked = this is the record. Editing is refused until an
+    # admin unlocks with a reason, and the unlock is appended, never a mutation.
+    locked: bool = False
+    locked_at: object = None
+    locked_by_name: str | None = None
+    lock_history: list[ExamLockRow] = Field(default_factory=list)
     avg_pct: float | None
     rows: list[ExamRosterRow]
     pages: list[CapturePageOut]
+
+
+class ExamLockIn(BaseModel):
+    # Required on unlock (Q-62): an unlock without a reason is an edit nobody
+    # can account for six months later.
+    reason: str | None = Field(default=None, max_length=300)
 
 
 # ── bands ────────────────────────────────────────────────────────────────────
@@ -279,6 +385,12 @@ class BandSetIn(BaseModel):
     student_id: uuid.UUID
     term_id: uuid.UUID
     tier: str = Field(pattern="^(A|B|C)$")
+    # V1-9 (`D-75`): the band belongs to a SUBJECT. Omitting it writes the
+    # legacy overall row, which no current computation reads.
+    subject_id: uuid.UUID | None = None
+    # `D-70`: which route produced this row — marks, or the teacher's own
+    # assessment against the descriptors.
+    source: str = Field(default="observation", pattern="^(test|observation)$")
     scope_skill_area_id: uuid.UUID | None = None
     note: str | None = Field(default=None, max_length=300)
 
@@ -305,9 +417,17 @@ class BandHistoryRow(BaseModel):
 class InterventionCreate(BaseModel):
     student_id: uuid.UUID
     term_id: uuid.UUID
+    # V1-9 (`D-77`): one plan per (child × subject), with a named owner.
+    subject_id: uuid.UUID | None = None
+    owner_member_id: uuid.UUID | None = None
     goal_text: str = Field(min_length=1, max_length=300)
+    # `S-167`: written when the child ENTERS. A goal decided at the end is a
+    # judgement, not a target.
+    exit_criterion: str | None = Field(default=None, max_length=300)
     target_tier: str = Field(default="B", pattern="^(A|B|C)$")
-    board_id: uuid.UUID   # where the checklist tasks land (M5)
+    # Optional since V1-9 (§4.6): nobody setting up support for Kabir wants to
+    # pick a task board from the school's data model mid-conversation.
+    board_id: uuid.UUID | None = None
     items: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -321,9 +441,16 @@ class InterventionItemOut(BaseModel):
 class InterventionOut(BaseModel):
     id: uuid.UUID
     student_id: uuid.UUID
+    subject_id: uuid.UUID | None = None
+    subject_name: str | None = None
+    owner_member_id: uuid.UUID | None = None
+    owner_name: str | None = None
     goal_text: str
+    exit_criterion: str | None = None
     target_tier: str
     status: str
+    closed_at: object = None
+    outcome_note: str | None = None
     items: list[InterventionItemOut]
 
 
@@ -354,6 +481,9 @@ class AnalysisCyclePoint(BaseModel):
     name: str
     date: Date
     type: str
+    # V1-8: the never-pool bucket and the school's own word for the type.
+    scale: str = "minor"
+    type_label: str = ""
     avg_pct: float | None
     subjects: list[dict]      # [{subject_id, name, avg_pct}]
 

@@ -180,13 +180,21 @@ class ActionService:
         text = (body.message or "").strip() or (
             f"{m.org.name}: {student.full_name} has been absent from school. "
             "Please let the class teacher know if everything is alright.")
-        sent = notify_guardians([(g.phone, g.notify_opt_out) for g in guardians], text)
+        out = notify_guardians(
+            self.db, org_id=m.org_id, student_id=student.id, guardians=guardians,
+            kind="absence", title=f"About {student.full_name}", body=text)
+        sent = out.notified
         self._append(m, "guardian_reminded", "student", student.id,
-                     detail={"sent": sent, "message": text})
+                     detail={"sent": sent, "pushed": out.pushed,
+                             "unreachable": out.unreachable, "message": text})
         return ActionOut(
             kind="guardian_reminded", ok=True, subject_type="student", subject_id=student.id,
+            # `S-62` honestly: "sent" now means the message is in the family's
+            # portal, which is not the same as it having arrived on a phone.
             message=(f"Reminded {sent} guardian{'s' if sent != 1 else ''}."
-                     if sent else "No guardian could be reached — check phone numbers."))
+                     + (f" {out.unreachable} could not be reached — worth a call."
+                        if out.unreachable else "")
+                     if sent else "No guardian on file — check the student's contacts."))
 
     def _assign_followup(self, m: CurrentMember, body: ActionIn) -> ActionOut:
         """Create a task on the Follow-ups board, assigned to a real person.

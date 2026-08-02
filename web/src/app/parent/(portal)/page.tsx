@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ClipboardCheck, Loader2, Moon, NotebookPen, Phone } from "lucide-react";
+import { BookOpen, ClipboardCheck, IndianRupee, Loader2, Moon, NotebookPen, Phone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { parentApi, type DayStatus, type HomeworkStatus } from "@/lib/parent-api";
@@ -175,6 +175,24 @@ export default function ParentTodayPage() {
         )}
       </Section>
 
+      {/* V1-10 (`D-66`/`S-160`): the fee reminder — **one line**, and only when
+          something is actually due. Two questions, "how much" and "by when",
+          and both fit on it. Deliberately not a ledger and not a tab: a fee tab
+          invites "why was I charged this", which is a counter conversation.
+          Neutral tone, never red — it is read by a family that may be having a
+          hard year. */}
+      {data.fee ? (
+        <Section icon={IndianRupee} title="Fees">
+          <p className="text-sm">{data.fee.line}</p>
+          {data.fee.school_phone ? (
+            <a href={`tel:${data.fee.school_phone}`}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm">
+              <Phone className="h-4 w-4" /> Call the office
+            </a>
+          ) : null}
+        </Section>
+      ) : null}
+
       {/* Yesterday's verdict — the question a parent opens this app to answer. */}
       {data.yesterday ? (
         <Section icon={ClipboardCheck} title={`Last homework · ${dayLabel(data.yesterday.date)}`}>
@@ -187,6 +205,15 @@ export default function ParentTodayPage() {
             ) : null}
             {data.yesterday.partial ? (
               <Badge tone="warning">{data.yesterday.partial} partly done</Badge>
+            ) : null}
+            {/* `S-99`: late counts as DONE and is reported beside completion,
+                never folded into it and never as a miss. */}
+            {data.yesterday.late ? (
+              <Badge tone="success">{data.yesterday.late} done late</Badge>
+            ) : null}
+            {/* `D-35`: absent when it was set — yellow, pending, never red. */}
+            {data.yesterday.carried ? (
+              <Badge tone="warning">{data.yesterday.carried} to catch up</Badge>
             ) : null}
             {data.yesterday.not_checked ? (
               <Badge tone="neutral">{data.yesterday.not_checked} not checked yet</Badge>
@@ -229,6 +256,34 @@ export default function ParentTodayPage() {
               </li>
             ))}
           </ul>
+        </Section>
+      ) : null}
+
+      {/* `S-94` — work whose deadline has passed, split OUT of "still to do".
+          The two used to be one list, so missed work sat beside upcoming work
+          looking as though it could still be handed in. Deliberately carries
+          NO red: it is a fact, and the child may well have finished it since. */}
+      {data.missed.length ? (
+        <Section icon={NotebookPen} title="Missed">
+          <ul className="space-y-2">
+            {data.missed.map((hw, i) => (
+              <li key={i} className="flex items-baseline gap-2 text-sm">
+                <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
+                  {hw.subject_name}
+                </span>
+                <span className="min-w-0 flex-1">{hw.text}</span>
+                {hw.due_date ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    was due {dayLabel(hw.due_date)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Worth a word with them — or with the teacher if it was set while
+            they were away.
+          </p>
         </Section>
       ) : null}
 

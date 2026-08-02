@@ -149,6 +149,35 @@ export interface CallBoard {
   left_after_lunch: LeftRow[];
 }
 
+// ── S-62 · reach: who the school's own alerts did not get to (V1-11) ─────────
+
+export interface ReachRow {
+  student_id: string;
+  student_name: string;
+  guardian_name: string;
+  /** The whole point of the row is the call, so the number rides along. */
+  phone: string | null;
+  kind: string;
+  title: string;
+  /** The sentence a human reads ("hasn't signed in to the app yet"). */
+  reason: string;
+  reason_code: "no_login" | "no_device" | "push_failed";
+  created_at: string;
+}
+
+export interface ReachBoard {
+  date: string;
+  messages_sent: number;
+  delivered: number;
+  unreachable: number;
+  /** Kept apart from `unreachable`: a family that asked not to be messaged is
+   *  not a delivery failure, and must never join a list the office is told to
+   *  clear. */
+  opted_out: number;
+  summary: string;
+  rows: ReachRow[];
+}
+
 // ── cover for an absent teacher ──────────────────────────────────────────────
 
 export interface SubstituteCandidate {
@@ -504,6 +533,8 @@ export interface HomeworkDay {
 }
 
 export interface HomeworkBoard {
+  /** V1-12 §7: the sentence the tab opens with, composed server-side. */
+  headline: string | null;
   overview: HomeworkOverview;
   daily: HomeworkDay[];
 }
@@ -550,6 +581,8 @@ export interface DutyRow {
 }
 
 export interface TaskBoard {
+  /** V1-12 §7. */
+  headline: string | null;
   date: string;
   window_days: number;
   open: number;
@@ -571,6 +604,11 @@ export interface ExamRollup {
   cycle_id: string;
   name: string;
   type: string;
+  /** V1-8: the school's own word for the type (`D-55`) — display this, not
+   *  `type`, which is the code's kind. */
+  type_label: string;
+  scale: "minor" | "major";
+  locked: boolean;
   date: string;
   class_id: string | null;
   class_label: string | null;
@@ -582,13 +620,28 @@ export interface ExamRollup {
   participation: number | null;
 }
 
+export interface ScaleFigureRollup {
+  scale: "minor" | "major";
+  label: string;
+  purpose: string;
+  exams: number;
+  scored: number;
+  avg_pct: number | null;
+}
+
 export interface ExamScopeRow {
   key: string;
   id: string | null;
   label: string;
   exams: number;
   scored: number;
+  /** V1-8 `S-114`: within the board's basis scale — NEVER blended across the
+   *  two. The other bucket rides along beside it. */
   avg_pct: number | null;
+  minor_pct: number | null;
+  minor_exams: number;
+  major_pct: number | null;
+  major_exams: number;
 }
 
 export interface ExamTrendPoint {
@@ -609,13 +662,24 @@ export interface ExamBand {
 }
 
 export interface ExamsBoard {
+  /** V1-12 §7 — names which scale its figure came from. */
+  headline: string | null;
   as_of: string;
   academic_year_id: string | null;
+  /** The school's own words for the types in scope (`D-55`). */
   types: string[];
   type_filter: string | null;
   exams: number;
   scored: number;
+  /** V1-8 `S-114`: computed within `scale_basis` alone — there is no blended
+   *  figure on this board. `standing` (major) and `trajectory` (minor) carry
+   *  the two separately, so the screen can name which it is showing. */
   avg_pct: number | null;
+  scale_filter: string | null;
+  scale_basis: "minor" | "major";
+  standing: ScaleFigureRollup | null;
+  trajectory: ScaleFigureRollup | null;
+  trend_scale: "minor" | "major";
   recent: ExamRollup[];
   by_class: ExamScopeRow[];
   by_subject: ExamScopeRow[];

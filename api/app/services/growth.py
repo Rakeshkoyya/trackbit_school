@@ -19,8 +19,10 @@ from datetime import date
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.bands import chip as band_chip
 from app.core.context import CurrentMember
 from app.core.coverage import SYLLABUS
+from app.core.exams import SCALE_LABELS, ScaleTally
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
     AcademicYear,
@@ -51,6 +53,7 @@ from app.schemas.growth import (
     GrowthBandEntry,
     GrowthChapter,
     GrowthObservation,
+    GrowthScaleFigure,
     GrowthScore,
     GrowthSkill,
     GrowthSubject,
@@ -58,6 +61,7 @@ from app.schemas.growth import (
     StudentGrowthOut,
 )
 from app.services.coverage import coverage_rows
+from app.services.exam_marks import load_class_marks
 
 _LOW_ATTENDANCE_PCT = 85.0
 _LOW_SCORE_PCT = 40.0
@@ -70,6 +74,20 @@ _MAX_STRENGTHS = 6
 
 def _pct(part: int, whole: int) -> float | None:
     return round(part * 100.0 / whole, 1) if whole else None
+
+
+def _figures(scores: list[GrowthScore],
+             held: dict[str, int] | None) -> list[GrowthScaleFigure]:
+    """The student's two never-pooled averages, each carrying its denominator
+    (`S-114` + `S-118`). The arithmetic is `core/exams.py`'s — this only shapes
+    it for the wire."""
+    tally = ScaleTally()
+    for s in scores:
+        tally.add(s.scale, s.score, s.max_score, cycle_id=s.cycle_id or (s.cycle_name, s.date))
+    return [GrowthScaleFigure(
+        scale=f.scale, label=SCALE_LABELS[f.scale], avg_pct=f.pct,
+        tests_taken=f.tests_taken, tests_held=f.tests_held, sentence=f.sentence())
+        for f in tally.figures(held)]
 
 
 class GrowthService:
@@ -99,9 +117,10 @@ class GrowthService:
         klass = self.db.get(SchoolClass, student.class_id) if student.class_id else None
         class_label = (klass.name + (f"-{klass.section}" if klass.section else "")
                        if klass else None)
-        band, band_history = self._bands(m.org_id, student.id)
+        band, band_history = self._bands(m, student.id)
         out = StudentGrowthOut(
             student_id=student.id, full_name=student.full_name, class_label=class_label,
+            date_of_birth=student.date_of_birth,
             band=band, band_history=band_history, attendance=GrowthAttendance())
         if klass is None:
             return out
@@ -273,18 +292,27 @@ class GrowthService:
                 rating=o.rating or "needs_work", note=o.note))
 
         subject_ids = {cs.subject_id: cs.id for cs, _, _ in cs_rows}
-        score_rows = self.db.execute(
-            select(AssessmentScore, AssessmentCycle.name, AssessmentCycle.date)
-            .join(AssessmentCycle, AssessmentCycle.id == AssessmentScore.cycle_id)
-            .where(AssessmentScore.org_id == m.org_id,
-                   AssessmentScore.student_id == student.id,
-                   AssessmentScore.subject_id.in_(subject_ids))
-            .order_by(AssessmentCycle.date)).all() if subject_ids else []
+        # V1-8: the score history is read through `exam_marks`, the one batched
+        # marks reader (rule 1). Before this, growth had its own query with **no
+        # type on it** (module §4.3), so `/students/[id]` drew one series through
+        # a 5-mark slip test and an 80-mark final: a child at 40% on slips and
+        # 85% in the finals read as erratic. Every row now carries its scale
+        # (`S-114`), the school's word (`D-55`) and its paper (`S-119`), and the
+        # figures below carry their denominator (`S-118`) — computed by the same
+        # function the report card uses, so the two can never disagree.
+        marks = load_class_marks(self.db, m.org_id, klass.id, [student.id])
+        held_by_subject = marks.held(student.id)
         scores_by_cs: dict[uuid.UUID, list[GrowthScore]] = defaultdict(list)
-        for score, cyc_name, cyc_date in score_rows:
-            scores_by_cs[subject_ids[score.subject_id]].append(GrowthScore(
-                cycle_name=cyc_name, date=cyc_date,
-                score=float(score.score), max_score=float(score.max_score)))
+        for r in marks.for_student(student.id):
+            cs_id = subject_ids.get(r.subject_id)
+            if cs_id is None:
+                continue
+            scores_by_cs[cs_id].append(GrowthScore(
+                cycle_id=r.cycle_id, cycle_name=r.cycle_name, date=r.date,
+                type=r.system_type, type_label=r.type_label, scale=r.scale,
+                score=r.score, max_score=r.max_score, paper_url=r.paper_url))
+        held = {subject_ids[sid]: counts for sid, counts in held_by_subject.items()
+                if sid in subject_ids}
 
         # `S-51`: the coverage FIGURE comes from the shared computation, not from
         # this module's per-topic walk and not from the browser. The walk above
@@ -317,23 +345,36 @@ class GrowthService:
                 homework_not_checked=hw_unchecked.get(cs.id, 0),
                 checks_flagged=checks_flagged.get(cs.id, 0),
                 observations=obs_by_cs.get(cs.id, []),
-                scores=scores_by_cs.get(cs.id, [])))
+                scores=scores_by_cs.get(cs.id, []),
+                score_figures=_figures(scores_by_cs.get(cs.id, []), held.get(cs.id))))
 
         out.skills = self._skills(m.org_id, student.id)
         out.growth_areas = self._growth_areas(out, obs_rows)
         out.strengths = self._strengths(out, obs_rows)
         return out
 
-    def _bands(self, org_id: uuid.UUID, student_id: uuid.UUID,
+    def _bands(self, m: CurrentMember, student_id: uuid.UUID,
                ) -> tuple[str | None, list[GrowthBandEntry]]:
+        """V1-9 (`D-75`/`S-186`): **"C · Hindi"**, not a letter.
+
+        There is no overall band any more. `band` carries the lowest tier the
+        child holds with the subject that earned it, and the history shows every
+        subject's rows — including the legacy overall ones, which are kept as
+        history and read by nothing."""
+        from app.services.bands import BandService  # noqa: PLC0415
+
+        subjects = {s.id: s.name for s in self.db.scalars(
+            select(Subject).where(Subject.org_id == m.org_id))}
         rows = list(self.db.scalars(
             select(StudentBand)
-            .where(StudentBand.org_id == org_id, StudentBand.student_id == student_id,
-                   StudentBand.scope_skill_area_id.is_(None))
+            .where(StudentBand.org_id == m.org_id, StudentBand.student_id == student_id)
             .order_by(StudentBand.created_at)))
-        history = [GrowthBandEntry(tier=b.tier, set_on=b.created_at.date(), note=b.note)
-                   for b in rows]
-        return (rows[-1].tier if rows else None), history
+        history = [GrowthBandEntry(
+            tier=b.tier, set_on=b.created_at.date(), note=b.note,
+            subject_name=subjects.get(b.subject_id) if b.subject_id else None)
+            for b in rows]
+        places = BandService(self.db).placements(m, [student_id]).get(student_id, [])
+        return band_chip(places), history
 
     def _skills(self, org_id: uuid.UUID, student_id: uuid.UUID) -> list[GrowthSkill]:
         """Latest score per skill area (diagnostics)."""

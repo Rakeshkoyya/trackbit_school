@@ -580,6 +580,9 @@ function PeriodPageInner() {
   const qc = useQueryClient();
   const [notHeldOpen, setNotHeldOpen] = useState(false);
   const [reason, setReason] = useState("");
+  // S-147: which approved event this period was lost to, if any. "" = free text,
+  // which is S-146's per-class case (8-A went to the rehearsal, 8-B taught on).
+  const [reasonEvent, setReasonEvent] = useState("");
 
   const { data: card, isLoading } = useQuery({
     queryKey: ["period-card", classId, periodNo],
@@ -597,7 +600,7 @@ function PeriodPageInner() {
         ?? (await schoolApi.openPeriod({
           class_id: classId, period_no: periodNo, class_subject_id: card!.class_subject_id,
         })).id;
-      return schoolApi.periodNotHeld(periodId, reason.trim());
+      return schoolApi.periodNotHeld(periodId, reason.trim(), reasonEvent || null);
     },
     onSuccess: () => { toast.success("Marked not held"); setNotHeldOpen(false); refresh(); },
     onError: (e) => showApiError(e, "Could not update"),
@@ -641,16 +644,42 @@ function PeriodPageInner() {
           </div>
           {card.status === "not_held" ? (
             <Badge tone="neutral">not held{card.not_held_reason ? ` · ${card.not_held_reason}` : ""}</Badge>
+          ) : card.locked ? (
+            <Badge tone="neutral">
+              off today{card.lock_reason ? ` · ${card.lock_reason}` : ""}
+            </Badge>
           ) : !notHeldOpen ? (
             <Button size="sm" variant="ghost" onClick={() => setNotHeldOpen(true)}>Period not held?</Button>
           ) : null}
         </div>
         {notHeldOpen && card.status !== "not_held" ? (
-          <form className="mt-2 flex gap-2"
+          <form className="mt-2 space-y-2"
             onSubmit={(e) => { e.preventDefault(); if (reason.trim()) notHeld.mutate(); }}>
-            <Input autoFocus placeholder="Why not? e.g. sports day" value={reason} onChange={(e) => setReason(e.target.value)} />
-            <Button type="submit" size="sm" variant="outline" disabled={notHeld.isPending || !reason.trim()}>Confirm</Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setNotHeldOpen(false)}>Cancel</Button>
+            {/* S-147 — the reason points at the event when there is one, so the
+                school can ask what a function cost it in periods. Free text
+                stays available; it is not the key. */}
+            {card.day_events.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {card.day_events.map((ev) => (
+                  <button key={ev.id} type="button"
+                    onClick={() => {
+                      setReasonEvent(ev.id === reasonEvent ? "" : ev.id);
+                      if (ev.id !== reasonEvent) setReason(ev.title);
+                    }}
+                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                      reasonEvent === ev.id
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-card hover:bg-muted"}`}>
+                    {ev.title}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className="flex gap-2">
+              <Input autoFocus placeholder="Why not? e.g. sports day" value={reason} onChange={(e) => setReason(e.target.value)} />
+              <Button type="submit" size="sm" variant="outline" disabled={notHeld.isPending || !reason.trim()}>Confirm</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setNotHeldOpen(false)}>Cancel</Button>
+            </div>
           </form>
         ) : null}
       </div>
@@ -658,6 +687,13 @@ function PeriodPageInner() {
       {card.status === "not_held" ? (
         <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
           This period was marked not held — nothing to capture.
+        </p>
+      ) : card.locked ? (
+        /* S-145: the school itself closed this period. Nothing is expected —
+           and what was already recorded against it is untouched (Q-65). */
+        <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+          {card.lock_reason ?? "The school"} — this period is off today, so
+          nothing is being asked of you. Anything already recorded is kept.
         </p>
       ) : (
         <div className="space-y-3">

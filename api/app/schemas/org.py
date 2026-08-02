@@ -156,6 +156,11 @@ class OrgSettingsOut(BaseModel):
     attendance_mode: str = "every_period"  # D-01
     min_attendance_pct: int = 75
     homework_gap_days: int = 3
+    # V1-8 (`D-54`/`S-138`, A-4): keep the model-read-vs-human-locked diff on
+    # locked exam captures, for training a marks reader later. Default OFF and
+    # asked for — it is the only data here that does not serve the school that
+    # entered it. No export path exists in v1.
+    training_data_opt_in: bool = False
     work_categories: list[WorkCategoryOut] = []
     limits: PlanLimitsOut
     usage: OrgUsageOut
@@ -173,6 +178,7 @@ class OrgSettingsUpdate(BaseModel):
         default=None, pattern="^(every_period|first_period|twice_daily)$")
     min_attendance_pct: int | None = Field(default=None, ge=0, le=100)
     homework_gap_days: int | None = Field(default=None, ge=1, le=30)
+    training_data_opt_in: bool | None = None
     # Full replace of the visible list; the service applies the D-19 rules
     # (missing keys are retired, never deleted).
     work_categories: list[WorkCategoryIn] | None = None

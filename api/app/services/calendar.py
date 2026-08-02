@@ -8,6 +8,7 @@ working weekdays + affects_teaching events and feeds them in.
 
 import uuid
 from datetime import date, timedelta
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -107,6 +108,91 @@ def org_working_days(db: Session, org_id: uuid.UUID, start: date, end: date) -> 
     blocked = expand_blocked_dates(event_rows(events))
     ww = set(year.working_weekdays or DEFAULT_WORKING_WEEKDAYS)
     return [d for d in _daterange(start, end) if is_teaching_day(d, ww, blocked)]
+
+
+class DayLock(NamedTuple):
+    """What the school's own calendar says about one date (V1-7, `S-145`).
+
+    `closed` — the whole day is locked, so nothing is expected of anybody.
+    `periods` — the specific period numbers locked on a day that otherwise runs.
+    `events` — the approved rows behind it, in the order they were painted, so a
+    surface can *name* the reason ("Independence Day") rather than saying a
+    period simply vanished.
+
+    Load-bearing distinction, and the one most likely to be lost by someone
+    tidying: **"no longer expected" is not "erase what was recorded"** (`Q-65`).
+    A school that closed at 11am genuinely did teach period 1. Locking removes a
+    period from what is still ASKED FOR — the capture surface, the denominators,
+    the 16:00 reminder — and never from what was already captured.
+    """
+
+    closed: bool = False
+    periods: frozenset[int] = frozenset()
+    events: tuple = ()
+
+    def expects(self, period_no: int) -> bool:
+        return not self.closed and period_no not in self.periods
+
+    @property
+    def any(self) -> bool:
+        return self.closed or bool(self.periods)
+
+    @property
+    def title(self) -> str | None:
+        return self.events[0].title if self.events else None
+
+
+def day_lock(db: Session, org_id: uuid.UUID, on_date: date,
+             year_id: uuid.UUID | None = None) -> DayLock:
+    """THE answer to "is this period still expected today?" (V1-7 `S-145`).
+
+    One function, because the alternative was four: My Day, the 16:00 reminder,
+    the capture heatmap and the daily report's ambiguity rules each had their own
+    idea of what a school holiday means, and three of them had none at all — on
+    15 August every teacher saw eight unlogged period rows, got nagged at 16:00
+    about a day the school itself cancelled, and appeared in the report as a
+    capture failure. That is `ux §5` (not captured is never a failure) inverted
+    into the product inventing work on a holiday.
+    """
+    q = select(CalendarEvent).where(
+        CalendarEvent.org_id == org_id,
+        CalendarEvent.start_date <= on_date,
+        CalendarEvent.end_date >= on_date,
+        CalendarEvent.affects_teaching.is_(True))
+    if year_id is not None:
+        q = q.where(CalendarEvent.academic_year_id == year_id)
+    events = list(db.scalars(q.order_by(CalendarEvent.start_date)))
+    if not events:
+        return DayLock()
+    closed = any(not e.blocks_periods for e in events)
+    periods: set[int] = set()
+    for e in events:
+        for p in e.blocks_periods or ():
+            periods.add(int(p))
+    return DayLock(closed=closed, periods=frozenset(periods), events=tuple(events))
+
+
+def day_locks(db: Session, org_id: uuid.UUID, start: date, end: date,
+              year_id: uuid.UUID | None = None) -> dict[date, DayLock]:
+    """The batched form for a grid (the capture heatmap, the month register) —
+    one query for the span rather than one per day."""
+    q = select(CalendarEvent).where(
+        CalendarEvent.org_id == org_id,
+        CalendarEvent.start_date <= end,
+        CalendarEvent.end_date >= start,
+        CalendarEvent.affects_teaching.is_(True))
+    if year_id is not None:
+        q = q.where(CalendarEvent.academic_year_id == year_id)
+    by_date: dict[date, list] = {}
+    for e in db.scalars(q.order_by(CalendarEvent.start_date)):
+        for d in _daterange(max(e.start_date, start), min(e.end_date, end)):
+            by_date.setdefault(d, []).append(e)
+    out: dict[date, DayLock] = {}
+    for d, evs in by_date.items():
+        closed = any(not e.blocks_periods for e in evs)
+        periods = {int(p) for e in evs for p in (e.blocks_periods or ())}
+        out[d] = DayLock(closed=closed, periods=frozenset(periods), events=tuple(evs))
+    return out
 
 
 def effective_periods(

@@ -13,12 +13,19 @@ from app.core.database import get_db
 from app.core.dependencies import require_super_admin
 from app.core.rate_limit import limiter
 from app.schemas.auth import SessionResponse
+from app.schemas.events import (
+    ObservanceBulkIn,
+    ObservanceBulkOut,
+    ObservanceIn,
+    ObservanceOut,
+)
 from app.schemas.platform import (
     CreateSchoolRequest,
     CreateSchoolResult,
     PlatformOrgOut,
     ReadinessOut,
 )
+from app.services.observances import ObservanceService
 from app.services.platform import PlatformService
 from app.services.readiness import ReadinessService
 
@@ -72,3 +79,57 @@ def mark_handed_over(
     db: Session = Depends(get_db),
 ) -> ReadinessOut:
     return ReadinessService(db).mark_handed_over(org_id)
+
+
+# ── the observance catalogue (V1-7, D-60 / S-149) ────────────────────────────
+# Platform data: no org_id, no RLS, super-admin on every write. One curation
+# serves every school and one correction fixes every school — which is the whole
+# reason it is not a file in the repo.
+@router.get("/observances", response_model=list[ObservanceOut])
+def list_observances(
+    year: int | None = None,
+    state: str | None = None,
+    q: str | None = None,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> list[ObservanceOut]:
+    return ObservanceService(db).list(year=year, state=state, q=q)
+
+
+@router.post("/observances", response_model=ObservanceOut)
+def create_observance(
+    body: ObservanceIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ObservanceOut:
+    return ObservanceService(db).create(body, member.user.id)
+
+
+@router.put("/observances/{observance_id}", response_model=ObservanceOut)
+def update_observance(
+    observance_id: uuid.UUID,
+    body: ObservanceIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ObservanceOut:
+    return ObservanceService(db).update(observance_id, body)
+
+
+@router.delete("/observances/{observance_id}", status_code=204)
+def retire_observance(
+    observance_id: uuid.UUID,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> None:
+    """Retire, never delete — a school may already have approved against it."""
+    ObservanceService(db).retire(observance_id)
+
+
+@router.post("/observances/bulk", response_model=ObservanceBulkOut)
+def bulk_observances(
+    body: ObservanceBulkIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ObservanceBulkOut:
+    """A year's import from one source, upserted on (key, date)."""
+    return ObservanceService(db).bulk(body, member.user.id)

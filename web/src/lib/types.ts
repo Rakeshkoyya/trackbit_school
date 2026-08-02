@@ -56,6 +56,9 @@ export interface Me {
   /** V1-3 (D-03): class teacher of at least one class — the nav shows
    *  "My Class" from this alone. */
   is_class_teacher: boolean;
+  /** V1-7 (D-56): your own date of birth, self-entered on Account. Never shown
+   *  on a class list (S-133) and never sent to a parent surface (Q-57). */
+  date_of_birth: string | null;
   user: User;
   org: Org;
   orgs: OrgSummary[];
@@ -361,6 +364,9 @@ export interface OrgSettings {
   attendance_mode: AttendanceMode;
   min_attendance_pct: number;
   homework_gap_days: number;
+  /** V1-8 (`D-54`/`S-138`): keep the model-read-vs-teacher-corrected diff on
+   *  locked exam captures. Default off, and asked for — no export path in v1. */
+  training_data_opt_in: boolean;
   work_categories: WorkCategory[];
   limits: PlanLimits;
   usage: OrgUsage;

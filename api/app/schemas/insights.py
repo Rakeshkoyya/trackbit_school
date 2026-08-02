@@ -614,6 +614,10 @@ class HomeworkDay(BaseModel):
 
 
 class HomeworkBoard(BaseModel):
+    # V1-12 (§7 rule 3): the sentence the tab opens with, composed server-side
+    # like the syllabus board's — so this tab and the overview block can never
+    # describe the same week differently.
+    headline: str | None = None
     overview: HomeworkOverview
     daily: list[HomeworkDay] = []
 
@@ -666,6 +670,7 @@ class DutyRow(BaseModel):
 
 
 class TaskBoardOut(BaseModel):
+    headline: str | None = None      # V1-12 §7
     date: date_
     window_days: int
     open: int = 0
@@ -690,6 +695,12 @@ class ExamRollup(BaseModel):
     cycle_id: uuid.UUID
     name: str
     type: str
+    # V1-8: the school's own word for the type (D-55) and the never-pool bucket
+    # (S-114). `type_label` falls back to the system kind's label only where a
+    # school has not named its own.
+    type_label: str = ""
+    scale: str = "minor"
+    locked: bool = False
     date: date_
     class_id: uuid.UUID | None = None
     class_label: str | None = None
@@ -701,13 +712,32 @@ class ExamRollup(BaseModel):
     participation: float | None = None
 
 
+class ScaleFigure(BaseModel):
+    """One never-pooled bucket, with its denominators attached (`S-114`/`S-118`).
+    Returned even when empty — *"no major exams yet"* is information, and
+    dropping the row is how a screen implies there were none."""
+    scale: str                    # minor | major
+    label: str                    # "Minor tests" / "Major exams"
+    purpose: str                  # why the two are apart, in a sentence
+    exams: int = 0
+    scored: int = 0
+    avg_pct: float | None = None
+
+
 class ExamScopeRow(BaseModel):
     key: str
     id: uuid.UUID | None = None
     label: str
     exams: int = 0
     scored: int = 0
+    # The average **within the board's basis scale** (never blended across the
+    # two — `S-114`). The other bucket rides along beside it so the screen can
+    # show both without a second request.
     avg_pct: float | None = None
+    minor_pct: float | None = None
+    minor_exams: int = 0
+    major_pct: float | None = None
+    major_exams: int = 0
 
 
 class ExamTrendPoint(BaseModel):
@@ -728,13 +758,23 @@ class ExamBand(BaseModel):
 
 
 class ExamsBoard(BaseModel):
+    headline: str | None = None      # V1-12 §7
     as_of: date_
     academic_year_id: uuid.UUID | None = None
     types: list[str] = []
     type_filter: str | None = None
     exams: int = 0
     scored: int = 0
+    # V1-8 (`S-114`, `Q-50`): **never a blended number.** `avg_pct` and every
+    # row below are computed within `scale_basis` alone — the bucket the board
+    # is currently reading — and `standing` / `trajectory` carry the two
+    # separately so the screen can lead with a sentence that names which.
     avg_pct: float | None = None
+    scale_filter: str | None = None      # what the caller asked for
+    scale_basis: str = "minor"           # what the figures below are computed from
+    standing: ScaleFigure | None = None  # major exams — where they stand
+    trajectory: ScaleFigure | None = None  # minor tests — which way they're moving
+    trend_scale: str = "minor"           # which bucket drew the trajectories
     recent: list[ExamRollup] = []
     by_class: list[ExamScopeRow] = []
     by_subject: list[ExamScopeRow] = []
@@ -886,3 +926,34 @@ class OverviewBoard(BaseModel):
     period_label: str | None = None
     sections: list[OverviewSection] = []
     actions: list[QuickAction] = []
+
+
+# ── S-62 · reach (V1-11) ────────────────────────────────────────────────────
+class ReachRow(BaseModel):
+    """One family the school did not reach, with the number to ring.
+
+    Named, not counted — the board's rule. `phone` is here because the whole
+    point of the row is the call: without it the admin has a problem and no way
+    to act on it."""
+    student_id: uuid.UUID
+    student_name: str
+    guardian_name: str
+    phone: str | None = None
+    kind: str
+    title: str
+    reason: str          # the sentence shown to a human
+    reason_code: str     # no_login | no_device | push_failed
+    created_at: datetime
+
+
+class ReachBoard(BaseModel):
+    date: date_
+    messages_sent: int = 0
+    delivered: int = 0
+    unreachable: int = 0
+    # Kept apart from `unreachable` on purpose: a family that asked not to be
+    # messaged is not a delivery failure and must never join a list the office
+    # is told to clear.
+    opted_out: int = 0
+    summary: str = ""
+    rows: list[ReachRow] = []

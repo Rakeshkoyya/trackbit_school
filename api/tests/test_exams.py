@@ -194,7 +194,12 @@ def test_teacher_creates_only_for_taught_classes(client, cleanup):
     assert band.status_code == 403
 
 
-def test_band_config_and_categorize(client, cleanup):
+def test_band_config_and_promote_from_a_band_test(client, cleanup):
+    """V1-9 rewrote this route. `/bands/categorize` was **one tap and it
+    committed**, off one overall letter (`D-75`), with no preview — and
+    `student_bands` is append-only, so a mistake was permanent. Its replacement
+    is the promote flow: per subject, **locked only** (`S-184`), and the moves
+    shown before they commit (`Q-81`)."""
     h, _reg, _year, klass, subject, kids = _setup(client, cleanup)
     cfg = client.get("/api/v1/assessments/bands/config", headers=h).json()
     assert cfg == {"a_min": 75, "b_min": 50}
@@ -204,27 +209,32 @@ def test_band_config_and_categorize(client, cleanup):
     cfg = client.put("/api/v1/assessments/bands/config", headers=h,
                      json={"a_min": 80, "b_min": 40}).json()
     assert cfg == {"a_min": 80, "b_min": 40}
+    # A subject only has a programme once the school monitors it (`D-68`).
+    client.put("/api/v1/bands/setup/monitored", headers=h,
+               json={"subject_ids": [subject["id"]]})
 
     exam = client.post("/api/v1/assessments/exams", headers=h, json={
         "class_id": klass["id"], "subject_id": subject["id"], "type": "band_test",
         "name": "Term 1 categorization", "date": "2026-07-10", "total_marks": 100,
         "rows": [
-            {"student_id": kids[0]["id"], "score": 85},   # ≥80 → A
-            {"student_id": kids[1]["id"], "score": 55},   # ≥40 → B
-            {"student_id": kids[2]["id"], "score": 30},   # <40 → C
+            {"student_id": kids[0]["id"], "score": 85},   # >=80 -> A
+            {"student_id": kids[1]["id"], "score": 55},   # >=40 -> B
+            {"student_id": kids[2]["id"], "score": 30},   # <40  -> C
         ]}).json()
-    res = client.post("/api/v1/assessments/bands/categorize", headers=h,
-                      json={"cycle_id": exam["id"]}).json()
-    assert res["applied"] == 3
-    assert res["counts"] == {"A": 1, "B": 1, "C": 1, "no_score": 0}
+    client.post(f"/api/v1/assessments/exams/{exam['id']}/lock", headers=h)
 
-    board = client.get(f"/api/v1/assessments/bands?class_id={klass['id']}", headers=h).json()
+    preview = client.get(f"/api/v1/bands/promote/{exam['id']}", headers=h).json()
+    assert preview["blocked"] is None and len(preview["moves"]) == 3
+    res = client.post(f"/api/v1/bands/promote/{exam['id']}", headers=h).json()
+    assert res["applied"] == 3
+
+    board = client.get("/api/v1/bands/class", headers=h, params={
+        "class_id": klass["id"], "subject_id": subject["id"]}).json()
     tiers = {r["full_name"]: r["current_tier"] for r in board["rows"]}
     assert tiers == {"Asha Reddy": "A", "Bharat Kumar": "B", "Chetan Rao": "C"}
 
-    # Idempotent: same test, same thresholds → nothing moves, history untouched.
-    again = client.post("/api/v1/assessments/bands/categorize", headers=h,
-                        json={"cycle_id": exam["id"]}).json()
+    # Idempotent: same test, same thresholds -> nothing moves, history untouched.
+    again = client.post(f"/api/v1/bands/promote/{exam['id']}", headers=h).json()
     assert again["applied"] == 0
     hist = client.get(f"/api/v1/assessments/students/{kids[0]['id']}/bands", headers=h).json()
     assert len(hist) == 1 and "Term 1 categorization" in hist[0]["note"]

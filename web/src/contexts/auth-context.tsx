@@ -19,7 +19,7 @@ interface AuthState {
   switchOrg: (orgId: string) => Promise<void>;
   createOrg: (orgName: string, timezone: string) => Promise<void>;
   setPassword: (password: string, name?: string) => Promise<void>;
-  updateProfile: (name: string) => Promise<void>;
+  updateProfile: (name: string, dob?: string | null) => Promise<void>;
   logout: () => void;
 }
 
@@ -33,6 +33,8 @@ function sessionToMe(s: Session): Me {
     // The session token doesn't carry it; /auth/me fills it in on the next
     // load, which is when the My Class nav item appears (V1-3, D-03).
     is_class_teacher: false,
+    // Same as above — a session response has no DOB; /auth/me carries it.
+    date_of_birth: null,
     user: s.user,
     org: s.org,
     orgs: s.orgs,
@@ -142,8 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const updateProfile = useCallback(async (name: string) => {
-    const data = await authApi.updateProfile(name);
+  const updateProfile = useCallback(async (name: string, dob?: string | null) => {
+    const data = await authApi.updateProfile(name, dob);
     setMe(data);
   }, []);
 

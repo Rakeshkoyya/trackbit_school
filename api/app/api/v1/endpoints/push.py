@@ -1,4 +1,11 @@
-"""Web Push: expose the VAPID public key, register/unregister device tokens."""
+"""Web Push: expose the VAPID public key, register/unregister device tokens.
+
+V1-11 (`D-14`): parents subscribe here too. A `DeviceToken` is keyed on the
+User, and a parent IS a User (with no membership) — so the table needed nothing;
+only the guard was wrong. Subscribe/unsubscribe therefore take the *principal*,
+while `/test` stays staff-only: it is a wiring aid, not a way to make a family's
+phone buzz.
+"""
 
 import json
 from datetime import UTC, datetime
@@ -9,9 +16,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.context import CurrentMember
+from app.core.context import CurrentMember, CurrentParent
 from app.core.database import get_db
-from app.core.dependencies import get_current_member
+from app.core.dependencies import get_current_member, get_current_principal
 from app.models import DeviceToken
 from app.schemas.common import MessageResponse
 from app.services import notifications
@@ -36,9 +43,10 @@ def vapid_key() -> dict:
 @router.post("/subscribe", response_model=MessageResponse)
 def subscribe(
     body: SubscribeRequest,
-    member: CurrentMember = Depends(get_current_member),
+    principal: CurrentMember | CurrentParent = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ) -> MessageResponse:
+    member = principal
     token = json.dumps(body.subscription, sort_keys=True)
     existing = db.scalar(select(DeviceToken).where(DeviceToken.token == token))
     if existing:
@@ -54,9 +62,10 @@ def subscribe(
 @router.post("/unsubscribe", response_model=MessageResponse)
 def unsubscribe(
     body: UnsubscribeRequest,
-    member: CurrentMember = Depends(get_current_member),
+    principal: CurrentMember | CurrentParent = Depends(get_current_principal),
     db: Session = Depends(get_db),
 ) -> MessageResponse:
+    member = principal
     # Match by endpoint inside the stored subscription JSON.
     for tok in db.scalars(select(DeviceToken).where(DeviceToken.user_id == member.user_id)):
         try:

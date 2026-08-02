@@ -57,6 +57,20 @@ export function ExamPortions({
     onError: (e) => showApiError(e, "Could not set the portion"),
   });
 
+  // V1-13: a portion could be set and never un-set. It feeds `exam_fit`, so a
+  // wrong cut point left on a subject quietly skews the "will the portion be
+  // covered in time?" answer for the rest of the term.
+  const clear = useMutation({
+    mutationFn: (portionId: string) => schoolApi.deleteExamPortion(portionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["exam-portions"] });
+      qc.invalidateQueries({ queryKey: ["wizard"] });
+      qc.invalidateQueries({ queryKey: ["exam-fit"] });
+      toast.success("Portion cleared");
+    },
+    onError: (e) => showApiError(e, "Could not clear the portion"),
+  });
+
   if (!exams.length) {
     return (
       <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
@@ -109,8 +123,10 @@ export function ExamPortions({
             csId={cs.id}
             subject={cs.subject_name ?? "Subject"}
             current={portions?.find((p) => p.exam_event_id === exam?.id && p.class_subject_id === cs.id)?.upto_topic_id}
-            saving={set.isPending}
+            portionId={portions?.find((p) => p.exam_event_id === exam?.id && p.class_subject_id === cs.id)?.id}
+            saving={set.isPending || clear.isPending}
             onPick={(topicId) => set.mutate({ class_subject_id: cs.id, upto_topic_id: topicId })}
+            onClear={(portionId) => clear.mutate(portionId)}
           />
         ))}
         {!css?.length ? (
@@ -125,14 +141,18 @@ function SubjectPortion({
   csId,
   subject,
   current,
+  portionId,
   saving,
   onPick,
+  onClear,
 }: {
   csId: string;
   subject: string;
   current?: string;
+  portionId?: string;
   saving: boolean;
   onPick: (topicId: string) => void;
+  onClear: (portionId: string) => void;
 }) {
   const { data: units } = useQuery({
     queryKey: ["syllabus", csId],
@@ -154,7 +174,12 @@ function SubjectPortion({
             aria-label={`Portion for ${subject}`}
             value={current ?? ""}
             disabled={saving}
-            onChange={(e) => e.target.value && onPick(e.target.value)}
+            onChange={(e) => {
+              // Picking the blank row is how a portion is un-set — the only way
+              // to say "this exam doesn't cover this subject after all".
+              if (e.target.value) onPick(e.target.value);
+              else if (portionId) onClear(portionId);
+            }}
             className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs"
           >
             <option value="">Up to…</option>

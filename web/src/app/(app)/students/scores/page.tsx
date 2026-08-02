@@ -7,7 +7,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { Camera, ChevronRight, ClipboardList, GraduationCap, Plus, Users } from "lucide-react";
+import { Camera, ChevronRight, ClipboardList, GraduationCap, Lock, Plus, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -30,7 +30,10 @@ function ExamPost({ exam }: { exam: ExamSummary }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="text-sm font-semibold">{exam.name}</p>
-          <Badge tone="neutral">{EXAM_TYPE_LABEL[exam.type] ?? exam.type}</Badge>
+          {/* V1-8 `D-55`: the school's OWN word for the type, falling back to
+              the system kind's label only where nobody has named one. */}
+          <Badge tone="neutral">{exam.type_label || EXAM_TYPE_LABEL[exam.type] || exam.type}</Badge>
+          {exam.locked ? <Badge tone="success"><Lock className="h-3 w-3" /> locked</Badge> : null}
           {exam.class_label ? <Badge tone="neutral">{exam.class_label}</Badge> : <Badge tone="neutral">All classes</Badge>}
           {exam.subject_name ? <Badge tone="neutral">{exam.subject_name}</Badge> : null}
           {exam.few_students ? <Badge tone="warning"><Users className="h-3 w-3" /> {exam.roster_count} students</Badge> : null}
@@ -46,6 +49,9 @@ function ExamPost({ exam }: { exam: ExamSummary }) {
           <span className="font-medium text-foreground">{exam.scored_count}</span>
           {exam.roster_count ? `/${exam.roster_count}` : ""} marks recorded
           {exam.verified ? " · verified" : ""}
+          {/* `S-114`: which bucket this exam sits in — a slip test and a term
+              exam are never added together anywhere downstream. */}
+          {exam.scale === "major" ? " · major exam" : ""}
         </p>
       </div>
       <div className="shrink-0 text-right">

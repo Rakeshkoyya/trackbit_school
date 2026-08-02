@@ -179,6 +179,42 @@ SCHOOL_ABSENCE_TABLES = (
     "student_absence_notes",
 )
 
+# V1-7 the school's decision on a catalogue suggestion (S-148) — engaged in
+# d6e7f8a9b0c1. `observances` itself is PLATFORM data (D-60/S-149): no org_id,
+# no policy, super-admin on every write — the demo_requests shape. It is
+# deliberately absent from this tuple.
+SCHOOL_EVENT_TABLES = (
+    "event_decisions",
+)
+
+# V1-8 the school's own exam vocabulary (D-55) and the append-only lock history
+# (D-53) — engaged in migration e7f8a9b0c1d2.
+SCHOOL_EXAM_TYPE_TABLES = (
+    "exam_types",
+    "exam_lock_events",
+)
+
+# V1-10 the fee conversation history (D-84) — engaged in migration a9b0c1d2e3f4.
+SCHOOL_FEE_NOTE_TABLES = (
+    "fee_notes",
+)
+
+# V1-11 the family's inbox (D-08/D-14) — engaged in migration b0c1d2e3f4a5.
+# `parent_login_attempts` is deliberately NOT here: like `otp_codes` it is
+# platform-level, because the DOB login runs before any session exists to set
+# `app.current_org_id` — a policy would be inert at exactly the moment it
+# mattered, and would refuse the write that records a brute-force attempt.
+SCHOOL_PARENT_TABLES = (
+    "guardian_messages",
+)
+
+# V1-9 the support programme: the written standard a band is assessed against
+# (D-69) and the weekly check-in (D-87) — engaged in migration f8a9b0c1d2e3.
+SCHOOL_BAND_TABLES = (
+    "band_descriptors",
+    "support_checkpoints",
+)
+
 # P3 assessments & bands (SPRD §4.5) — engaged in migration d8e9fab0c1d2.
 SCHOOL_ASSESSMENT_TABLES = (
     "skill_areas",

@@ -8,7 +8,16 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_office_up
+from app.core.dependencies import require_academic, require_office_up
+from app.schemas.collection import (
+    AssignFollowupIn,
+    AssignFollowupOut,
+    CollectionBoard,
+    FeeFollowupDetail,
+    FeeNoteIn,
+    FeeNoteOut,
+    RemindOut,
+)
 from app.schemas.fees import (
     DueDateUpdate,
     FeeStructureCreate,
@@ -22,6 +31,7 @@ from app.schemas.fees import (
     StudentFeeUpdate,
     TransactionOut,
 )
+from app.services.collection import CollectionService
 from app.services.fees import FeeService
 
 router = APIRouter()
@@ -119,3 +129,60 @@ def overdue_students(
     m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db),
 ):
     return FeeService(db).overdue_students(m, year_id=year_id, limit=limit, offset=offset)
+
+
+# ── V1-10 · the collection board (D-64) ──────────────────────────────────────
+# Every one of these is `require_office_up` — an **admin-only alias** since the
+# v2 role collapse — except `followup_detail`, which is the single narrow
+# exception `D-83` opened and guards inside the service.
+@router.get("/collection", response_model=CollectionBoard)
+def collection_board(year_id: uuid.UUID | None = None, quarter: str | None = None,
+                     m: CurrentMember = Depends(require_office_up),
+                     db: Session = Depends(get_db)):
+    """The one computation every fee screen renders (`S-152`): quarter strip,
+    collection curve, class table with both denominators, and the named
+    defaulter list that has existed since P0-D and was called by nothing."""
+    return CollectionService(db).board(m, year_id, quarter)
+
+
+@router.get("/student-fees/{sf_id}/notes", response_model=list[FeeNoteOut])
+def fee_notes(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+              db: Session = Depends(get_db)):
+    return CollectionService(db).notes(m, sf_id)
+
+
+@router.post("/student-fees/{sf_id}/notes", response_model=FeeNoteOut)
+def add_fee_note(sf_id: uuid.UUID, body: FeeNoteIn,
+                 m: CurrentMember = Depends(require_office_up),
+                 db: Session = Depends(get_db)):
+    """`D-84`: append-only. What the family SAID is the point — "spoke to the
+    mother, paying after the 15th" is what makes a row go away."""
+    return CollectionService(db).add_note(m, sf_id, body)
+
+
+@router.post("/student-fees/{sf_id}/remind", response_model=RemindOut)
+def remind(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+           db: Session = Depends(get_db)):
+    """One human press per reminder — no automatic dunning. The service holds
+    the manners: one per week, quiet hours, primary guardian only, and it stops
+    the moment the payment lands."""
+    return CollectionService(db).remind(m, sf_id)
+
+
+@router.post("/student-fees/{sf_id}/assign", response_model=AssignFollowupOut)
+def assign_followup(sf_id: uuid.UUID, body: AssignFollowupIn,
+                    m: CurrentMember = Depends(require_office_up),
+                    db: Session = Depends(get_db)):
+    """`D-83`: the task carries the amount, the date and the conversation log —
+    the person making the call cannot make it usefully while blind to them."""
+    task_id = CollectionService(db).assign_followup(m, sf_id, body.member_id, body.board_id)
+    return AssignFollowupOut(task_id=task_id, message="Follow-up assigned.")
+
+
+# `D-83`: the ONE fee payload a teacher may receive — this student, inside this
+# task. `require_academic`, because the guard that matters is the assignment,
+# and the service enforces it.
+@router.get("/followup/{task_id}", response_model=FeeFollowupDetail)
+def followup_detail(task_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                    db: Session = Depends(get_db)):
+    return CollectionService(db).followup_detail(m, task_id)

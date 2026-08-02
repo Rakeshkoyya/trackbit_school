@@ -72,6 +72,10 @@ function HomeworkInner() {
     <div>
       <PageHeader title="Homework" subtitle="Is it being done — and is anyone checking?" />
 
+      {/* §7: lead with the sentence. Composed server-side so this tab, the
+          overview block and Lucy cannot describe the same week differently. */}
+      {data.headline ? <p className="mb-5 text-base">{data.headline}</p> : null}
+
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
           label={`Completed (${o.window_days}d)`}

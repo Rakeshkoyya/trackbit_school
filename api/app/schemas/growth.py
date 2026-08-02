@@ -61,6 +61,31 @@ class GrowthScore(BaseModel):
     date: date
     score: float
     max_score: float
+    # ── V1-8 ────────────────────────────────────────────────────────────────
+    # Before this, the score history was `{cycle_name, date, score, max_score}`
+    # with **no type** (module §4.3), so `/students/[id]` drew one series
+    # through a 5-mark slip test and an 80-mark final: a child at 40% on slips
+    # and 85% in the finals read as erratic. `scale` is what keeps the two
+    # apart (`S-114`) and `type_label` is the school's own word (`D-55`).
+    cycle_id: uuid.UUID | None = None
+    type: str | None = None
+    type_label: str | None = None
+    scale: str = "minor"
+    # `S-119`: this student's own marked script, kept forever as evidence and —
+    # until V1-8 — unreachable from the screen a parent meeting happens over.
+    paper_url: str | None = None
+
+
+class GrowthScaleFigure(BaseModel):
+    """`S-118`: an average that carries its denominator, one level below the
+    school figure. *"61% across 5 of the 9 tests 8-B sat"* — because a child who
+    is absent for the hard ones otherwise reads as strong."""
+    scale: str
+    label: str
+    avg_pct: float | None = None
+    tests_taken: int = 0
+    tests_held: int = 0
+    sentence: str = ""
 
 
 class GrowthSubject(BaseModel):
@@ -111,6 +136,10 @@ class GrowthSubject(BaseModel):
     checks_flagged: int = 0  # daily-check "didn't do it" exceptions
     observations: list[GrowthObservation] = []
     scores: list[GrowthScore] = []
+    # V1-8: the two never-pooled figures for this subject, each with its own
+    # denominator. The list is what the history chart draws; these are what a
+    # sentence may quote.
+    score_figures: list[GrowthScaleFigure] = []
 
 
 class GrowthSkill(BaseModel):
@@ -124,13 +153,23 @@ class GrowthBandEntry(BaseModel):
     tier: str
     set_on: date
     note: str | None = None
+    # V1-9: which subject earned it. None on the legacy overall rows, which are
+    # kept as history and read by no current computation (`D-75`).
+    subject_name: str | None = None
 
 
 class StudentGrowthOut(BaseModel):
     student_id: uuid.UUID
     full_name: str
     class_label: str | None = None
-    band: str | None = None  # latest overall tier — staff-only (P4)
+    # V1-7 `S-133`: the FULL date belongs on the student's own record — the
+    # register and board registration both need it. It is the shared surfaces
+    # (class lists, the what's-on feed) that get the day only, never the age.
+    date_of_birth: date | None = None
+    # V1-9 (`S-186`): **"C · Hindi"** — the lowest band the child holds, named
+    # with the subject that earned it. Never a bare letter, never an average
+    # across subjects, and staff-only throughout (P4).
+    band: str | None = None
     band_history: list[GrowthBandEntry] = []
     attendance: GrowthAttendance
     subjects: list[GrowthSubject] = []

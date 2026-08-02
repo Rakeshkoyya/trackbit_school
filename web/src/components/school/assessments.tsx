@@ -10,10 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet } from "@/components/ui/sheet";
-import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type { BandRow } from "@/lib/school-types";
 
 export const TIER_TONE: Record<string, "success" | "warning" | "neutral"> = { A: "success", B: "neutral", C: "warning" };
 
@@ -87,89 +85,18 @@ export function ScoreGrid({ cycleId, classId, canVerify }: { cycleId: string; cl
   );
 }
 
-function InterventionSheet({ row, termId, onClose }: { row: BandRow | null; termId: string | null; onClose: () => void }) {
-  const [goal, setGoal] = useState("");
-  const [items, setItems] = useState("Daily hard-words drill\n15 min reading practice");
-  const [board, setBoard] = useState("");
-  const { data: boards } = useQuery({ queryKey: ["boards"], queryFn: appApi.boards });
-  const list = boards ? [...boards.my_boards, ...boards.other_public] : [];
-  const effBoard = board || list[0]?.id || "";
-  const create = useMutation({
-    mutationFn: () => schoolApi.createIntervention({
-      student_id: row!.student_id, term_id: termId!, goal_text: goal.trim(), target_tier: "B",
-      board_id: effBoard, items: items.split("\n").map((i) => i.trim()).filter(Boolean) }),
-    onSuccess: () => { toast.success("Intervention created · tasks assigned"); setGoal(""); onClose(); },
-    onError: (e) => showApiError(e, "Could not create"),
-  });
-  return (
-    <Sheet open={!!row} onOpenChange={(v) => { if (!v) onClose(); }} title={row ? `Intervention · ${row.full_name}` : ""}>
-      {row ? (
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (goal.trim() && effBoard && termId) create.mutate(); }}>
-          <div><Label>Goal</Label><Input placeholder="Move C→B in reading" value={goal} onChange={(e) => setGoal(e.target.value)} /></div>
-          <div><Label>Checklist (one per line → tasks for the class teacher)</Label>
-            <textarea className="min-h-24 w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={items} onChange={(e) => setItems(e.target.value)} /></div>
-          <div><Label>Task board</Label>
-            <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={effBoard} onChange={(e) => setBoard(e.target.value)}>
-              {list.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select></div>
-          <Button type="submit" className="w-full" disabled={create.isPending || !goal.trim() || !termId}>Create intervention</Button>
-        </form>
-      ) : null}
-    </Sheet>
-  );
-}
-
-export function BandBoard({ classId, termId, canEdit }: { classId: string; termId: string | null; canEdit: boolean }) {
-  const qc = useQueryClient();
-  const [ivFor, setIvFor] = useState<BandRow | null>(null);
-  const { data: board } = useQuery({ queryKey: ["bands", classId, termId], queryFn: () => schoolApi.bandBoard(classId, termId ?? undefined) });
-  const setBand = useMutation({
-    mutationFn: (v: { student_id: string; tier: string }) => schoolApi.setBand({ student_id: v.student_id, term_id: termId!, tier: v.tier }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bands", classId, termId] }); toast.success("Band set"); },
-    onError: (e) => showApiError(e, "Could not set band"),
-  });
-  // SC-3: one tap files everyone under their suggested tier (append-only history).
-  const pendingMoves = board?.rows.filter((r) => r.suggested_tier && r.suggested_tier !== r.current_tier).length ?? 0;
-  const applyAll = useMutation({
-    mutationFn: () => schoolApi.applyBandSuggestions({ class_id: classId, term_id: termId! }),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["bands", classId, termId] }); toast.success(r.applied ? `${r.applied} student${r.applied === 1 ? "" : "s"} re-banded` : "Everyone already matches their suggestion"); },
-    onError: (e) => showApiError(e, "Could not apply suggestions"),
-  });
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">Bands are staff-only support tiers — never shared with parents.</p>
-        {canEdit && termId && pendingMoves > 0 ? (
-          <Button size="sm" variant="outline" disabled={applyAll.isPending} onClick={() => applyAll.mutate()}>
-            Apply {pendingMoves} suggestion{pendingMoves === 1 ? "" : "s"}
-          </Button>
-        ) : null}
-      </div>
-      <div className="space-y-2">
-        {board?.rows.map((r) => (
-          <div key={r.student_id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">{r.full_name}</p>
-              <p className="text-xs text-muted-foreground">{r.latest_pct != null ? `latest ${r.latest_pct}%` : "no scores"}{r.suggested_tier ? ` · suggested ${r.suggested_tier}` : ""}</p>
-            </div>
-            {r.current_tier ? <Badge tone={TIER_TONE[r.current_tier]}>Band {r.current_tier}</Badge> : null}
-            {canEdit && termId ? (
-              <select className="rounded-md border border-border bg-card px-1.5 py-1 text-sm" value={r.current_tier ?? ""}
-                onChange={(e) => e.target.value && setBand.mutate({ student_id: r.student_id, tier: e.target.value })}>
-                <option value="">set…</option>
-                {["A", "B", "C"].map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            ) : null}
-            {canEdit && r.current_tier === "C" ? (
-              <Button size="sm" variant="outline" onClick={() => setIvFor(r)}>Intervention</Button>
-            ) : null}
-          </div>
-        ))}
-      </div>
-      <InterventionSheet row={ivFor} termId={termId} onClose={() => setIvFor(null)} />
-    </div>
-  );
-}
+// V1-9: `BandBoard` and `InterventionSheet` are **deleted**.
+//
+// The board read one overall letter per child (`D-75` retires it) and carried
+// "Apply N suggestions" — `apply_band_suggestions`, which re-banded a class off
+// *each child's most recent cycle, whatever it was*, so a Tuesday slip test
+// could move eleven children between support tiers (`S-183`).
+//
+// Their replacements: `components/school/band-assess.tsx` (assess one class for
+// one subject, entry only) and `/students/bands` (the programme board, where
+// **movement is the headline**). The intervention sheet's task-board dropdown —
+// the school's data model in the middle of a conversation about a child — is
+// gone with it; ownership is assigned from the C list, where it belongs.
 
 export function NewCycleSheet({ open, onOpenChange, termId, yearId }: { open: boolean; onOpenChange: (v: boolean) => void; termId: string | null; yearId: string | null }) {
   const qc = useQueryClient();

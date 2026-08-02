@@ -28,6 +28,46 @@ from app.services.school_clock import today_in
 WINDOW_DAYS = 14
 
 
+def _plural(n: int, word: str) -> str:
+    return word if n == 1 else word + "s"
+
+
+def _headline(ov) -> str:
+    """§7 rule 3 — the sentence the tab opens with.
+
+    Composed only from figures `overview` already computed, so the tab, the
+    overview block and Lucy cannot describe the same week differently.
+
+    The care here is HW-1's rule, restated: **`not_checked` is the teacher's gap
+    and never a child's miss**, so unchecked sets are named separately and are
+    never inside the completion figure. A percentage with nothing checked behind
+    it is not a low score, it is no score — and saying "0% done" there would
+    blame children for a teacher who has not opened the notebooks.
+    """
+    if not ov.assigned:
+        return f"No homework has been set in the last {ov.window_days} days."
+    unchecked = max(0, ov.assigned - ov.checked)
+    if ov.overall_completion is None:
+        return (f"{ov.assigned} {_plural(ov.assigned, 'set')} of homework set, "
+                "none checked yet — completion cannot be read until somebody checks.")
+
+    pct = round(ov.overall_completion * 100)
+    parts = [f"{pct}% done across the {ov.checked} of {ov.assigned} "
+             f"{_plural(ov.assigned, 'set')} that were checked."]
+    # `S-99`: late is done, and reported beside completion rather than inside it.
+    if ov.late:
+        parts.append(f"{ov.late} done late.")
+    if unchecked:
+        parts.append(f"{unchecked} still unchecked.")
+    # A named row beats a count (DASH3) — say who, not how many.
+    if ov.delayed_teachers:
+        t = ov.delayed_teachers[0]
+        more = len(ov.delayed_teachers) - 1
+        parts.append(f"{t.teacher_name} has checked nothing"
+                     + (f" (+{more} more)." if more else "."))
+    return " ".join(parts)
+
+
 class HomeworkInsights:
     def __init__(self, db: Session):
         self.db = db
@@ -63,7 +103,7 @@ class HomeworkInsights:
                 completion=round(v[3] / v[2], 3) if v[2] else None)
             for d, v in sorted(per_day.items())
         ]
-        return HomeworkBoard(overview=overview, daily=daily)
+        return HomeworkBoard(headline=_headline(overview), overview=overview, daily=daily)
 
     def student(self, m: CurrentMember, student_id: uuid.UUID,
                 window_days: int = WINDOW_DAYS):

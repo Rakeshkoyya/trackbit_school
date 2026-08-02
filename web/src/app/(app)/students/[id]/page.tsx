@@ -23,6 +23,8 @@ import {
   AttendanceBySubject, GrowthProfiles, GrowthTiles, ScoreHistory, StrengthsAndGrowth,
 } from "@/components/students/growth-analytics";
 import { StudentHomeworkHistory } from "@/components/school/student-homework-history";
+import { AnalysisBlock, ReportCardBlock } from "@/components/students/report-card";
+import { SupportBlock } from "@/components/students/support-block";
 import { TimelineBlock } from "@/components/students/timeline-block";
 import { Badge } from "@/components/ui/badge";
 import { PageLoading } from "@/components/ui/page-loading";
@@ -195,6 +197,12 @@ function GrowthInner() {
           <p className="text-sm text-muted-foreground">
             {data.class_label ?? "No class assigned"}
             {data.subjects.length ? ` · ${data.subjects.length} subjects` : ""}
+            {/* V1-7 (S-133): the full date lives HERE, on their own record —
+                the register and board registration both need it. Shared
+                surfaces get the day only. */}
+            {data.date_of_birth
+              ? ` · born ${new Date(data.date_of_birth + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+              : ""}
           </p>
           {data.band ? (
             <p className="mt-1.5">
@@ -213,6 +221,18 @@ function GrowthInner() {
       <GrowthTiles data={data} />
       <GrowthProfiles data={data} />
       <StrengthsAndGrowth data={data} />
+
+      {/* V1-8 `D-81` — the two report levels, in order: the familiar card of
+          numbers first, the written analysis under it. Both fold away, because
+          the page above them already answers "how is this child doing". */}
+      {/* V1-9 (`S-180`): the plan attached to the tier. `studentInterventions`
+          existed since P3 and was called by nothing — so this page showed a
+          child's band and never what anyone was doing about it. */}
+      <SupportBlock studentId={params.id} />
+
+      <ReportCardBlock studentId={params.id} />
+      <AnalysisBlock studentId={params.id} />
+
       <ScoreHistory data={data} />
       <AttendanceBySubject data={data} />
 

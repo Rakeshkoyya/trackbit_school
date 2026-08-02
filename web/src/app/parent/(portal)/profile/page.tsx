@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
+import { AddChild } from "@/components/parent/add-child";
+import { NotificationSettings } from "@/components/parent/notification-settings";
 import { ApiError } from "@/lib/api-client";
 import { parentApi } from "@/lib/parent-api";
 
@@ -46,6 +48,8 @@ export default function ParentProfilePage() {
 
   return (
     <div className="space-y-4">
+      <NotificationSettings />
+      <AddChild />
       <section className="rounded-xl border border-border bg-card p-4">
         <h2 className="mb-3 text-sm font-semibold">Your account</h2>
         <dl className="space-y-1.5 text-sm">

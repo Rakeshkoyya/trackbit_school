@@ -27,7 +27,6 @@ from app.models import (
     LessonLog,
     PlanEntry,
     Student,
-    StudentBand,
     SyllabusTopic,
 )
 from app.schemas.checks import (
@@ -85,12 +84,19 @@ class RecommendationsService:
                 Student.org_id == org_id, Student.class_id == class_id,
                 Student.status == "active")))
 
-    def _current_tier(self, org_id: uuid.UUID, student_id: uuid.UUID) -> str | None:
-        return self.db.scalar(
-            select(StudentBand.tier).where(
-                StudentBand.org_id == org_id, StudentBand.student_id == student_id,
-                StudentBand.scope_skill_area_id.is_(None))
-            .order_by(StudentBand.created_at.desc()).limit(1))
+    def _tiers_for(self, org_id: uuid.UUID, students: list[Student],
+                   subject_id: uuid.UUID) -> dict[uuid.UUID, str]:
+        """student → tier **in this subject** (V1-9, `D-75`).
+
+        This is where per-subject bands pay for themselves, and it is free: the
+        generator already runs per class-subject, so the English period now
+        hands the easier route to the children who cannot read — instead of to
+        whoever the single blended letter happened to catch. One query for the
+        class, replacing one per child."""
+        from app.services.bands import BandService  # noqa: PLC0415
+
+        return BandService(self.db).tier_map_for_subject(
+            org_id, [s.id for s in students], subject_id)
 
     def _intervention_students(
         self, org_id: uuid.UUID, students: list[Student],
@@ -99,6 +105,9 @@ class RecommendationsService:
         by_id = {s.id: s for s in students}
         if not by_id:
             return []
+        # `status == 'active'` is why closing an intervention had to exist
+        # (`S-180`): before V1-9 nothing could set `achieved`, so a goal met in
+        # July kept injecting a targeted check into the period card in March.
         rows = self.db.execute(
             select(Intervention.student_id, Intervention.goal_text)
             .where(Intervention.org_id == org_id, Intervention.status == "active",
@@ -130,7 +139,8 @@ class RecommendationsService:
 
     def _generate(self, m: CurrentMember, cs: ClassSubject, d: date) -> None:
         students = self._class_students(m.org_id, cs.class_id)
-        c_band = {s.id for s in students if self._current_tier(m.org_id, s.id) == "C"}
+        tiers = self._tiers_for(m.org_id, students, cs.subject_id)
+        c_band = {sid for sid, tier in tiers.items() if tier == "C"}
         topic = self._planned_topic_title(m.org_id, cs.id, d)
         source, drafted = draft_checks(topic, c_band_present=bool(c_band))
 
@@ -149,7 +159,7 @@ class RecommendationsService:
 
         # ≤ 1 targeted check per intervention student in this class.
         for student, goal in self._intervention_students(m.org_id, students):
-            tier = self._current_tier(m.org_id, student.id)
+            tier = tiers.get(student.id)
             self.db.add(DailyCheck(
                 org_id=m.org_id, class_subject_id=cs.id, date=d,
                 description=f"{student.full_name}: {goal}", source="ai",

@@ -20,10 +20,10 @@ from app.services.academics import AcademicService
 from app.services.assessments import AssessmentService
 from app.services.attendance import AttendanceService
 from app.services.classroom import ClassroomService
+from app.services.collection import CollectionService
 from app.services.daily_report import DailyReportService
 from app.services.dashboard import DashboardService
 from app.services.exams import ExamService
-from app.services.fees import FeeService
 from app.services.growth import GrowthService
 from app.services.lucy.registry import tool
 from app.services.overview import OverviewService
@@ -142,24 +142,33 @@ def get_compliance(m: CurrentMember, db: Session, on_date: date | None = None):
 
 # --- fees (admin only — teachers never see fees) ---------------------------
 
-@tool("get_fee_summary",
-      "Fee collection totals for a year: total, collected, pending installments and "
-      "overdue amount.",
-      params={"year_id": _UUID}, role="admin",
-      widgets=("stat_group", "donut", "meter"), default_widget="stat_group")
-def get_fee_summary(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None):
-    return FeeService(db).summary(m, year_id)
-
-
-@tool("get_overdue_fees",
-      "Students with overdue fee installments: name, class, overdue amount, earliest "
-      "due date. Sorted worst-first.",
+@tool("get_fee_collection",
+      "Fee collection for a year, by quarter: how much is collected, still "
+      "pending and actually overdue, the quarter strip, the per-class table with "
+      "both denominators (how many FAMILIES and how much money), and the named "
+      "defaulter list. Quarters are due-date windows. `collected`, `pending` and "
+      "`overdue` are three different facts and must never be added together. "
+      "Dues carried from a PREVIOUS year are in `carried` and are deliberately "
+      "outside this year's totals — report them as their own line, never folded "
+      "in. ADMIN-ONLY: never put any fee figure in anything a teacher or a "
+      "parent will read.",
       params={"year_id": _UUID,
-              "limit": {"type": "integer", "description": "max rows, default 20"}},
-      role="admin", widgets=("table", "alert_list"))
-def get_overdue_fees(m: CurrentMember, db: Session,
-                     year_id: uuid.UUID | None = None, limit: int = 20):
-    return FeeService(db).overdue_students(m, year_id=year_id, limit=limit)
+              "quarter": {"type": "string",
+                          "description": "quarter label from a previous call; "
+                                         "omit for the current one"}},
+      role="admin",
+      widgets=("stat_group", "table", "bar_chart", "meter"),
+      default_widget="stat_group")
+def get_fee_collection(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None,
+                       quarter: str | None = None):
+    # V1-12: this is the SAME computation `/fees` renders (`S-152`). It used to
+    # be `FeeService.summary`, which has no quarters at all and omits
+    # `opening_dues` from every figure (`B-2`) — so Lucy would answer "how much
+    # of Q2 is in?" with a year total that silently dropped the school's worst
+    # debtors, while the screen beside her showed both. That is the 44th place a
+    # fact gets computed differently, and it is exactly what V1-12 exists to
+    # close.
+    return CollectionService(db).board(m, year_id, quarter)
 
 
 # --- attendance -------------------------------------------------------------
@@ -235,18 +244,25 @@ def get_weak_subjects(m: CurrentMember, db: Session):
 
 
 @tool("get_band_board",
-      "The A/B/C intervention-band board for a class: each student's current and "
-      "suggested tier with latest %. STAFF-ONLY data — never include band tiers in "
-      "anything meant for parents or guardians.",
-      params={"class_id": {**_UUID, "required": True}, "term_id": _UUID},
+      "The A/B/C support-band board for a class IN ONE SUBJECT: each student's "
+      "current tier, and the tier a chosen test would suggest. A band belongs to "
+      "a subject — there is no overall letter — so always say which subject you "
+      "are reporting on. STAFF-ONLY data: never include band tiers in anything "
+      "meant for parents or guardians.",
+      params={"class_id": {**_UUID, "required": True},
+              "subject_id": {**_UUID, "required": True},
+              "term_id": _UUID},
       widgets=("table", "donut"))
 def get_band_board(m: CurrentMember, db: Session, class_id: uuid.UUID,
-                   term_id: uuid.UUID | None = None):
-    return AssessmentService(db).band_board(m, class_id, term_id)
+                   subject_id: uuid.UUID, term_id: uuid.UUID | None = None):
+    # V1-9 (`D-75`): `subject_id` is required, not optional. A board without a
+    # subject would have to invent the overall letter this packet retires.
+    return AssessmentService(db).band_board(m, class_id, subject_id, term_id)
 
 
 @tool("get_band_history",
-      "One student's band tier changes over time (append-only history). Staff-only.",
+      "One student's band tier changes over time, per subject (append-only "
+      "history). Staff-only.",
       params={"student_id": {**_UUID, "required": True}},
       widgets=("table", "timeline"))
 def get_band_history(m: CurrentMember, db: Session, student_id: uuid.UUID):

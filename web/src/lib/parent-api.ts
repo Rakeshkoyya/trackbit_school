@@ -47,6 +47,13 @@ export interface ParentHomeworkDay {
   done: number;
   not_done: number;
   partial: number;
+  /** V1-5 (`S-99`): done, but after the deadline. Counted as done and reported
+   *  BESIDE completion — never folded into it, never rendered as a miss. */
+  late: number;
+  /** `D-34`/`D-35`: absent when it was set. Pending, never a miss — and it
+   *  leaves the denominator entirely, exactly as `not_checked` does. */
+  carried: number;
+  /** The TEACHER's gap, never the child's. Never coloured as a miss (HW-1). */
   not_checked: number;
 }
 
@@ -90,6 +97,24 @@ export interface ParentToday {
   yesterday: ParentHomeworkDay | null;
   /** Set and not finished: what's still to do. */
   pending: ParentHomeworkItem[];
+  /** `S-94`: work whose deadline has passed, split OUT of "still to do" — the
+   *  two were one list, so missed work sat beside upcoming work looking as if
+   *  it could still be handed in. Carries no red: it is a fact, and the child
+   *  may well have finished it since. */
+  missed: ParentHomeworkItem[];
+  /** V1-10 (`D-66`/`Q-69`): the fee reminder — **one line**, and only when
+   *  something is actually due. A family that has paid sees no money message at
+   *  all. Never red, never the word defaulter: a reminder, not a demand. */
+  fee: ParentFeeLine | null;
+}
+
+export interface ParentFeeLine {
+  amount_due: number;
+  due_date: string | null;
+  paid_so_far: number;
+  /** Pre-composed on the server, so every surface says it the same way. */
+  line: string;
+  school_phone: string | null;
 }
 
 export interface ParentAttendance {
@@ -124,6 +149,11 @@ export interface ParentScore {
   date: string;
   score: number;
   max_score: number;
+  /** V1-8 (`D-55`): the school's own word for the exam type. */
+  type_label: string | null;
+  /** `S-114`: minor and major are NEVER pooled. A 5-mark slip test and an
+   *  80-mark term exam are not two points on one line. */
+  scale: string;
 }
 
 export interface ParentReportSubject {
@@ -156,6 +186,59 @@ export interface ParentReport {
   growth_areas: string[];
 }
 
+// ── D-13 · the login, one step per screen ──────────────────────────────────
+export interface ParentClassOption {
+  class_id: string;
+  name: string;
+  section: string | null;
+  label: string | null;
+}
+
+export interface SchoolLookup {
+  org_id: string;
+  school_name: string;
+  school_phone: string | null;
+  classes: ParentClassOption[];
+}
+
+export interface ParentChildMatch {
+  student_id: string;
+  full_name: string;
+}
+
+// ── D-08/D-14 · the notifications archive ──────────────────────────────────
+export interface ParentNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  url: string | null;
+  student_id: string;
+  student_name: string;
+  created_at: string;
+  read: boolean;
+}
+
+export interface ParentNotifications {
+  items: ParentNotification[];
+  unread: number;
+}
+
+// ── Q-56 · the school calendar ─────────────────────────────────────────────
+export interface ParentCalendarItem {
+  date: string;
+  end_date: string | null;
+  title: string;
+  kind: string;
+  /** The answer to "is school open on Monday?". The title is the reason. */
+  closed: boolean;
+  detail: string | null;
+}
+
+export interface ParentCalendar {
+  items: ParentCalendarItem[];
+}
+
 export interface RequestOtpResult {
   message: string;
   channel: "whatsapp" | "sms" | "stub";
@@ -163,6 +246,20 @@ export interface RequestOtpResult {
 }
 
 export const parentApi = {
+  // `D-13` the front door: code → class → section → child → date of birth.
+  lookupSchool: (code: string) =>
+    api.post<SchoolLookup>("/parent/auth/school", { code }, false),
+  findChild: (orgId: string, classId: string, query: string) =>
+    api.post<ParentChildMatch[]>(
+      "/parent/auth/find-child", { org_id: orgId, class_id: classId, query }, false),
+  verifyDob: (studentId: string, dateOfBirth: string) =>
+    api.post<Session>(
+      "/parent/auth/verify-dob", { student_id: studentId, date_of_birth: dateOfBirth }, false),
+  // `Q-25` (b): each child proved once, then the switcher works unchanged.
+  addChild: (studentId: string, dateOfBirth: string) =>
+    api.post<{ student_id: string; full_name: string }>(
+      "/parent/children/add", { student_id: studentId, date_of_birth: dateOfBirth }),
+  // `Q-29` the recovery door, kept for the family whose child has no DOB on file.
   requestOtp: (phone: string) =>
     api.post<RequestOtpResult>("/parent/auth/request-otp", { phone }, false),
   verifyOtp: (phone: string, code: string) =>
@@ -174,4 +271,9 @@ export const parentApi = {
     api.get<ParentToday>(`/parent/children/${studentId}/today`),
   report: (studentId: string) =>
     api.get<ParentReport>(`/parent/children/${studentId}/report`),
+  calendar: (studentId: string) =>
+    api.get<ParentCalendar>(`/parent/children/${studentId}/calendar`),
+  notifications: () => api.get<ParentNotifications>("/parent/notifications"),
+  markNotificationsRead: () =>
+    api.post<{ message: string }>("/parent/notifications/read", {}),
 };

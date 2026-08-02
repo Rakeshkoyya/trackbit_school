@@ -77,7 +77,12 @@ from app.schemas.insights import (
     SubstituteCandidate,
 )
 from app.services.attendance import day_absence_maps, day_matrix, is_day_absent
-from app.services.calendar import event_rows, expand_blocked_dates, org_working_days
+from app.services.calendar import (
+    day_lock,
+    event_rows,
+    expand_blocked_dates,
+    org_working_days,
+)
 from app.services.dashboard import DashboardService
 from app.services.insights.actions import ActionService
 from app.services.school_clock import day_periods, marking_period_nos, today_in
@@ -201,6 +206,11 @@ class AttendanceInsights:
                 .group_by(Student.class_id)).all()
         }
 
+        # V1-7 `S-145`: a period the school locked is `not_expected` — the same
+        # neutral cell V1-3 gave a period the mode never asks about. Before this
+        # the heatmap read a declared holiday as a school-wide capture failure.
+        lock = day_lock(self.db, m.org_id, on, year.id)
+
         total_marked = total_expected = 0
         for cid, label in classes.items():
             cells: list[CaptureCell] = []
@@ -216,7 +226,7 @@ class AttendanceInsights:
                 # A scheduled period the mode does not mark is `not_expected` —
                 # neutral, out of the denominator. A teacher who marked it
                 # anyway still counts: the record is the record.
-                expects = not marking or p.period_no in marking
+                expects = (not marking or p.period_no in marking) and lock.expects(p.period_no)
                 if not expects and state == "pending":
                     cells.append(CaptureCell(
                         period_no=p.period_no, state="not_expected",

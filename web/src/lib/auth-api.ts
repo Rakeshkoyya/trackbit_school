@@ -17,7 +17,12 @@ export const authApi = {
   verifyToken: (token: string) => api.post<Session>("/auth/verify", { token }, false),
   setPassword: (password: string, name?: string) =>
     api.post<{ message: string }>("/auth/set-password", { password, name: name || null }),
-  updateProfile: (name: string) => api.patch<Me>("/auth/me", { name }),
+  /** V1-7 (D-56): staff DOB is self-entered here and NEVER imported. Passing
+   *  `dob` (including null, to clear it) sets it; omitting it leaves it alone. */
+  updateProfile: (name: string, dob?: string | null) =>
+    api.patch<Me>("/auth/me", dob === undefined
+      ? { name }
+      : { name, date_of_birth: dob, set_date_of_birth: true }),
   changePassword: (current_password: string, new_password: string) =>
     api.post<{ message: string }>("/auth/change-password", { current_password, new_password }),
   forgotPassword: (email: string) =>

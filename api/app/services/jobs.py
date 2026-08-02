@@ -387,6 +387,15 @@ def run_teacher_reminder() -> int:
                 TimetableSlot.org_id == org.id, TimetableSlot.weekday == d.weekday(),
                 TimetableSlot.effective_from <= d,
                 _or(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d))))
+            # V1-7 `S-145`: never nag about a day the school itself cancelled.
+            # Before this, 15 August sent every teacher a "you have 8 periods not
+            # marked or logged" push about a holiday.
+            from app.services.calendar import day_lock as _day_lock  # noqa: PLC0415
+            lock = _day_lock(db, org.id, d)
+            if lock.closed:
+                continue
+            if lock.periods:
+                slots = [s for s in slots if s.period_no not in lock.periods]
             if not slots:
                 continue
             teacher_of = dict(db.execute(_select(
@@ -471,13 +480,16 @@ def run_saturday_summary() -> int:
                            AttendanceException.student_id == st.id,
                            AttendanceException.status == "absent",
                            ClassPeriod.date >= week_start, ClassPeriod.date <= d)) or 0
-                recipients = list(db.execute(_select(Guardian.phone, Guardian.notify_opt_out)
-                    .where(Guardian.org_id == org.id, Guardian.student_id == st.id)).all())
+                recipients = list(db.scalars(_select(Guardian).where(
+                    Guardian.org_id == org.id, Guardian.student_id == st.id)))
                 if not recipients:
                     continue
                 msg = (f"{st.full_name} this week at {org.name}: {hw} homework set, "
                        f"{absences} day(s) absent.")
-                sent += notify_guardians([(p, o) for p, o in recipients], msg)
+                sent += notify_guardians(
+                    db, org_id=org.id, student_id=st.id, guardians=recipients,
+                    kind="week_note", title=f"{st.full_name}'s week", body=msg,
+                    dedupe_key=f"week_note:{st.id}:{d.isoformat()}").notified
         db.commit()
         logger.info("saturday-summary job: %d guardian messages", sent)
         return sent

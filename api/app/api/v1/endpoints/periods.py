@@ -51,4 +51,4 @@ def reopen_period(period_id: uuid.UUID, m: CurrentMember = Depends(require_acade
 @router.post("/{period_id}/not-held", response_model=PeriodOut)
 def not_held(period_id: uuid.UUID, body: PeriodNotHeldIn,
              m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
-    return PeriodService(db).not_held(m, period_id, body.reason)
+    return PeriodService(db).not_held(m, period_id, body.reason, body.event_id)

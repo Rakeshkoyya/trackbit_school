@@ -11,13 +11,12 @@ import type {
   ActionResult,
   AttendanceBoard,
   CallBoard,
+  ReachBoard,
   ExamsBoard,
-  FollowupRow,
   HomeworkBoard,
   OverviewBoard,
   StaffBoard,
   StaffImpact,
-  StreakBoard,
   Substitution,
   SyllabusBoard,
   SyllabusCheckpoint,
@@ -25,7 +24,8 @@ import type {
   TaskBoard,
 } from "@/lib/insights-types";
 
-const qs = (params: Record<string, string | number | undefined | null>) => {
+// V1-7 reuses this — one query-string builder, not a second one in events-api.
+export const qs = (params: Record<string, string | number | undefined | null>) => {
   const p = Object.entries(params).filter(([, v]) => v != null && v !== "");
   return p.length ? "?" + p.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&") : "";
 };
@@ -37,12 +37,14 @@ export const insightsApi = {
 
   attendance: (yearId?: string) =>
     api.get<AttendanceBoard>(`/insights/attendance${qs({ year_id: yearId })}`),
-  streaks: (p: { minDays?: number; yearId?: string } = {}) =>
-    api.get<StreakBoard>(`/insights/attendance/streaks${qs({ min_days: p.minDays, year_id: p.yearId })}`),
   /** V1-3 (S-08): needs-a-call (D-86 coloured) · drifting · chronic late ·
    *  left after lunch. */
   attendanceCalls: (yearId?: string) =>
     api.get<CallBoard>(`/insights/attendance/calls${qs({ year_id: yearId })}`),
+  /** V1-11 (`S-62`): the families the school's own alerts did not reach.
+   *  Removing WhatsApp did not remove the reach problem — it made it visible. */
+  attendanceReach: (onDate?: string) =>
+    api.get<ReachBoard>(`/insights/attendance/reach${qs({ on_date: onDate })}`),
 
   staff: (weekStart?: string) =>
     api.get<StaffBoard>(`/insights/staff${qs({ week_start: weekStart })}`),
@@ -68,21 +70,16 @@ export const insightsApi = {
   tasks: (windowDays?: number) =>
     api.get<TaskBoard>(`/insights/tasks${qs({ window_days: windowDays })}`),
 
-  exams: (p: { yearId?: string; type?: string } = {}) =>
-    api.get<ExamsBoard>(`/insights/exams${qs({ year_id: p.yearId, type: p.type })}`),
+  /** `type` filters on the school's own word for the exam type (`D-55`);
+   *  `scale` on minor/major. Nothing in the payload is pooled across the two. */
+  exams: (p: { yearId?: string; type?: string; scale?: string } = {}) =>
+    api.get<ExamsBoard>(`/insights/exams${qs({ year_id: p.yearId, type: p.type, scale: p.scale })}`),
 
   // ── the action rail ────────────────────────────────────────────────────────
   /** Every rail button. The server appends a `followup_actions` row and refuses
    *  to fire the same action twice in one day — `already_done` says so. */
   action: (kind: ActionKind, body: ActionIn) =>
     api.post<ActionResult>(`/insights/actions/${kind}`, body),
-  actionHistory: (p: { subjectType?: string; subjectId?: string; limit?: number } = {}) =>
-    api.get<FollowupRow[]>(
-      `/insights/actions/history${qs({
-        subject_type: p.subjectType, subject_id: p.subjectId, limit: p.limit,
-      })}`,
-    ),
-
   substitutions: (onDate?: string) =>
     api.get<Substitution[]>(`/insights/substitutions${qs({ on_date: onDate })}`),
   cancelSubstitution: (id: string) =>

@@ -91,6 +91,15 @@ class ClassPeriod(Base, UUIDPKMixin, CreatedAtMixin):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="held")
     not_held_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # V1-7 `S-147`: the reason POINTS AT THE EVENT rather than at free text.
+    # "Not held — Independence Day rehearsal" typed by forty teachers in forty
+    # spellings answers nothing; with this the school can ask "what did Diwali
+    # cost us in periods?" and "which classes lost the most to functions this
+    # term?". `not_held_reason` stays as the note, and is what a teacher types
+    # when the reason is not on the calendar at all.
+    not_held_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="SET NULL"), nullable=True,
+    )
 
     # ── attendance ───────────────────────────────────────────────────────────
     # NULL while the period is open but attendance not yet submitted. Its

@@ -31,6 +31,7 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { MeterBar, STATUS_COLOR } from "@/components/charts";
 import { ActionRail, CustomSection, MetricCell, SectionCard } from "@/components/insights/overview";
 import { SetupGate } from "@/components/school/setup-gate";
+import { WhatsOnCard } from "@/components/school/whats-on";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -41,6 +42,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { useYear } from "@/contexts/year-context";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
+import { eventsApi } from "@/lib/events-api";
 import { insightsApi } from "@/lib/insights-api";
 import type { QuickAction } from "@/lib/insights-types";
 import { schoolApi } from "@/lib/school-api";
@@ -265,6 +267,12 @@ function DashboardInner() {
     queryFn: () => schoolApi.dashboard(yearId ?? undefined),
     enabled: !!yearId,
   });
+  // V1-7 (D-51): today's specials + what is coming. Read once for the page —
+  // it is the same feed the teacher's My Day strip renders, at more depth.
+  const { data: whatsOn } = useQuery({
+    queryKey: ["whats-on"],
+    queryFn: () => eventsApi.whatsOn(),
+  });
   const { data: pendingCaptures = [] } = useQuery({
     queryKey: ["captures", "pending"],
     queryFn: () => schoolApi.captures(),
@@ -354,6 +362,13 @@ function DashboardInner() {
             {exams ? <SectionCard section={exams} /> : null}
           </div>
         )}
+      </section>
+
+      {/* V1-7: the read side of a calendar the school has written for a year.
+          It sits below the board because it is context, not a task — and above
+          alerts because it is often the explanation for one. */}
+      <section className="mb-6">
+        <WhatsOnCard data={whatsOn} onOpenCalendar="/plan" />
       </section>
 
       {/* Alerts feed — each becomes a task, or opens the screen that fixes it. */}

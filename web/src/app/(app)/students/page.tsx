@@ -22,6 +22,7 @@ import { useYear } from "@/contexts/year-context";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
 import type { RosterAnalyze, StudentListItem } from "@/lib/school-types";
+import { cn } from "@/lib/utils";
 
 function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
@@ -98,6 +99,102 @@ function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: 
   );
 }
 
+/** Guardians, after the child exists (V1-13).
+ *
+ *  The create sheet took one "primary guardian" and nothing could touch it
+ *  afterwards — no second parent, no corrected number, no way to honour a
+ *  family asking to stop being messaged. Every guardian-facing thing in the
+ *  product keys on these rows: the absence alert, the homework note, the fee
+ *  reminder, the parent portal's phone-OTP recovery door, and the reach board
+ *  that names families the school could not deliver to.
+ *
+ *  `notify_opt_out` is deliberately a toggle here rather than a delete: V1-11
+ *  counts an opted-out family **apart** and keeps them off the list the office
+ *  is told to clear. Deleting the row instead would lose the fact that they
+ *  asked, and the next importer run would put them back.
+ */
+function GuardiansBlock({ studentId, guardians }: {
+  studentId: string;
+  guardians: import("@/lib/school-types").Guardian[];
+}) {
+  const qc = useQueryClient();
+  const [g, setG] = useState({ name: "", phone: "", relation: "" });
+  const refresh = () => qc.invalidateQueries({ queryKey: ["student", studentId] });
+
+  const add = useMutation({
+    mutationFn: () => schoolApi.addGuardian(studentId, {
+      name: g.name.trim(), phone: g.phone.trim(),
+      relation: g.relation.trim() || null,
+      is_primary: guardians.length === 0,
+    }),
+    onSuccess: () => { refresh(); setG({ name: "", phone: "", relation: "" }); toast.success("Guardian added"); },
+    onError: (e) => showApiError(e, "Could not add guardian"),
+  });
+  const update = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: { is_primary?: boolean; notify_opt_out?: boolean } }) =>
+      schoolApi.updateGuardian(id, body),
+    onSuccess: () => { refresh(); toast.success("Updated"); },
+    onError: (e) => showApiError(e, "Could not update guardian"),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => schoolApi.deleteGuardian(id),
+    onSuccess: () => { refresh(); toast.success("Guardian removed"); },
+    onError: (e) => showApiError(e, "Could not remove guardian"),
+  });
+
+  return (
+    <div className="rounded-md border border-border p-3">
+      <p className="mb-2 text-xs font-medium text-muted-foreground">Guardians</p>
+      {guardians.length === 0 ? (
+        <p className="mb-2 text-xs text-warning">
+          None on file — this family gets no attendance alert, no homework note and no fee reminder.
+        </p>
+      ) : null}
+      <ul className="mb-3 space-y-2">
+        {guardians.map((gd) => (
+          <li key={gd.id} className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium">{gd.name}</span>
+            {gd.relation ? <span className="text-xs text-muted-foreground">{gd.relation}</span> : null}
+            <a href={`tel:${gd.phone}`} className="text-xs text-primary hover:underline">{gd.phone}</a>
+            {gd.is_primary ? (
+              <Badge tone="primary" className="text-[10px]">primary</Badge>
+            ) : (
+              <button type="button" className="text-[11px] text-primary hover:underline"
+                onClick={() => update.mutate({ id: gd.id, body: { is_primary: true } })}>
+                make primary
+              </button>
+            )}
+            <button type="button"
+              className={cn("text-[11px] hover:underline",
+                gd.notify_opt_out ? "text-warning" : "text-muted-foreground")}
+              title="A family that asked not to be messaged is counted apart, never chased."
+              onClick={() => update.mutate({ id: gd.id, body: { notify_opt_out: !gd.notify_opt_out } })}>
+              {gd.notify_opt_out ? "opted out of messages" : "receiving messages"}
+            </button>
+            <button type="button" className="ml-auto text-muted-foreground hover:text-danger"
+              onClick={() => remove.mutate(gd.id)} aria-label={`Remove ${gd.name}`}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="grid grid-cols-2 gap-2">
+        <Input placeholder="Name" value={g.name} onChange={(e) => setG({ ...g, name: e.target.value })} />
+        <Input placeholder="Phone" value={g.phone} onChange={(e) => setG({ ...g, phone: e.target.value })} />
+      </div>
+      <div className="mt-2 flex gap-2">
+        <Input placeholder="Relation (Father/Mother)" value={g.relation}
+          onChange={(e) => setG({ ...g, relation: e.target.value })} />
+        <Button type="button" size="sm" variant="secondary"
+          disabled={add.isPending || !g.name.trim() || g.phone.trim().length < 5}
+          onClick={() => add.mutate()}>
+          <Plus className="h-4 w-4" /> Add
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function EditStudentForm({ data, onSaved }: { data: import("@/lib/school-types").StudentDetail; onSaved: () => void }) {
   const qc = useQueryClient();
   const { yearId } = useYear();
@@ -169,6 +266,10 @@ function EditStudentForm({ data, onSaved }: { data: import("@/lib/school-types")
       <Button type="submit" className="w-full" disabled={save.isPending || !form.full_name.trim()}>
         {save.isPending ? "Saving…" : "Save changes"}
       </Button>
+      {/* Outside the field set on purpose: each guardian row saves on its own
+          tap, so it must not ride on "Save changes" or a half-typed name would
+          discard a corrected phone number. */}
+      <GuardiansBlock studentId={data.id} guardians={data.guardians} />
     </form>
   );
 }

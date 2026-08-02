@@ -310,6 +310,243 @@ function LeavePolicySection() {
   );
 }
 
+
+/** V1-8 (`D-55`/`S-135`) — the school's own exam vocabulary.
+ *
+ * A school running *CET* could not record one: the system kind is a fixed list
+ * of nine, so CET was filed as a class test and no analytic could separate it
+ * again. Here the school names its own, and each name carries its **scale**
+ * (`S-114`), so the teacher picks one thing per exam instead of two.
+ *
+ * Retire, never delete: an exam type that named forty exams last year keeps
+ * rendering on them. Unticking only removes it from the picker. */
+function ExamTypesSection() {
+  const qc = useQueryClient();
+  const { data: types = [] } = useQuery({
+    queryKey: ["exam-types", "all"], queryFn: () => schoolApi.examTypes(true),
+  });
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState("class_test");
+  const [scale, setScale] = useState("minor");
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["exam-types"] });
+    qc.invalidateQueries({ queryKey: ["exam-types", "all"] });
+  };
+  const create = useMutation({
+    mutationFn: () => schoolApi.createExamType({ name: name.trim(), system_type: kind, scale }),
+    onSuccess: () => { setName(""); refresh(); toast.success("Exam type added"); },
+    onError: (e) => showApiError(e, "Could not add it"),
+  });
+  const update = useMutation({
+    mutationFn: (v: { id: string; body: { scale?: string; active?: boolean } }) =>
+      schoolApi.updateExamType(v.id, v.body),
+    onSuccess: () => { refresh(); toast.success("Saved"); },
+    onError: (e) => showApiError(e, "Could not save"),
+  });
+
+  return (
+    <section className="mt-5 rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-1 text-sm font-semibold">Exam types</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        The words your staffroom actually uses. <strong>Minor</strong> tests show which way a
+        class is moving; <strong>major</strong> exams show where it stands — and the two are
+        never averaged together on any screen.
+      </p>
+      <div className="space-y-1.5">
+        {types.map((t) => (
+          <div key={t.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
+            <span className="min-w-0 flex-1 text-sm font-medium">{t.name}</span>
+            {t.exams ? (
+              <span className="text-xs text-muted-foreground">{t.exams} recorded</span>
+            ) : null}
+            <select className="rounded-md border border-border bg-card px-1.5 py-1 text-xs"
+              value={t.scale}
+              onChange={(e) => update.mutate({ id: t.id, body: { scale: e.target.value } })}>
+              <option value="minor">Minor test</option>
+              <option value="major">Major exam</option>
+            </select>
+            <button type="button" className="text-xs text-muted-foreground underline"
+              onClick={() => update.mutate({ id: t.id, body: { active: !t.active } })}>
+              {t.active ? "Retire" : "Bring back"}
+            </button>
+          </div>
+        ))}
+        {!types.length ? (
+          <p className="text-sm text-muted-foreground">
+            The nine standard types appear the first time somebody records a test.
+          </p>
+        ) : null}
+      </div>
+      <div className="mt-4 flex flex-wrap items-end gap-2">
+        <div className="min-w-[8rem] flex-1">
+          <Label htmlFor="et-name">Add a type</Label>
+          <Input id="et-name" placeholder="CET" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <select className="h-9 rounded-md border border-border bg-card px-2 text-sm"
+          value={kind} onChange={(e) => setKind(e.target.value)}>
+          <option value="slip_test">like a slip test</option>
+          <option value="class_test">like a class test</option>
+          <option value="chapter_test">like a chapter test</option>
+          <option value="objective">like an objective test</option>
+          <option value="unit_test">like a unit test</option>
+          <option value="term_exam">like a term exam</option>
+        </select>
+        <select className="h-9 rounded-md border border-border bg-card px-2 text-sm"
+          value={scale} onChange={(e) => setScale(e.target.value)}>
+          <option value="minor">Minor test</option>
+          <option value="major">Major exam</option>
+        </select>
+        <Button disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>
+          Add
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** V1-8 (`D-54`/`S-138`, A-4) — the training-data opt-in.
+ *
+ * The only setting in the product about data that does not serve the school
+ * that entered it. Default off, and **asked for**: it is children's handwriting
+ * with their names on it, and it is the school's. Nothing is exported in v1. */
+function TrainingDataSection({ s }: { s: OrgSettings }) {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (on: boolean) => appApi.updateSettings({ training_data_opt_in: on }),
+    onSuccess: (res) => { qc.setQueryData(["settings"], res); toast.success("Saved"); },
+    onError: (e) => showApiError(e, "Could not save"),
+  });
+  return (
+    <section className="mt-5 rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-1 text-sm font-semibold">Help improve the marks reader</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        When an exam is locked, keep what the model read from the photographed papers beside
+        what your teacher corrected it to, so the reader gets better at your school&apos;s
+        handwriting. The papers are already kept as evidence; this only keeps the corrections
+        beside them. Nothing leaves your database, and you can turn it off at any time.
+      </p>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={s.training_data_opt_in}
+          onChange={(e) => save.mutate(e.target.checked)} />
+        Keep the corrections with the papers
+      </label>
+    </section>
+  );
+}
+
+
+/** V1-9 (`D-68`/`D-69`/`D-74`) — what a band MEANS in this school.
+ *
+ * Two things, and the second is the one that makes a tier honest:
+ *
+ * - **Monitored subjects.** A subject that isn't monitored has no bands and no
+ *   support programme, and nothing else about it changes.
+ * - **The descriptors** — *what a B child in English can do.* Without them a
+ *   tier means only "scored below 50% on whatever the last test was", which is
+ *   why two teachers in the same school band the same child differently and
+ *   neither is wrong. They ship **pre-written and editable** (`S-175`): 27 empty
+ *   boxes get filled in by nobody.
+ *
+ * Each subject carries its **own threshold** (`D-74`). Before V1-9 there were two
+ * numbers for the whole school, so English and Maths were assumed to grade
+ * alike. Band C has no threshold — it is "below B", never its own cut-off. */
+function BandSetupSection() {
+  const qc = useQueryClient();
+  const { data: setup = [] } = useQuery({ queryKey: ["band-setup"], queryFn: schoolApi.bandSetup });
+  const [open, setOpen] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["band-setup"] });
+    qc.invalidateQueries({ queryKey: ["band-programme"] });
+  };
+  const toggle = useMutation({
+    mutationFn: (ids: string[]) => schoolApi.setMonitoredSubjects(ids),
+    onSuccess: () => { refresh(); toast.success("Saved"); },
+    onError: (e) => showApiError(e, "Could not save"),
+  });
+  const save = useMutation({
+    mutationFn: (v: { id: string; text?: string; min_pct?: number }) =>
+      schoolApi.updateDescriptor(v.id, { text: v.text, min_pct: v.min_pct }),
+    onSuccess: () => { refresh(); toast.success("Saved"); },
+    onError: (e) => showApiError(e, "Could not save"),
+  });
+
+  const monitoredIds = setup.filter((x) => x.monitored).map((x) => x.subject_id);
+
+  return (
+    <section className="mt-5 rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-1 text-sm font-semibold">Support programme</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Bands are private teaching groups, never labels and never shared with parents.
+        A subject you don&apos;t monitor has no bands and no programme — nothing else
+        about it changes.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {setup.map((s) => (
+          <button key={s.subject_id} type="button"
+            onClick={() => toggle.mutate(s.monitored
+              ? monitoredIds.filter((id) => id !== s.subject_id)
+              : [...monitoredIds, s.subject_id])}
+            className={cn("rounded-md border px-3 py-1.5 text-sm transition",
+              s.monitored ? "border-primary bg-primary/10 font-medium text-primary"
+                : "border-border text-muted-foreground hover:bg-muted/40")}>
+            {s.monitored ? "\u2713 " : ""}{s.subject_name}
+          </button>
+        ))}
+      </div>
+
+      {setup.filter((s) => s.monitored).map((s) => (
+        <div key={s.subject_id} className="mt-4 rounded-lg border border-border p-3">
+          <button type="button" className="text-sm font-medium"
+            onClick={() => setOpen(open === s.subject_id ? null : s.subject_id)}>
+            {s.subject_name} — what each band means
+          </button>
+          {open === s.subject_id ? (
+            <div className="mt-3 space-y-3">
+              {s.descriptors.map((d) => (
+                <div key={d.id ?? d.tier}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold">Band {d.tier}</span>
+                    {d.tier === "C" ? (
+                      <span className="text-xs text-muted-foreground">below the B threshold</span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        from
+                        <Input type="number" min={0} max={100}
+                          className="h-7 w-16" defaultValue={d.min_pct ?? undefined}
+                          onBlur={(e) => {
+                            const v = Number(e.target.value);
+                            if (d.id && v !== d.min_pct) save.mutate({ id: d.id, min_pct: v });
+                          }} />
+                        %
+                      </span>
+                    )}
+                  </div>
+                  <textarea rows={2}
+                    className="mt-1 w-full rounded-md border border-border bg-card px-2 py-2 text-sm"
+                    value={draft[d.id ?? ""] ?? d.text}
+                    onChange={(e) => setDraft((p) => ({ ...p, [d.id ?? ""]: e.target.value }))}
+                    onBlur={(e) => {
+                      if (d.id && e.target.value.trim() && e.target.value !== d.text) {
+                        save.mutate({ id: d.id, text: e.target.value.trim() });
+                      }
+                    }} />
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                These sentences are what teachers assess against, and they are what every
+                screen shows beside the letter — a letter on its own is a label.
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function SettingsScreen() {
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ["settings"], queryFn: appApi.settings });
@@ -384,8 +621,11 @@ export function SettingsScreen() {
 
       <SchoolSection s={s} />
       <CaptureSection s={s} />
+      <ExamTypesSection />
+      <BandSetupSection />
       <WorkCategoriesSection s={s} />
       <LeavePolicySection />
+      <TrainingDataSection s={s} />
     </div>
   );
 }

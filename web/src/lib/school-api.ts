@@ -5,7 +5,6 @@ import type {
   CalendarSummary,
   ClassSubject,
   FeeStructure,
-  FeeSummary,
   Guardian,
   HomeworkSheet,
   LeaveBalance,
@@ -71,14 +70,6 @@ export const schoolApi = {
   // calendar (M1)
   calendarSummary: (yearId: string) =>
     api.get<CalendarSummary>(`/academics/calendar/summary${qs({ year_id: yearId })}`),
-  createEvent: (b: {
-    academic_year_id: string;
-    type: string;
-    title: string;
-    start_date: string;
-    end_date: string;
-    affects_teaching?: boolean;
-  }) => api.post<CalendarEvent>("/academics/calendar/events", b),
   deleteEvent: (id: string) => api.del<{ message: string }>(`/academics/calendar/events/${id}`),
   /** One round trip for a drag-selected range (V2-P7). */
   createEvents: (events: import("@/lib/school-types").CalendarEventInput[]) =>
@@ -157,14 +148,6 @@ export const schoolApi = {
   generatePlan: (csId: string, termId?: string | null) =>
     api.post<import("@/lib/school-types").PlanGenerateResult>(
       `/planner/plan/${csId}/generate${qs({ term_id: termId ?? undefined })}`),
-  planComments: (csId: string, includeResolved = false) =>
-    api.get<import("@/lib/school-types").PlanComment[]>(
-      `/planner/plan/${csId}/comments${qs({ include_resolved: includeResolved ? "true" : undefined })}`),
-  addPlanComment: (csId: string, b: { text: string; topic_id?: string | null }) =>
-    api.post<import("@/lib/school-types").PlanComment>(`/planner/plan/${csId}/comments`, b),
-  resolvePlanComment: (id: string) =>
-    api.post<import("@/lib/school-types").PlanComment>(`/planner/plan/comments/${id}/resolve`),
-
   // ── document ingestion (V2-P7, SPRD2 §5.1) ────────────────────────────────
   /** Staff sheet -> proposed mapping + the gaps a human must close. */
   staffImportAnalyze: (file: File) => {
@@ -197,10 +180,6 @@ export const schoolApi = {
   }) => api.post<import("@/lib/school-types").SyllabusCommitResult>(
     "/planner/syllabus/import/commit", b),
 
-  topicProgress: (csId: string) =>
-    api.get<import("@/lib/school-types").TopicProgressRow[]>(
-      `/planner/plan/${csId}/progress`),
-
   // ── post-setup read models (V2-P10) ───────────────────────────────────────
   schoolOverview: (yearId?: string) =>
     api.get<import("@/lib/school-types").SchoolOverview>(
@@ -215,7 +194,6 @@ export const schoolApi = {
   wizardAdvance: (b: { to_step: number; payload?: Record<string, unknown> }) =>
     api.post<import("@/lib/school-types").WizardState>("/wizard/advance", b),
   wizardComplete: () => api.post<import("@/lib/school-types").WizardState>("/wizard/complete"),
-  wizardReset: () => api.post<import("@/lib/school-types").WizardState>("/wizard/reset"),
   forecast: (classId: string) =>
     api.get<import("@/lib/school-types").Forecast[]>(`/planner/plan/forecast${qs({ class_id: classId })}`),
 
@@ -258,16 +236,16 @@ export const schoolApi = {
   studentHomework: (studentId: string, windowDays?: number) =>
     api.get<StudentHomeworkHistory>(
       `/homework/student/${studentId}${qs({ window_days: windowDays ? String(windowDays) : undefined })}`),
-  compliance: () => api.get<import("@/lib/school-types").Compliance>("/classroom/compliance"),
-
   // period detail page (V2-P6) — everything for one class-period in one call
   periodCard: (classId: string, periodNo: number, onDate?: string) =>
     api.get<import("@/lib/school-types").PeriodCard>(
       `/periods/card${qs({ class_id: classId, period_no: String(periodNo), on_date: onDate })}`),
   openPeriod: (b: { class_id: string; period_no: number; class_subject_id?: string | null; date?: string | null }) =>
     api.post<{ id: string }>("/periods/open", b),
-  periodNotHeld: (periodId: string, reason: string) =>
-    api.post<{ id: string }>(`/periods/${periodId}/not-held`, { reason }),
+  /** V1-7 (S-147): `eventId` files this against the approved calendar row, so
+   *  "what did Diwali cost us in periods?" is answerable. Null = free text. */
+  periodNotHeld: (periodId: string, reason: string, eventId?: string | null) =>
+    api.post<{ id: string }>(`/periods/${periodId}/not-held`, { reason, event_id: eventId ?? null }),
   closePeriod: (periodId: string) => api.post<{ id: string }>(`/periods/${periodId}/close`),
   reopenPeriod: (periodId: string) => api.post<{ id: string }>(`/periods/${periodId}/reopen`),
 
@@ -317,9 +295,6 @@ export const schoolApi = {
     reason_code?: string | null; note?: string | null;
     source?: "parent_call" | "office" | "teacher";
   }) => api.post<import("@/lib/school-types").AbsenceNote>("/attendance/absences/notes", b),
-  absenceNotes: (studentId: string) =>
-    api.get<import("@/lib/school-types").AbsenceNote[]>(
-      `/attendance/absences/${studentId}/notes`),
   myClasses: () => api.get<import("@/lib/school-types").MyClassList>("/my-class"),
   classRegister: (classId: string, month?: string) =>
     api.get<import("@/lib/school-types").ClassRegister>(
@@ -346,20 +321,12 @@ export const schoolApi = {
   recordAttendance: (meetingId: string, rows: {
     student_id: string; status: string; late_minutes?: number | null; homework_done?: boolean | null;
   }[]) => api.patch<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/attendance`, { rows }),
-  uploadEvidence: (meetingId: string, file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    return api.upload<import("@/lib/school-types").Meeting>(`/sessions/meetings/${meetingId}/photo`, form);
-  },
-  sessionRecords: () => api.get<import("@/lib/school-types").SessionRecord[]>("/sessions/records"),
   sessionStudentCard: (meetingId: string, studentId: string) =>
     api.get<import("@/lib/school-types").SessionStudentCard>(
       `/sessions/meetings/${meetingId}/students/${studentId}`),
   setStudentLogs: (meetingId: string, studentId: string, entries: { section: string; note: string }[]) =>
     api.put<import("@/lib/school-types").SessionStudentCard>(
       `/sessions/meetings/${meetingId}/students/${studentId}/logs`, { entries }),
-  homeworkBoard: (meetingId: string) =>
-    api.get<import("@/lib/school-types").HomeworkBoard>(`/sessions/meetings/${meetingId}/homework`),
   deleteSessionMedia: (mediaId: string) => api.del<{ message: string }>(`/sessions/media/${mediaId}`),
   // Media upload: presign → direct-to-R2 PUT → confirm; falls back to the
   // pass-through endpoint when R2 isn't configured (dev) or for small files.
@@ -422,17 +389,75 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").ExamDetail>(`/assessments/exams/${cycleId}`),
   saveExam: (b: import("@/lib/school-types").ExamSaveBody) =>
     api.post<import("@/lib/school-types").ExamDetail>("/assessments/exams", b),
+  // V1-8 (D-80): the exam's second tab — the analysis beside Score's numbers.
+  examReport: (cycleId: string) =>
+    api.get<import("@/lib/school-types").ExamReport>(`/assessments/exams/${cycleId}/report`),
+  // V1-8 (D-53): verify & lock. The locked exam IS the record; editing after it
+  // is refused until an ADMIN unlocks with a reason, and the unlock is appended.
+  lockExam: (cycleId: string) =>
+    api.post<import("@/lib/school-types").ExamDetail>(`/assessments/exams/${cycleId}/lock`),
+  unlockExam: (cycleId: string, reason: string) =>
+    api.post<import("@/lib/school-types").ExamDetail>(`/assessments/exams/${cycleId}/unlock`, { reason }),
+  // V1-8 (D-55): the school's own exam vocabulary. The picker seeds itself on
+  // first read, so nobody configures words before recording a test.
+  examTypes: (includeRetired?: boolean) =>
+    api.get<import("@/lib/school-types").ExamType[]>(
+      `/assessments/exam-types${qs({ include_retired: includeRetired ? "true" : undefined })}`),
+  createExamType: (b: { name: string; system_type: string; scale?: string }) =>
+    api.post<import("@/lib/school-types").ExamType>("/assessments/exam-types", b),
+  updateExamType: (id: string, b: { name?: string; scale?: string; active?: boolean; position?: number }) =>
+    api.patch<import("@/lib/school-types").ExamType>(`/assessments/exam-types/${id}`, b),
+  // V1-8 (D-81): the two report levels. Level 1 is numbers only; level 2 is the
+  // narrative over the SAME figures.
+  reportCard: (studentId: string) =>
+    api.get<import("@/lib/school-types").ReportCard>(`/students/${studentId}/report-card`),
+  studentAnalysis: (studentId: string) =>
+    api.get<import("@/lib/school-types").StudentAnalysis>(`/students/${studentId}/analysis`),
+  classReportCard: (classId: string) =>
+    api.get<import("@/lib/school-types").ClassReportCard>(`/assessments/classes/${classId}/report-card`),
   deleteCycle: (id: string) => api.del<{ message: string }>(`/assessments/cycles/${id}`),
-  bandConfig: () => api.get<import("@/lib/school-types").BandConfig>("/assessments/bands/config"),
-  setBandConfig: (b: import("@/lib/school-types").BandConfig) =>
-    api.put<import("@/lib/school-types").BandConfig>("/assessments/bands/config", b),
-  categorizeBands: (cycleId: string) =>
-    api.post<import("@/lib/school-types").BandCategorizeResult>(
-      "/assessments/bands/categorize", { cycle_id: cycleId }),
+  // ── V1-9 · the support programme ───────────────────────────────────────────
+  // `categorizeBands` and `applyBandSuggestions` are DELETED (`S-183`): two
+  // implicit routes that re-banded a class off whatever test happened last.
+  // Movement now goes through the promote preview, which shows its moves first.
+  bandSetup: () => api.get<import("@/lib/school-types").BandSubjectSetup[]>("/bands/setup"),
+  setMonitoredSubjects: (subjectIds: string[]) =>
+    api.put<import("@/lib/school-types").BandSubjectSetup[]>(
+      "/bands/setup/monitored", { subject_ids: subjectIds }),
+  updateDescriptor: (id: string, b: { text?: string; min_pct?: number }) =>
+    api.patch<import("@/lib/school-types").BandDescriptor>(`/bands/setup/descriptors/${id}`, b),
+  bandClassBoard: (p: { classId: string; subjectId: string; cycleId?: string; termId?: string }) =>
+    api.get<import("@/lib/school-types").BandClassBoard>(
+      `/bands/class${qs({ class_id: p.classId, subject_id: p.subjectId, cycle_id: p.cycleId, term_id: p.termId })}`),
+  fileBands: (b: {
+    class_id: string; subject_id: string; term_id: string; source: string;
+    cycle_id?: string | null; rows: { student_id: string; tier: string | null }[];
+  }) => api.post<{ message: string }>("/bands/class/file", b),
+  bandPromotePreview: (cycleId: string) =>
+    api.get<import("@/lib/school-types").BandPromotePreview>(`/bands/promote/${cycleId}`),
+  bandPromote: (cycleId: string) =>
+    api.post<import("@/lib/school-types").BandPromotePreview>(`/bands/promote/${cycleId}`),
+  bandProgramme: (termId?: string) =>
+    api.get<import("@/lib/school-types").ProgrammeBoard>(`/bands/programme${qs({ term_id: termId })}`),
+  assignBandOwner: (b: {
+    student_id: string; subject_id: string; member_id?: string | null;
+    term_id?: string | null; goal_text?: string; exit_criterion?: string;
+  }) => api.post<{ message: string }>("/bands/owner", b),
+  supportList: (memberId?: string) =>
+    api.get<import("@/lib/school-types").SupportList>(`/bands/support${qs({ member_id: memberId })}`),
+  supportChild: (interventionId: string) =>
+    api.get<import("@/lib/school-types").SupportChild>(`/bands/support/${interventionId}`),
+  supportCheckIn: (interventionId: string, b: {
+    worked_on?: string; what_changed?: string; next_step?: string; ready_to_retest: boolean;
+  }) => api.post<import("@/lib/school-types").SupportChild>(
+    `/bands/support/${interventionId}/check-in`, b),
+  closeSupportPlan: (interventionId: string, b: { status: string; outcome_note?: string }) =>
+    api.post<import("@/lib/school-types").SupportChild>(
+      `/bands/support/${interventionId}/close`, b),
   // photo score capture (SC-2): photo → AI transcription → deterministic match →
   // human review grid → confirm. Scores persist only on confirm.
   // cycle_id omitted = a draft exam capture (SC-5), saved via saveExam.
-  createCapture: (b: { cycle_id?: string; class_id: string; subject_id?: string; skill_area_id?: string; student_ids?: string[] }) =>
+  createCapture: (b: { cycle_id?: string; class_id: string; subject_id?: string; skill_area_id?: string; student_ids?: string[]; mode?: "register" | "scripts" }) =>
     api.post<import("@/lib/school-types").Capture>("/assessments/captures", b),
   capture: (id: string) => api.get<import("@/lib/school-types").Capture>(`/assessments/captures/${id}`),
   captures: (opts?: { cycleId?: string; classId?: string }) =>
@@ -451,25 +476,16 @@ export const schoolApi = {
   saveScores: (cycleId: string, rows: { student_id: string; subject_id?: string; skill_area_id?: string; score: number; max_score: number }[]) =>
     api.post<{ message: string }>(`/assessments/cycles/${cycleId}/scores`, { rows }),
   verifyScores: (cycleId: string) => api.post<{ message: string }>(`/assessments/cycles/${cycleId}/verify`),
-  applyBandSuggestions: (b: { class_id: string; term_id: string }) =>
-    api.post<{ applied: number }>("/assessments/bands/apply-suggestions", b),
-  currentBands: () => api.get<Record<string, string>>("/assessments/bands/current"),
   classAnalysis: (classId: string) =>
     api.get<import("@/lib/school-types").ClassAnalysis>(`/assessments/classes/${classId}/analysis`),
-  bandBoard: (classId: string, termId?: string) =>
-    api.get<import("@/lib/school-types").BandBoard>(`/assessments/bands${qs({ class_id: classId, term_id: termId })}`),
-  setBand: (b: { student_id: string; term_id: string; tier: string; note?: string | null }) =>
-    api.post<{ message: string }>("/assessments/bands", b),
-  bandHistory: (studentId: string) =>
-    api.get<import("@/lib/school-types").BandHistoryRow[]>(`/assessments/students/${studentId}/bands`),
-  skillProfile: (studentId: string) =>
-    api.get<import("@/lib/school-types").SkillProfile>(`/assessments/students/${studentId}/skill-profile`),
+  /** student → **"C · Hindi"** (`S-186`) for staff directory chips. Never an
+   *  average across subjects, never a bare letter, never parent-facing (P4). */
+  currentBands: () => api.get<Record<string, string>>("/assessments/bands/current"),
   trends: (classId: string) =>
     api.get<import("@/lib/school-types").SubjectTrend[]>(`/assessments/classes/${classId}/trends`),
   studentInterventions: (studentId: string) =>
-    api.get<import("@/lib/school-types").Intervention[]>(`/assessments/students/${studentId}/interventions`),
-  createIntervention: (b: { student_id: string; term_id: string; goal_text: string; target_tier: string; board_id: string; items: string[] }) =>
-    api.post<import("@/lib/school-types").Intervention>("/assessments/interventions", b),
+    api.get<import("@/lib/school-types").StudentIntervention[]>(
+      `/assessments/students/${studentId}/interventions`),
   addClassSubject: (b: {
     class_id: string;
     subject_id: string;
@@ -496,8 +512,17 @@ export const schoolApi = {
   updateStudent: (id: string, b: Record<string, unknown>) =>
     api.patch<StudentDetail>(`/students/${id}`, b),
   deleteStudent: (id: string) => api.del<{ message: string }>(`/students/${id}`),
-  addGuardian: (studentId: string, b: Record<string, unknown>) =>
-    api.post<Guardian>(`/students/${studentId}/guardians`, b),
+  addGuardian: (studentId: string, b: {
+    name: string; phone: string; relation?: string | null;
+    is_primary?: boolean; notify_opt_out?: boolean;
+  }) => api.post<Guardian>(`/students/${studentId}/guardians`, b),
+  /** V1-13: `notify_opt_out` is the one a school actually needs to change later —
+   *  a family that asked to stop being messaged (V1-11 counts them apart and
+   *  never puts them on the list the office is told to clear). */
+  updateGuardian: (id: string, b: {
+    name?: string; phone?: string; relation?: string | null;
+    is_primary?: boolean; notify_opt_out?: boolean;
+  }) => api.patch<Guardian>(`/students/guardians/${id}`, b),
   deleteGuardian: (id: string) => api.del<{ message: string }>(`/students/guardians/${id}`),
   importRosterAnalyze: (file: File) => {
     const form = new FormData();
@@ -541,7 +566,23 @@ export const schoolApi = {
     api.post<import("@/lib/school-types").TimetableGenerate>("/timetable/generate", b),
 
   // ── fees ────────────────────────────────────────────────────────────────
-  feeSummary: (yearId?: string) => api.get<FeeSummary>(`/fees/summary${qs({ year_id: yearId })}`),
+  // ── V1-10 · the collection board (D-64) ────────────────────────────────────
+  // One computation behind every fee screen (`S-152`), so the quarter strip, the
+  // class table and the defaulter list cannot disagree with each other.
+  collectionBoard: (p: { yearId?: string; quarter?: string } = {}) =>
+    api.get<import("@/lib/school-types").CollectionBoard>(
+      `/fees/collection${qs({ year_id: p.yearId, quarter: p.quarter })}`),
+  feeNotes: (sfId: string) =>
+    api.get<import("@/lib/school-types").FeeNote[]>(`/fees/student-fees/${sfId}/notes`),
+  addFeeNote: (sfId: string, b: { kind: string; said?: string; promised_date?: string | null }) =>
+    api.post<import("@/lib/school-types").FeeNote>(`/fees/student-fees/${sfId}/notes`, b),
+  remindFee: (sfId: string) =>
+    api.post<import("@/lib/school-types").RemindResult>(`/fees/student-fees/${sfId}/remind`),
+  assignFeeFollowup: (sfId: string, b: { member_id: string; board_id?: string }) =>
+    api.post<{ task_id: string; message: string }>(`/fees/student-fees/${sfId}/assign`, b),
+  /** `D-83`: the assigned teacher's view of ONE student's fee, inside the task. */
+  feeFollowup: (taskId: string) =>
+    api.get<import("@/lib/school-types").FeeFollowupDetail>(`/fees/followup/${taskId}`),
   structures: (yearId?: string) =>
     api.get<FeeStructure[]>(`/fees/structures${qs({ year_id: yearId })}`),
   createStructure: (b: Record<string, unknown>) => api.post<FeeStructure>("/fees/structures", b),
@@ -558,7 +599,6 @@ export const schoolApi = {
   ),
   pay: (instId: string, b: { amount: string; mode?: string; note?: string }) =>
     api.post<StudentFeeDetail>(`/fees/installments/${instId}/pay`, b),
-  markPaid: (instId: string) => api.post<StudentFeeDetail>(`/fees/installments/${instId}/mark-paid`),
   undo: (instId: string) => api.post<StudentFeeDetail>(`/fees/installments/${instId}/undo`),
 
   // ── SF-1 staff: attendance · timesheet · leave ────────────────────────────

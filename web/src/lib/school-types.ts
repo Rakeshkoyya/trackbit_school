@@ -246,6 +246,12 @@ export interface MyDay {
   tasks: import("./types").Task[];
   // "n older tasks →" — the window is never silent (D-43).
   older_task_count: number;
+  // V1-7 (S-145): the school locked today, or some of its periods. Those period
+  // cards are GONE from `periods` rather than sitting there unlogged — leaving
+  // them would invent work on a holiday and make the capture rate lie.
+  day_closed: boolean;
+  locked_periods: number[];
+  lock_reason: string | null;
 }
 
 // â”€â”€ timetable (V2-P1, SPRD2 Â§5.3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -787,10 +793,47 @@ export interface Cycle {
   student_ids: string[] | null;
 }
 
-// ── exams (SC-5) — the scores screen's exam-first surface ────────────────────
+// ── exams (SC-5 + V1-8) — the scores screen's exam-first surface ─────────────
+/** V1-8 `S-114`: the two buckets that are NEVER added together. Trajectory is
+ *  read from `minor`, standing from `major`. There is no third value and no
+ *  blended figure anywhere in the client. */
+export type ExamScale = "minor" | "major";
+
+/** V1-8 `D-55`: the school's own word for a kind of exam — *CET*, *pre-board*.
+ *  `system_type` is what the code branches on and is never rendered. */
+export interface ExamType {
+  id: string;
+  name: string;
+  system_type: CycleType;
+  scale: ExamScale;
+  position: number;
+  active: boolean;
+  exams: number;
+}
+
+/** V1-8 `S-118`: a percentage that cannot be shown without its denominator.
+ *  Render `sentence` — it already carries "across 5 of the 9 tests". */
+export interface ScaleFigure {
+  scale: ExamScale;
+  label: string;
+  purpose: string;
+  avg_pct: number | null;
+  tests_taken: number;
+  tests_held: number;
+  sentence: string;
+}
+
+export interface QuestionMark { q: string; score: number; max: number | null }
+
 export interface ExamSummary {
   id: string;
   type: CycleType;
+  exam_type_id: string | null;
+  exam_type_name: string | null;
+  /** The school's word, falling back to the system kind's label. Display this. */
+  type_label: string;
+  scale: ExamScale;
+  locked: boolean;
   name: string;
   date: string;
   class_id: string | null;
@@ -816,11 +859,35 @@ export interface ExamRosterRow {
   roll_no: string | null;
   score: number | null;
   max_score: number | null;
+  /** V1-8: read off the marked script; absent for a hand-typed exam. */
+  question_marks: QuestionMark[] | null;
+  /** `S-119`: this child's own paper, one tap away. */
+  paper_url: string | null;
+  /** `S-116`: the per-question marks don't sum to the total written on the
+   *  paper. About the TEACHER's paper — never a claim about the child. */
+  sum_mismatch: number | null;
+}
+
+export interface ExamLockRow {
+  action: "lock" | "unlock";
+  reason: string | null;
+  by_name: string | null;
+  at: string;
 }
 
 export interface ExamDetail {
   id: string;
   type: CycleType;
+  exam_type_id: string | null;
+  exam_type_name: string | null;
+  type_label: string;
+  scale: ExamScale;
+  exam_event_id: string | null;
+  exam_event_name: string | null;
+  locked: boolean;
+  locked_at: string | null;
+  locked_by_name: string | null;
+  lock_history: ExamLockRow[];
   name: string;
   date: string;
   class_id: string;
@@ -847,7 +914,17 @@ export interface ExamSaveBody {
   total_marks: number;
   student_ids?: string[] | null;
   capture_id?: string | null;
-  rows: { student_id: string; score: number; max_score?: number | null }[];
+  exam_type_id?: string | null;
+  exam_event_id?: string | null;
+  rows: {
+    student_id: string;
+    score: number;
+    max_score?: number | null;
+    question_marks?: QuestionMark[] | null;
+    /** V1-8 `S-119`: files this photographed script against this child, on
+     *  save — i.e. once a human has confirmed the grid, never at parse time. */
+    page_id?: string | null;
+  }[];
 }
 
 export interface BandConfig { a_min: number; b_min: number }
@@ -861,11 +938,18 @@ export interface CapturePage { id: string; page_no: number; url: string; content
 export interface CaptureParsedRow {
   name_text: string;
   roll_text: string | null;
-  score: number;
+  /** V1-8: null on an unreadable page — kept as a row for the teacher to map
+   *  by hand (`D-80` step 5), never discarded. */
+  score: number | null;
   max_score: number | null;
   student_id: string | null;
   confidence: "roll" | "exact" | "fuzzy" | null;
   candidates: { student_id: string; full_name: string }[];
+  page_no: number | null;
+  page_id: string | null;
+  unreadable: boolean;
+  question_marks: QuestionMark[] | null;
+  sum_mismatch: number | null;
 }
 export interface CaptureRosterRow { student_id: string; full_name: string; roll_no: string | null }
 /** The AI-read exam header — a form prefill, never persisted as-is. */
@@ -883,6 +967,9 @@ export interface Capture {
   class_id: string;
   subject_id: string | null;
   skill_area_id: string | null;
+  /** V1-8 `D-80`: `scripts` = a photo per student's marked paper (the primary
+   *  exam flow); `register` = one page listing many students (SC-1). */
+  mode: "register" | "scripts";
   status: "uploaded" | "parsed" | "confirmed" | "discarded";
   parse_error: string | null;
   pages: CapturePage[];
@@ -1324,6 +1411,14 @@ export interface PeriodHomework {
   due_date: string | null;
 }
 
+export interface PeriodDayEvent {
+  id: string;
+  title: string;
+  type: "holiday" | "exam_block" | "event" | "celebration";
+  affects_teaching: boolean;
+  blocks_periods: number[] | null;
+}
+
 export interface PeriodCard {
   class_id: string;
   class_label: string;
@@ -1334,6 +1429,17 @@ export interface PeriodCard {
   period_id: string | null;
   status: "held" | "not_held";
   not_held_reason: string | null;
+  /** V1-7 (S-147): the reason POINTS AT the approved event, so "what did Diwali
+   *  cost us in periods?" is a query rather than forty spellings of free text. */
+  not_held_event_id: string | null;
+  /** The approved events running on this date — the picker behind "not held,
+   *  because". Empty on an ordinary day, and she types instead. */
+  day_events: PeriodDayEvent[];
+  /** V1-7 (S-145/S-146): the ADMIN locked this period school-wide, so the
+   *  teacher is never asked. Recording her own block too would subtract the
+   *  period from capacity twice. */
+  locked: boolean;
+  lock_reason: string | null;
   opened: boolean;
   closed: boolean;
   attendance_marked: boolean;
@@ -1472,6 +1578,13 @@ export interface GrowthScore {
   date: string;
   score: number;
   max_score: number;
+  /** V1-8: a slip test and a term exam are different questions — never one
+   *  series through both (`S-114`). */
+  cycle_id: string | null;
+  type: CycleType | null;
+  type_label: string | null;
+  scale: ExamScale;
+  paper_url: string | null;
 }
 
 export interface GrowthSubject {
@@ -1485,6 +1598,8 @@ export interface GrowthSubject {
   checks_flagged: number;
   observations: GrowthObservation[];
   scores: GrowthScore[];
+  /** The two never-pooled averages, each carrying its denominator (`S-118`). */
+  score_figures: ScaleFigure[];
 }
 
 export interface GrowthSkill {
@@ -1504,6 +1619,9 @@ export interface StudentGrowth {
   student_id: string;
   full_name: string;
   class_label: string | null;
+  /** V1-7 (S-133): the full date belongs on the student's OWN record. Shared
+   *  surfaces get the day only — never the age, never a DOB on a class list. */
+  date_of_birth: string | null;
   band: string | null;
   band_history: GrowthBandEntry[];
   attendance: GrowthAttendance;
@@ -1976,4 +2094,436 @@ export interface ClassSyllabus {
   as_of: string;
   headline: string;
   rows: SubjectPaceRow[];
+}
+
+
+// ── V1-8 · the exam Report tab (`D-80`) ──────────────────────────────────────
+export interface ExamReportRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  score: number | null;
+  max_score: number | null;
+  pct: number | null;
+}
+
+export interface ExamReportQuestion {
+  q: string;
+  attempted: number;
+  avg_score: number | null;
+  max: number | null;
+  avg_pct: number | null;
+}
+
+export interface ExamReport {
+  cycle_id: string;
+  name: string;
+  date: string;
+  type_label: string;
+  scale: ExamScale;
+  scale_label: string;
+  class_id: string;
+  class_label: string;
+  subject_id: string;
+  subject_name: string;
+  topic: string | null;
+  total_marks: number | null;
+  locked: boolean;
+  summary: string;
+  summary_source: string;
+  roster: number;
+  scored: number;
+  avg_pct: number | null;
+  participation: number | null;
+  distribution: { label: string; count: number }[];
+  rows: ExamReportRow[];
+  /** Named rows against a STATED criterion (`gap_points`) — never a rank. */
+  not_sat: ExamReportRow[];
+  struggling: ExamReportRow[];
+  strong: ExamReportRow[];
+  gap_points: number;
+  /** Empty for a hand-typed exam; `question_note` says why, as a word. */
+  questions: ExamReportQuestion[];
+  question_note: string | null;
+  coverage_taught: number;
+  coverage_total: number;
+  coverage_pct: number | null;
+  coverage_note: string | null;
+  latest_topic: string | null;
+  exam_event_name: string | null;
+}
+
+// ── V1-8 · the two report levels (`D-81`) ────────────────────────────────────
+export interface ReportCardExam {
+  cycle_id: string;
+  name: string;
+  type_label: string;
+  scale: ExamScale;
+  date: string;
+  score: number;
+  max_score: number;
+  pct: number | null;
+  locked: boolean;
+  paper_url: string | null;
+}
+
+export interface ReportCardSubject {
+  subject_id: string | null;
+  subject_name: string | null;
+  exams: ReportCardExam[];
+  figures: ScaleFigure[];
+}
+
+/** Level 1 — numbers only. Never a band (P4): this is the surface most likely
+ *  to be printed and handed to a family. */
+export interface ReportCard {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  admission_no: string | null;
+  class_label: string | null;
+  as_of: string;
+  subjects: ReportCardSubject[];
+  figures: ScaleFigure[];
+}
+
+export interface ClassReportCard {
+  class_id: string;
+  class_label: string;
+  as_of: string;
+  columns: {
+    cycle_id: string; name: string; type_label: string; scale: ExamScale;
+    date: string; subject_id: string | null; subject_name: string | null;
+    total_marks: number | null;
+  }[];
+  students: ReportCard[];
+}
+
+/** Level 2 — the narrative, over the same figures. */
+export interface AnalysisSubject {
+  subject_id: string | null;
+  subject_name: string | null;
+  teacher_name: string | null;
+  figures: ScaleFigure[];
+  coverage_taught: number;
+  coverage_total: number;
+  coverage_pct: number | null;
+  attendance_pct: number | null;
+  topics: { title: string; status: string; missed_while_absent: boolean }[];
+  summary: string;
+  summary_source: string;
+}
+
+export interface StudentAnalysis {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  as_of: string;
+  attendance_pct: number | null;
+  figures: ScaleFigure[];
+  subjects: AnalysisSubject[];
+  skills: { skill_area: string; score: number; max_score: number; pct: number | null }[];
+  strengths: string[];
+  growth_areas: string[];
+  summary: string;
+  summary_source: string;
+}
+
+
+// ── V1-9 · the support programme (bands) ─────────────────────────────────────
+export type BandTier = "A" | "B" | "C";
+
+/** `S-166`: the letter never renders without its sentence. */
+export interface BandDescriptor {
+  id: string | null;
+  subject_id: string;
+  subject_name: string;
+  tier: BandTier;
+  text: string;
+  /** The subject's own threshold (`D-74`). null on C — C is "below B". */
+  min_pct: number | null;
+}
+
+export interface BandSubjectSetup {
+  subject_id: string;
+  subject_name: string;
+  monitored: boolean;
+  descriptors: BandDescriptor[];
+}
+
+export interface AssessRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  current_tier: BandTier | null;
+  pct: number | null;
+  /** null = did not sit it. **Not assessed is a word**, never a C. */
+  suggested_tier: BandTier | null;
+}
+
+export interface BandClassBoard {
+  class_id: string;
+  class_label: string;
+  subject_id: string;
+  subject_name: string;
+  term_id: string | null;
+  a_min: number;
+  b_min: number;
+  cycle_id: string | null;
+  cycle_name: string | null;
+  descriptors: BandDescriptor[];
+  rows: AssessRow[];
+}
+
+export interface BandMoveRow {
+  student_id: string;
+  full_name: string;
+  from_tier: BandTier | null;
+  to_tier: BandTier;
+  pct: number;
+  direction: "up" | "down" | "new";
+}
+
+/** The review step (`Q-81`) — shown before anything commits, because
+ *  `student_bands` is append-only and a child slipping B → C is permanent. */
+export interface BandPromotePreview {
+  cycle_id: string;
+  name: string;
+  date: string;
+  class_id: string | null;
+  class_label: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  total_marks: number | null;
+  locked: boolean;
+  already_promoted: boolean;
+  blocked: string | null;
+  /** `S-184`: warn, never block. */
+  warnings: string[];
+  roster: number;
+  sat: number;
+  not_sat: number;
+  unchanged: number;
+  moves: BandMoveRow[];
+  applied: number;
+  descriptor: string | null;
+}
+
+export interface ProgrammeRow {
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  /** `S-188`: never a row about a child without the subject on it. */
+  subject_id: string;
+  subject_name: string;
+  since: string | null;
+  owner_member_id: string | null;
+  owner_name: string | null;
+  intervention_id: string | null;
+  last_checkin: string | null;
+}
+
+export interface ProgrammeGridCell {
+  class_id: string;
+  class_label: string | null;
+  subject_id: string;
+  subject_name: string;
+  c_count: number;
+  moved_up: number;
+  slipped: number;
+}
+
+export interface ProgrammeBoard {
+  term_id: string | null;
+  term_name: string | null;
+  subjects: string[];
+  headline: string;
+  moved_up: number;
+  slipped: number;
+  stuck: ProgrammeRow[];
+  grid: ProgrammeGridCell[];
+  not_assessed: string[];
+}
+
+export interface SupportDayRow { date: string; kind: string; text: string }
+
+export interface SupportStudentRow {
+  intervention_id: string;
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  tier: BandTier | null;
+  since: string | null;
+  checkins: number;
+  last_checkin: string | null;
+  weeks_since_checkin: number | null;
+  checked_in_this_week: boolean;
+  ready_to_retest: boolean;
+  status: string;
+}
+
+export interface SupportList {
+  as_of: string;
+  week_start: string;
+  headline: string;
+  groups: { subject_name: string; rows: SupportStudentRow[] }[];
+  moved_on: SupportStudentRow[];
+}
+
+export interface SupportCheckpoint {
+  id: string;
+  week_start: string;
+  worked_on: string | null;
+  what_changed: string | null;
+  next_step: string | null;
+  ready_to_retest: boolean;
+  author_name: string | null;
+  created_at: string;
+}
+
+export interface SupportChild {
+  intervention_id: string;
+  student_id: string;
+  full_name: string;
+  class_label: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  tier: BandTier | null;
+  since: string | null;
+  source: string | null;
+  owner_name: string | null;
+  goal_text: string;
+  exit_criterion: string | null;
+  status: string;
+  headline: string;
+  descriptors: BandDescriptor[];
+  /** `S-164`: his week as five other teachers already recorded it. */
+  week: SupportDayRow[];
+  week_start: string | null;
+  checkpoints: SupportCheckpoint[];
+  latest_pct: number | null;
+  latest_test: string | null;
+}
+
+export interface StudentIntervention {
+  id: string;
+  student_id: string;
+  subject_id: string | null;
+  subject_name: string | null;
+  owner_member_id: string | null;
+  owner_name: string | null;
+  goal_text: string;
+  exit_criterion: string | null;
+  target_tier: string;
+  status: string;
+  closed_at: string | null;
+  outcome_note: string | null;
+  items: { id: string; text: string; task_instance_id: string | null; done: boolean }[];
+}
+
+
+// ── V1-10 · the collection board ─────────────────────────────────────────────
+export interface QuarterRow {
+  label: string;
+  start: string;
+  end: string;
+  billed: number;
+  collected: number;
+  pending: number;
+  overdue: number;
+  /** null when nothing was billed — a quarter with no instalments is **not**
+   *  0% collected. */
+  pct: number | null;
+}
+
+export interface ClassCollectionRow {
+  class_id: string | null;
+  class_label: string;
+  /** `S-159`: both denominators. ₹1.4L is one big defaulter or fourteen small
+   *  ones, and those need opposite actions. */
+  families_pending: number;
+  families_total: number;
+  billed: number;
+  collected: number;
+  pending: number;
+  overdue: number;
+  pct: number | null;
+}
+
+export interface CollectionPoint { day: string; collected: number; previous: number | null }
+
+export interface DefaulterRow {
+  student_fee_id: string;
+  student_id: string;
+  student_name: string;
+  class_label: string | null;
+  overdue_amount: number;
+  earliest_due_date: string | null;
+  /** `S-157`: the person who owes is the person you ring. */
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  other_guardians: { name: string; phone: string }[];
+  reminded_on: string | null;
+  assigned_on: string | null;
+  /** `S-161`: what the family SAID, not that a button was pressed. */
+  last_said: string | null;
+  last_said_on: string | null;
+}
+
+export interface CollectionBoard {
+  as_of: string;
+  academic_year_id: string | null;
+  academic_year_label: string | null;
+  quarter: string | null;
+  headline: string;
+  billed: number;
+  collected: number;
+  /** Three states, never summed (`S-163`): pending is a forecast, overdue is a
+   *  phone call. There is no "outstanding" field on purpose. */
+  pending: number;
+  overdue: number;
+  pct: number | null;
+  quarters: QuarterRow[];
+  curve: CollectionPoint[];
+  by_class: ClassCollectionRow[];
+  defaulters: DefaulterRow[];
+  unscheduled_billed: number;
+  unscheduled_note: string | null;
+  /** `D-88`: dues from a previous year — their own line, never in the figures
+   *  above, and never silently omitted either. */
+  carried: { amount: number; families: number; note: string } | null;
+}
+
+export interface FeeNote {
+  id: string;
+  kind: string;
+  said: string | null;
+  promised_date: string | null;
+  author_name: string | null;
+  created_at: string;
+}
+
+export interface RemindResult {
+  sent: number;
+  skipped: string | null;
+  message: string;
+}
+
+/** `D-83` — the one fee payload a teacher may receive: this student, inside
+ *  this task. */
+export interface FeeFollowupDetail {
+  task_id: string;
+  student_id: string;
+  student_fee_id: string;
+  student_name: string;
+  class_label: string | null;
+  pending_amount: number;
+  due_date: string | null;
+  paid_so_far: number;
+  total_fee: number;
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  notes: FeeNote[];
 }

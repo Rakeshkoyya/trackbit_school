@@ -11,10 +11,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
+from app.core.exams import normalise_scale, type_label
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AssessmentCycle,
     AssessmentScore,
+    ExamType,
     Intervention,
     InterventionItem,
     Membership,
@@ -26,14 +28,12 @@ from app.models import (
     Subject,
     TaskInstance,
     Term,
+    User,
 )
 from app.schemas.assessments import (
     AnalysisCyclePoint,
     AnalysisMover,
-    BandBoard,
-    BandCategorizeOut,
     BandConfig,
-    BandRow,
     ClassAnalysis,
     CycleCreate,
     CycleOut,
@@ -185,7 +185,13 @@ class AssessmentService:
             cells=cells)
 
     def save_scores(self, m: CurrentMember, cycle_id: uuid.UUID, body: ScoresBulkIn) -> ScoreGrid | None:
-        self._cycle(m, cycle_id)
+        cycle = self._cycle(m, cycle_id)
+        # V1-8 (`D-53`): the lock is the record, on every write path into a
+        # cycle — not just the exam screen's. A guard on one door is a door.
+        if cycle.locked_at is not None:
+            raise ValidationError(
+                "This exam is locked. An admin can unlock it with a reason.",
+                code="exam_locked")
         for r in body.rows:
             if (r.subject_id is None) == (r.skill_area_id is None):
                 raise ValidationError("Each score needs exactly one of subject/skill.")
@@ -216,54 +222,12 @@ class AssessmentService:
         return None
 
     # ── bands ────────────────────────────────────────────────────────────────
-    def _latest_pct(self, m: CurrentMember, student_id: uuid.UUID) -> float | None:
-        """Average pct across the student's most recent cycle with scores."""
-        got = self._latest_pcts(m, [student_id]).get(student_id)
-        return got[0] if got else None
-
-    def _latest_pcts(
-        self, m: CurrentMember, sids: list[uuid.UUID],
-    ) -> dict[uuid.UUID, tuple[float, str]]:
-        """student -> (avg pct across their most recent cycle, that cycle's name).
-
-        One query for the whole roster — the remote DB makes per-student queries
-        the dominant cost of the band board."""
-        if not sids:
-            return {}
-        rows = self.db.execute(
-            select(AssessmentScore.student_id, AssessmentScore.score, AssessmentScore.max_score,
-                   AssessmentCycle.id, AssessmentCycle.date, AssessmentCycle.name)
-            .join(AssessmentCycle, AssessmentCycle.id == AssessmentScore.cycle_id)
-            .where(AssessmentScore.org_id == m.org_id,
-                   AssessmentScore.student_id.in_(sids))).all()
-        by_student: dict[uuid.UUID, dict] = {}
-        for sid, score, mx, cid, cdate, cname in rows:
-            by_student.setdefault(sid, {}).setdefault(
-                (cdate, str(cid), cname), []).append((float(score), float(mx)))
-        out: dict[uuid.UUID, tuple[float, str]] = {}
-        for sid, cycles in by_student.items():
-            (_, _, cname), scores = max(cycles.items(), key=lambda kv: (kv[0][0], kv[0][1]))
-            tot = sum(mx for _, mx in scores)
-            if tot:
-                out[sid] = (round(sum(s for s, _ in scores) / tot, 4), cname)
-        return out
-
-    def _current_tiers(
-        self, m: CurrentMember, sids: list[uuid.UUID], term_id: uuid.UUID | None,
-    ) -> dict[uuid.UUID, str]:
-        """student -> newest overall tier, batched (newest-first, first seen wins)."""
-        if not sids:
-            return {}
-        q = (select(StudentBand).where(
-                StudentBand.org_id == m.org_id, StudentBand.student_id.in_(sids),
-                StudentBand.scope_skill_area_id.is_(None))
-             .order_by(StudentBand.created_at.desc()))
-        if term_id:
-            q = q.where(StudentBand.term_id == term_id)
-        tiers: dict[uuid.UUID, str] = {}
-        for b in self.db.scalars(q):
-            tiers.setdefault(b.student_id, b.tier)
-        return tiers
+    # `_latest_pcts` / `_current_tiers` are **deleted** (V1-9). Both existed to
+    # serve the one-tap re-band and the overall letter: the first took whatever
+    # test happened last, and the second filtered for the *overall* band row that
+    # `D-75` retires. Per-subject reads live in `BandService.placements` — one
+    # implementation, so the directory chip, the class donut, the daily-check
+    # generator and the report card cannot disagree about a child's band.
 
     # ── band config (SC-5) ───────────────────────────────────────────────────
     def band_config(self, m: CurrentMember) -> BandConfig:
@@ -279,100 +243,36 @@ class AssessmentService:
         self.db.flush()
         return self.band_config(m)
 
-    def band_board(self, m: CurrentMember, class_id: uuid.UUID, term_id: uuid.UUID | None) -> BandBoard:
-        students = list(self.db.scalars(
-            select(Student).where(Student.org_id == m.org_id, Student.class_id == class_id)
-            .order_by(Student.full_name)))
-        sids = [s.id for s in students]
-        tiers = self._current_tiers(m, sids, term_id)
-        pcts = self._latest_pcts(m, sids)
-        cfg = self.band_config(m)
-        rows: list[BandRow] = []
-        for st in students:
-            pct = pcts.get(st.id, (None, None))[0]
-            rows.append(BandRow(
-                student_id=st.id, full_name=st.full_name, current_tier=tiers.get(st.id),
-                suggested_tier=_tier_for(pct, cfg.a_min, cfg.b_min) if pct is not None else None,
-                latest_pct=round(pct * 100, 1) if pct is not None else None))
-        return BandBoard(class_id=class_id, term_id=term_id, rows=rows)
+    def band_board(self, m: CurrentMember, class_id: uuid.UUID, subject_id: uuid.UUID,
+                   term_id: uuid.UUID | None = None, cycle_id: uuid.UUID | None = None):
+        """Assess a class **for one subject** (`D-75`). Delegates to
+        `BandService` so there is exactly one place a band is read."""
+        from app.services.bands import BandService  # noqa: PLC0415
 
-    def apply_band_suggestions(self, m: CurrentMember, class_id: uuid.UUID,
-                               term_id: uuid.UUID) -> int:
-        """One tap after a categorization test: append a band row for every student
-        whose suggested tier differs from their current one (SC-3). Append-only —
-        the movement history stays intact — and each row records its source cycle,
-        so the history explains itself. Returns how many students moved."""
-        if not self.db.scalar(select(Term.id).where(
-                Term.id == term_id, Term.org_id == m.org_id)):
-            raise NotFoundError("Term")
-        sids = list(self.db.scalars(select(Student.id).where(
-            Student.org_id == m.org_id, Student.class_id == class_id,
-            Student.status == "active")))
-        tiers = self._current_tiers(m, sids, term_id)
-        pcts = self._latest_pcts(m, sids)
-        cfg = self.band_config(m)
-        applied = 0
-        for sid, (pct, cycle_name) in pcts.items():
-            suggested = _tier_for(pct, cfg.a_min, cfg.b_min)
-            if tiers.get(sid) == suggested:
-                continue
-            self.db.add(StudentBand(
-                org_id=m.org_id, student_id=sid, term_id=term_id, tier=suggested,
-                set_by=m.user_id, note=f"auto from {cycle_name}"))
-            applied += 1
-        self.db.flush()
-        return applied
+        return BandService(self.db).class_board(m, class_id, subject_id, cycle_id, term_id)
 
-    def categorize_from_cycle(self, m: CurrentMember, cycle_id: uuid.UUID) -> BandCategorizeOut:
-        """One tap after a band test: tier every scored student of that class by
-        the org's thresholds, appending a band row where the tier moved (law 3 —
-        the movement history stays intact and each row names its source test)."""
-        cycle = self._cycle(m, cycle_id)
-        if cycle.class_id is None:
-            raise ValidationError("Categorization runs on a class-scoped test.",
-                                  code="class_scoped_only")
-        cfg = self.band_config(m)
-        students = list(self.db.scalars(select(Student).where(
-            Student.org_id == m.org_id, Student.class_id == cycle.class_id,
-            Student.status == "active")))
-        sids = [s.id for s in students]
-        totals: dict[uuid.UUID, list[float]] = {}
-        for sc in self.db.scalars(select(AssessmentScore).where(
-                AssessmentScore.org_id == m.org_id, AssessmentScore.cycle_id == cycle.id)):
-            pair = totals.setdefault(sc.student_id, [0.0, 0.0])
-            pair[0] += float(sc.score)
-            pair[1] += float(sc.max_score)
-        tiers = self._current_tiers(m, sids, cycle.term_id)
-        counts = {"A": 0, "B": 0, "C": 0, "no_score": 0}
-        applied = 0
-        for st in students:
-            pair = totals.get(st.id)
-            if not pair or not pair[1]:
-                counts["no_score"] += 1
-                continue
-            tier = _tier_for(pair[0] / pair[1], cfg.a_min, cfg.b_min)
-            counts[tier] += 1
-            if tiers.get(st.id) == tier:
-                continue
-            self.db.add(StudentBand(
-                org_id=m.org_id, student_id=st.id, term_id=cycle.term_id, tier=tier,
-                set_by=m.user_id, note=f"band test: {cycle.name}"))
-            applied += 1
-        self.db.flush()
-        return BandCategorizeOut(applied=applied, counts=counts)
+    # `S-183`: `apply_band_suggestions` is **deleted**, not deprecated. It
+    # re-banded a class from *each child's most recent cycle, whatever it was* —
+    # a Tuesday slip test could move eleven children between support tiers. With
+    # `D-76`'s explicit promotion there are no longer two paths to one outcome,
+    # and the unchosen one was the dangerous one.
+    #
+    # `categorize_from_cycle` is gone for the same reason: one tap, no preview,
+    # one overall letter. Its replacement is `BandService.promote_preview` →
+    # `promote` — per subject (`D-75`), locked-only (`S-184`), and showing the
+    # moves before they commit (`Q-81`), because `student_bands` is append-only
+    # and a child slipping B → C is the most consequential thing this module does.
 
     def current_band_map(self, m: CurrentMember) -> dict[str, str]:
-        """student_id -> newest overall tier for the whole org, one query.
-        Staff-only surfaces (directory chips, filters) — P4 keeps it off anything
-        guardian-facing."""
-        tiers: dict[str, str] = {}
-        for b in self.db.scalars(
-                select(StudentBand).where(
-                    StudentBand.org_id == m.org_id,
-                    StudentBand.scope_skill_area_id.is_(None))
-                .order_by(StudentBand.created_at.desc())):
-            tiers.setdefault(str(b.student_id), b.tier)
-        return tiers
+        """student_id -> **"C · Hindi"** — the lowest band a child holds, named
+        with the subject that earned it (`S-186`).
+
+        Staff-only surfaces (directory chips, filters); P4 keeps it off anything
+        guardian-facing. There is no overall letter to return any more (`D-75`),
+        and a chip that averaged across subjects would be one."""
+        from app.services.bands import BandService  # noqa: PLC0415
+
+        return BandService(self.db).chip_map(m)
 
     def set_band(self, m: CurrentMember, body) -> None:
         # Append-only — a new row per change keeps the movement history (P4).
@@ -381,6 +281,7 @@ class AssessmentService:
             raise NotFoundError("Student")
         self.db.add(StudentBand(
             org_id=m.org_id, student_id=body.student_id, term_id=body.term_id, tier=body.tier,
+            subject_id=body.subject_id, source=body.source,
             scope_skill_area_id=body.scope_skill_area_id, set_by=m.user_id, note=body.note))
         self.db.flush()
 
@@ -422,10 +323,20 @@ class AssessmentService:
         sids = [s.id for s in students]
         names = {s.id: s.full_name for s in students}
 
-        tiers = self._current_tiers(m, sids, None)
+        # V1-9 (`D-75`): there is no overall letter to count. These are band
+        # **placements** — one per (child × monitored subject) — and the screen
+        # labels them as such. Counting children instead would mean inventing a
+        # blend, which is the defect this packet removes.
+        from app.services.bands import BandService  # noqa: PLC0415
+
+        places = BandService(self.db).placements(m, sids)
         band_counts = {"A": 0, "B": 0, "C": 0, "unset": 0}
         for sid in sids:
-            band_counts[tiers.get(sid, "unset")] += 1
+            mine = places.get(sid) or []
+            if not mine:
+                band_counts["unset"] += 1
+            for p in mine:
+                band_counts[p.tier] += 1
 
         rows = []
         if sids:
@@ -433,8 +344,9 @@ class AssessmentService:
                 select(AssessmentScore.student_id, AssessmentScore.score,
                        AssessmentScore.max_score, AssessmentScore.subject_id,
                        AssessmentCycle.id, AssessmentCycle.name, AssessmentCycle.date,
-                       AssessmentCycle.type)
+                       AssessmentCycle.type, AssessmentCycle.scale, ExamType.name)
                 .join(AssessmentCycle, AssessmentCycle.id == AssessmentScore.cycle_id)
+                .outerjoin(ExamType, ExamType.id == AssessmentCycle.exam_type_id)
                 .where(AssessmentScore.org_id == m.org_id,
                        AssessmentScore.student_id.in_(sids),
                        AssessmentScore.subject_id.isnot(None))).all()
@@ -443,9 +355,14 @@ class AssessmentService:
 
         # cycle -> {meta, per-subject sums, per-student sums}
         cycles: dict[uuid.UUID, dict] = {}
-        for sid, score, mx, subj_id, cid, cname, cdate, ctype in rows:
+        for sid, score, mx, subj_id, cid, cname, cdate, ctype, cscale, own_name in rows:
             c = cycles.setdefault(cid, {
                 "name": cname, "date": cdate, "type": ctype,
+                # V1-8 (`S-114`): the point carries its scale, so the chart can
+                # keep a slip test and a term exam on separate lines instead of
+                # drawing one trajectory through both.
+                "scale": normalise_scale(cscale, ctype),
+                "type_label": own_name or type_label(ctype),
                 "subj": {}, "students": {}, "tot": [0.0, 0.0]})
             s, x = float(score), float(mx)
             c["tot"][0] += s
@@ -463,6 +380,7 @@ class AssessmentService:
         ordered = sorted(cycles.items(), key=lambda kv: (kv[1]["date"], str(kv[0])))
         points = [AnalysisCyclePoint(
             cycle_id=cid, name=c["name"], date=c["date"], type=c["type"],
+            scale=c["scale"], type_label=c["type_label"],
             avg_pct=pct(c["tot"]),
             subjects=[{"subject_id": str(sub_id), "name": subject_names.get(sub_id, "?"),
                        "avg_pct": pct(pair)}
@@ -483,8 +401,12 @@ class AssessmentService:
                     buckets[min(3, int(p // 25))] += 1
             histogram = [{"bucket": b, "count": n} for b, n in
                          zip(["0–25%", "25–50%", "50–75%", "75–100%"], buckets, strict=True)]
-            if len(ordered) > 1:
-                prev = ordered[-2][1]
+            # `S-114`: a "mover" compares like with like. Measuring a term exam
+            # against yesterday's slip test produces a dramatic delta about
+            # nothing — and it is the delta an admin acts on.
+            same_scale = [kv for kv in ordered[:-1] if kv[1]["scale"] == latest["scale"]]
+            if same_scale:
+                prev = same_scale[-1][1]
                 for sid, pair in latest["students"].items():
                     p_now, p_prev = pct(pair), pct(prev["students"].get(sid, [0.0, 0.0]))
                     if p_now is not None and p_prev is not None:
@@ -533,32 +455,66 @@ class AssessmentService:
 
     # ── interventions (spawn M5 tasks) ───────────────────────────────────────
     def create_intervention(self, m: CurrentMember, body: InterventionCreate) -> InterventionOut:
+        """A support plan for one child **in one subject** (`D-77`).
+
+        Three V1-9 changes, and each closes a defect the module could not
+        function with:
+
+        * **the owner** (`D-71`/`S-168`) — it defaulted to
+          `school_classes.class_teacher_member_id`, which no screen set until
+          V1-2, so every intervention in every real school was created
+          unassigned. It now defaults to the **subject teacher** of the child's
+          class and is explicit on the payload.
+        * **the exit criterion** (`S-167`) — written when the child enters, not
+          judged when the term ends.
+        * **the board is optional** (§4.6) — the sheet used to ask a teacher to
+          pick a task board from a dropdown of the school's whole data model, in
+          the middle of a conversation about a child.
+        """
         student = self.db.scalar(select(Student).where(
             Student.id == body.student_id, Student.org_id == m.org_id))
         if student is None:
             raise NotFoundError("Student")
+        from app.services.bands import BandService  # noqa: PLC0415
+
+        owner_member_id = body.owner_member_id
+        if owner_member_id is None and body.subject_id is not None:
+            owner_member_id = BandService(self.db)._default_owner(  # noqa: SLF001
+                m, student, body.subject_id)
         intervention = Intervention(
             org_id=m.org_id, student_id=body.student_id, term_id=body.term_id,
-            goal_text=body.goal_text, target_tier=body.target_tier)
+            subject_id=body.subject_id, owner_member_id=owner_member_id,
+            goal_text=body.goal_text, exit_criterion=body.exit_criterion,
+            target_tier=body.target_tier)
         self.db.add(intervention)
         self.db.flush()
-        # Assign the checklist tasks to the class teacher (if set).
+        # The checklist tasks go to the owner — the person actually answerable
+        # for this child in this subject — falling back to the class teacher.
         assignee = None
-        if student.class_id:
+        if owner_member_id:
+            mem = self.db.get(Membership, owner_member_id)
+            assignee = mem.user_id if mem else None
+        if assignee is None and student.class_id:
             klass = self.db.get(SchoolClass, student.class_id)
             if klass and klass.class_teacher_member_id:
                 mem = self.db.get(Membership, klass.class_teacher_member_id)
                 assignee = mem.user_id if mem else None
-        task_svc = TaskService(self.db)
-        for text in body.items:
-            item = InterventionItem(org_id=m.org_id, intervention_id=intervention.id, text=text)
-            self.db.add(item)
-            self.db.flush()
-            task = task_svc.create(m, TaskCreateRequest(
-                board_id=body.board_id, title=f"{student.full_name}: {text}",
-                description=f"Intervention goal: {body.goal_text}", category="Intervention",
-                assignee_id=assignee))
-            item.task_instance_id = task.id
+        if body.items and body.board_id:
+            task_svc = TaskService(self.db)
+            for text in body.items:
+                item = InterventionItem(org_id=m.org_id, intervention_id=intervention.id,
+                                        text=text)
+                self.db.add(item)
+                self.db.flush()
+                task = task_svc.create(m, TaskCreateRequest(
+                    board_id=body.board_id, title=f"{student.full_name}: {text}",
+                    description=f"Intervention goal: {body.goal_text}",
+                    category="Intervention", assignee_id=assignee))
+                item.task_instance_id = task.id
+        elif body.items:
+            for text in body.items:
+                self.db.add(InterventionItem(
+                    org_id=m.org_id, intervention_id=intervention.id, text=text))
         self.db.flush()
         return self._intervention_out(m, intervention.id)
 
@@ -573,8 +529,18 @@ class AssessmentService:
             TaskInstance.status == "done"))) if iv.items else set()
         items = [InterventionItemOut(id=i.id, text=i.text, task_instance_id=i.task_instance_id,
                                      done=i.task_instance_id in done_ids) for i in iv.items]
-        return InterventionOut(id=iv.id, student_id=iv.student_id, goal_text=iv.goal_text,
-                               target_tier=iv.target_tier, status=iv.status, items=items)
+        subject_name = self.db.scalar(select(Subject.name).where(
+            Subject.id == iv.subject_id)) if iv.subject_id else None
+        owner_name = self.db.scalar(
+            select(User.name).join(Membership, Membership.user_id == User.id)
+            .where(Membership.id == iv.owner_member_id)) if iv.owner_member_id else None
+        return InterventionOut(
+            id=iv.id, student_id=iv.student_id, subject_id=iv.subject_id,
+            subject_name=subject_name, owner_member_id=iv.owner_member_id,
+            owner_name=owner_name, goal_text=iv.goal_text,
+            exit_criterion=iv.exit_criterion, target_tier=iv.target_tier,
+            status=iv.status, closed_at=iv.closed_at, outcome_note=iv.outcome_note,
+            items=items)
 
     def student_interventions(self, m: CurrentMember, student_id: uuid.UUID) -> list[InterventionOut]:
         ivs = self.db.scalars(select(Intervention.id).where(

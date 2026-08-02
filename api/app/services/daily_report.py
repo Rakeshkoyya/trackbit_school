@@ -45,6 +45,7 @@ from app.schemas.reports_daily import DailyReportOut, ReportHighlights, ReportSe
 from app.services.ai import report_summary, report_write
 from app.services.ai.report import deterministic_summary
 from app.services.attendance import day_absence_maps, is_day_absent
+from app.services.calendar import day_lock
 from app.services.planner import PlannerService
 from app.services.sessions import SessionService
 
@@ -144,6 +145,15 @@ class DailyReportService:
         cs_meta = self._cs_meta(org_id)
         class_labels = self._class_labels(org_id)
         slots = self._today_slots(org_id, d)
+        # V1-7 `S-145`: periods the school locked are not expected, so they
+        # cannot be "not marked" or "not logged". Without this the report for
+        # 15 August reads as the worst capture day of the year, and the
+        # attendance-without-log ambiguity fires on every class in the school.
+        lock = day_lock(self.db, org_id, d)
+        if lock.closed:
+            slots = []
+        elif lock.periods:
+            slots = [s for s in slots if s.period_no not in lock.periods]
 
         # Only ATTENDANCE-MARKED periods count as marked; a period opened but
         # never submitted is not a capture (V2-P6).

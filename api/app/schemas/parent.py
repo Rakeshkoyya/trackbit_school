@@ -6,11 +6,11 @@ service builds these from staff payloads; tests assert the fields never leak.
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.schemas.growth import GrowthAttendance, GrowthChapter, GrowthScore
+from app.schemas.growth import GrowthAttendance, GrowthChapter
 
 
 class RequestOtpIn(BaseModel):
@@ -32,6 +32,101 @@ class SetCredentialsIn(BaseModel):
     username: str | None = Field(default=None, max_length=32)
     email: EmailStr | None = None
     password: str = Field(min_length=8, max_length=128)
+
+
+# ── D-13 · the login, one step per screen ───────────────────────────────────
+class SchoolCodeIn(BaseModel):
+    code: str = Field(min_length=4, max_length=16)
+
+
+class ParentClassOut(BaseModel):
+    class_id: uuid.UUID
+    name: str
+    section: str | None = None
+    label: str | None = None
+
+
+class SchoolLookupOut(BaseModel):
+    """Step 1's answer. Deliberately thin: the school's name so the parent knows
+    they typed the right code, its phone so a stuck parent has somewhere to go,
+    and the class list. Nothing about the school's size, its staff or its year."""
+
+    org_id: uuid.UUID
+    school_name: str
+    school_phone: str | None = None
+    classes: list[ParentClassOut] = []
+
+
+class FindChildIn(BaseModel):
+    org_id: uuid.UUID
+    class_id: uuid.UUID
+    # `S-55`: the minimum is enforced in the service (one config, one message),
+    # not duplicated as a validator here.
+    query: str = Field(max_length=60)
+
+
+class ParentChildMatch(BaseModel):
+    """A search hit, before any credential is entered. The name and nothing
+    else — no admission number, no class teacher, no date of birth hint."""
+
+    student_id: uuid.UUID
+    full_name: str
+
+
+class VerifyDobIn(BaseModel):
+    student_id: uuid.UUID
+    date_of_birth: date
+
+
+class AddChildOut(BaseModel):
+    student_id: uuid.UUID
+    full_name: str
+
+
+# ── D-08/D-14 · the notifications archive ───────────────────────────────────
+class ParentNotification(BaseModel):
+    """One message the school sent this family.
+
+    `S-61`: the Today tab is the delivery surface and this is the archive, so a
+    parent who opens the app once a day has already seen everything and never
+    has to check two places. `delivered` is shown to nobody — it exists so the
+    school can tell whether its own alert arrived (`S-62`)."""
+
+    id: uuid.UUID
+    kind: str
+    title: str
+    body: str
+    url: str | None = None
+    student_id: uuid.UUID
+    student_name: str
+    created_at: datetime
+    read: bool = False
+
+
+class ParentNotificationsOut(BaseModel):
+    items: list[ParentNotification] = []
+    unread: int = 0
+
+
+# ── Q-56 · the school calendar, read-only ───────────────────────────────────
+class ParentCalendarItem(BaseModel):
+    """*"Is school open on Monday?"* — the most-asked question in a school
+    office, answered from rows the school already maintains.
+
+    `closed` is the answer; `title` is the reason. A birthday item is only ever
+    this family's own child (a list of classmates' birthdays is a roster leak
+    wearing a party hat)."""
+
+    date: date
+    end_date: date | None = None
+    title: str
+    kind: str          # holiday | exam_block | celebration | event | birthday
+    closed: bool = False
+    detail: str | None = None
+
+
+class ParentCalendarOut(BaseModel):
+    items: list[ParentCalendarItem] = []
 
 
 class ParentChildOut(BaseModel):
@@ -131,6 +226,48 @@ class ParentTodayOut(BaseModel):
     # days looking like something that could still be handed in.
     pending: list[ParentHomeworkItem] = []
     missed: list[ParentHomeworkItem] = []
+    # V1-10 (`D-66`/`Q-69`/`S-160`): the fee reminder — **one line**, and only
+    # when something is actually due. Two questions, "how much" and "by when",
+    # and both fit on it. Not a ledger: a fee tab invites "why was I charged
+    # this", which is a counter conversation, not a screen. Neutral tone, never
+    # red, never the word defaulter — it is read by a family that may be having
+    # a hard year.
+    fee: "ParentFeeLine | None" = None
+
+
+class ParentFeeLine(BaseModel):
+    """What a parent may see about money. Field by field, like everything in
+    this projection — and deliberately no transaction history, no instalment
+    list, no status word."""
+    amount_due: float
+    due_date: date | None = None
+    paid_so_far: float = 0
+    line: str = ""
+    # The office's number, so "I need to discuss it" has somewhere to go. The
+    # portal stays read-only (`D-86`): the phone call is the write path.
+    school_phone: str | None = None
+
+
+class ParentScore(BaseModel):
+    """A mark, as a parent may see it — named field by field, deliberately.
+
+    It does **not** reuse `GrowthScore`. V1-8 added `paper_url` (a link to the
+    child's photographed script) to that staff schema, and because this
+    projection referenced the type rather than the fields, the link would have
+    reached the portal without anybody deciding it should. That is the exact
+    accident PC-1's allowlist exists to prevent — *"a new staff field cannot
+    reach a parent by accident"* — so the shape is spelled out here instead.
+
+    `type_label` and `scale` ARE included, and deliberately: a parent reading
+    one line through a 5-mark slip test and an 80-mark final is the same
+    conflation `S-114` removed everywhere else."""
+
+    cycle_name: str
+    date: date
+    score: float
+    max_score: float
+    type_label: str | None = None
+    scale: str = "minor"
 
 
 class ParentReportSubject(BaseModel):
@@ -143,7 +280,7 @@ class ParentReportSubject(BaseModel):
     chapters: list[GrowthChapter] = []
     homework_assigned: int = 0
     homework_personal: int = 0
-    scores: list[GrowthScore] = []
+    scores: list[ParentScore] = []
 
     # V1-6 — the coverage figure, computed server-side by `core.coverage` and
     # measured against the WHOLE syllabus (`S-54`, `Q-16`). Both parent pages

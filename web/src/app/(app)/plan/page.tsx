@@ -20,6 +20,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { SuggestionList } from "@/components/school/approve-date";
 import { ExamFitPanel } from "@/components/school/exam-fit-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { ExamPortions } from "@/components/wizard/exam-portions";
@@ -72,6 +73,13 @@ function PlanYearInner() {
     queryKey: ["classes", yearId],
     queryFn: () => schoolApi.classes(yearId!),
     enabled: !!yearId,
+  });
+  // The approval sheet offers periods to lock (D-58's middle level), so it
+  // needs the school day's length — the same config the timetable draws from.
+  const { data: periodConfig } = useQuery({
+    queryKey: ["period-config", yearId],
+    queryFn: () => schoolApi.periodConfig(yearId!),
+    enabled: !!yearId && canEdit,
   });
 
   const invalidate = () => {
@@ -201,6 +209,14 @@ function PlanYearInner() {
                 plan re-forecasts against them.
               </p>
             </div>
+          ) : null}
+
+          {/* V1-7 (D-57): the stream of suggestions, right beside the calendar
+              approving one writes to. Nothing reaches that calendar by any
+              other route (S-122). */}
+          {canEdit ? (
+            <SuggestionList yearId={yearId}
+                            periodsPerDay={periodConfig?.periods_per_day ?? 8} />
           ) : null}
 
           {canEdit ? <ExamPortions exams={exams} classes={classes ?? []} /> : null}

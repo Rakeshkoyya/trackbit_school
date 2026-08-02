@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.core.context import CurrentMember
+from app.core.exams import sum_mismatch
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models import (
     AssessmentCycle,
@@ -44,7 +45,7 @@ from app.schemas.assessments import (
     ScoresBulkIn,
 )
 from app.services import storage
-from app.services.ai.scores import extract_marksheet
+from app.services.ai.scores import extract_marksheet, extract_script
 from app.services.assessments import AssessmentService
 from app.services.periods import assert_can_take_class
 from app.services.score_match import match_rows
@@ -91,6 +92,7 @@ class ScoreCaptureService:
         return CaptureOut(
             id=cap.id, cycle_id=cap.cycle_id, class_id=cap.class_id,
             subject_id=cap.subject_id, skill_area_id=cap.skill_area_id,
+            mode=cap.mode,
             status=cap.status, parse_error=cap.parse_error, pages=pages,
             parsed_rows=cap.parsed_rows, parsed_meta=cap.parsed_meta,
             student_ids=[uuid.UUID(str(s)) for s in cap.student_ids or []] or None,
@@ -140,6 +142,7 @@ class ScoreCaptureService:
         cap = ScoreCapture(
             org_id=m.org_id, cycle_id=body.cycle_id, class_id=body.class_id,
             subject_id=body.subject_id, skill_area_id=body.skill_area_id,
+            mode=body.mode,
             student_ids=student_ids, created_by_member_id=m.membership.id)
         self.db.add(cap)
         self.db.flush()
@@ -171,6 +174,16 @@ class ScoreCaptureService:
         return self._out(m, cap)
 
     def parse(self, m: CurrentMember, capture_id: uuid.UUID) -> CaptureOut:
+        """Photos → a review grid. The model transcribes, `score_match` decides
+        identity, and **the human confirms** — that division is not negotiable
+        (`D-49`, and `D-80` keeps it).
+
+        V1-8: a page the model cannot read no longer aborts the whole capture.
+        It comes back as a row of its own, flagged `unreadable`, for the teacher
+        to attach a student and marks to by hand (`D-80` step 5). Losing
+        thirty-nine good pages because the fortieth was blurred was the old
+        behaviour, and it is the kind of thing that sends a teacher back to
+        paper."""
         cap = self._capture(m, capture_id)
         self._mutable(cap)
         if not cap.pages:
@@ -181,29 +194,82 @@ class ScoreCaptureService:
             self.db.flush()
             return self._out(m, cap)
 
-        transcribed: list[dict] = []
-        meta: dict | None = None
-        for page in cap.pages:
-            data = storage.get_bytes(page.object_key)
-            filename = page.object_key.rsplit("/", 1)[-1]
-            page_result = extract_marksheet(filename, data) if data is not None else None
-            if page_result is None:
-                cap.parse_error = "unreadable_page"
-                self.db.flush()
-                return self._out(m, cap)
-            transcribed.extend(page_result["rows"])
-            if meta is None:
-                meta = page_result.get("meta")
+        transcribed, extras, meta, unread = self._transcribe(cap)
 
         roster = [{"id": s.id, "full_name": s.full_name, "roll_no": s.roll_no,
                    "admission_no": s.admission_no}
                   for s in self._roster(m, cap.class_id, cap.student_ids)]
-        cap.parsed_rows = match_rows(transcribed, roster)
+        matched = match_rows(transcribed, roster)
+        # `match_rows` is index-aligned with its input and returns only identity
+        # fields — merge the page/question detail back rather than widening the
+        # matcher, which stays pure and stdlib-only.
+        rows = [{**row, **extras[i]} for i, row in enumerate(matched)]
+        rows.extend(unread)
+        rows.sort(key=lambda r: (r.get("page_no") or 0))
+
+        cap.parsed_rows = rows
         cap.parsed_meta = self._resolve_meta(m, meta)
-        cap.parse_error = None
+        # Only a capture where NOTHING could be read is an error; a single bad
+        # page is a row with a job attached to it.
+        cap.parse_error = "unreadable_page" if not transcribed and unread else None
         cap.status = "parsed"
         self.db.flush()
         return self._out(m, cap)
+
+    def _transcribe(self, cap: ScoreCapture) -> tuple[list[dict], list[dict], dict | None,
+                                                      list[dict]]:
+        """Every page read once. Returns (rows for the matcher, the per-row page
+        detail to merge back, the exam header, the unreadable pages)."""
+        transcribed: list[dict] = []
+        extras: list[dict] = []
+        unread: list[dict] = []
+        meta: dict | None = None
+
+        for page in cap.pages:
+            data = storage.get_bytes(page.object_key)
+            filename = page.object_key.rsplit("/", 1)[-1]
+            page_meta: dict | None = None
+
+            if cap.mode == "scripts":
+                # One page = one student's marked script (`D-80`).
+                result = extract_script(filename, data) if data is not None else None
+                if result is None:
+                    unread.append({
+                        "name_text": "", "roll_text": None, "score": None,
+                        "max_score": None, "student_id": None, "confidence": None,
+                        "candidates": [], "page_no": page.page_no,
+                        "page_id": str(page.id), "unreadable": True,
+                        "question_marks": None, "sum_mismatch": None})
+                    continue
+                row = result["row"]
+                page_meta = result.get("meta")
+                transcribed.append({k: row[k] for k in
+                                    ("name_text", "roll_text", "score", "max_score")})
+                extras.append({
+                    "page_no": page.page_no, "page_id": str(page.id), "unreadable": False,
+                    "question_marks": row.get("question_marks"),
+                    "sum_mismatch": sum_mismatch(row.get("question_marks"), row.get("score")),
+                })
+            else:
+                # One page = a mark register listing many students (SC-1).
+                result = extract_marksheet(filename, data) if data is not None else None
+                if result is None:
+                    unread.append({
+                        "name_text": "", "roll_text": None, "score": None,
+                        "max_score": None, "student_id": None, "confidence": None,
+                        "candidates": [], "page_no": page.page_no,
+                        "page_id": str(page.id), "unreadable": True,
+                        "question_marks": None, "sum_mismatch": None})
+                    continue
+                page_meta = result.get("meta")
+                for row in result["rows"]:
+                    transcribed.append(row)
+                    extras.append({"page_no": page.page_no, "page_id": str(page.id),
+                                   "unreadable": False, "question_marks": None,
+                                   "sum_mismatch": None})
+            if meta is None:
+                meta = page_meta
+        return transcribed, extras, meta, unread
 
     def _resolve_meta(self, m: CurrentMember, meta: dict | None) -> dict | None:
         """AI header → form prefill. The subject text is matched against the
@@ -232,10 +298,19 @@ class ScoreCaptureService:
         return out
 
     def finalize_for_exam(self, m: CurrentMember, capture_id: uuid.UUID,
-                          cycle: AssessmentCycle) -> ScoreCapture:
+                          cycle: AssessmentCycle,
+                          page_students: dict[uuid.UUID, uuid.UUID] | None = None,
+                          ) -> ScoreCapture:
         """Attach a draft capture to the cycle its reviewed exam just created
         (or re-saved) and close it. The scores themselves are written by the
-        exam save — this only files the evidence."""
+        exam save — this only files the evidence.
+
+        V1-8: `page_students` is the page↔student map taken from the **confirmed
+        grid**, so each photographed script is filed against the child whose
+        paper it is (`S-119` — the paper one tap from the report card, which is
+        the one question a parent meeting actually produces). Written here and
+        not at parse time, because it is data about a student and the matcher's
+        proposal is not a human's confirmation (§8)."""
         cap = self._capture(m, capture_id)
         self._mutable(cap)
         if cap.class_id != cycle.class_id:
@@ -245,6 +320,10 @@ class ScoreCaptureService:
         cap.status = "confirmed"
         cap.confirmed_by_member_id = m.membership.id
         cap.confirmed_at = datetime.now(UTC)
+        if page_students:
+            for page in cap.pages:
+                if page.id in page_students:
+                    page.student_id = page_students[page.id]
         self.db.flush()
         return cap
 
