@@ -361,24 +361,40 @@ class OverviewService:
         # figure that is never the student's miss (HW-1).
         check_tone = "red" if unchecked > 5 else "amber" if unchecked else "green"
 
+        # The funnel's three stages, in the order they happen, all in ONE unit
+        # (student-homeworks) so they nest and the two gaps are readable. The
+        # old trio mixed units — two figures counted sets and one counted
+        # students — which is why they never read as one story.
+        f = ov.funnel
         metrics = [
             OverviewMetric(
-                key="completion", label=f"Done ({ov.window_days}d)",
-                value=f"{round(completion * 100)}%" if completion is not None else "—",
-                sub=(f"{ov.checked} of {ov.assigned} sets checked" if ov.assigned
-                     else "no homework set in the window"),
-                tone=done_tone, href="/dashboard/homework",
-                spark=[d.completion for d in board.daily]),
+                # Volume is never good or bad, so this one carries no tone: a
+                # busy homework week is not a worse week.
+                key="given", label="Homework given", value=str(f.given),
+                sub=(f"to students, from {f.assignments} "
+                     f"{_plural(f.assignments, 'set')} across "
+                     f"{f.class_subjects} class-{_plural(f.class_subjects, 'subject')}"
+                     if f.given else "nothing set in the window"),
+                tone="neutral", href="/dashboard/homework"),
             OverviewMetric(
-                key="unchecked", label="Unchecked past due", value=str(unchecked),
-                sub=("everything set has been checked" if not unchecked
-                     else "set, due, and never gone through"),
+                key="checked", label="Teacher checked", value=str(f.checked),
+                # Toned on what is past its DEADLINE, never on the raw rate:
+                # homework set this morning being unchecked is not a failure,
+                # and an amber tile every afternoon is how a board gets ignored.
+                sub=(f"{round(f.check_rate * 100)}% of what was given"
+                     + (f" · {unchecked} past due" if unchecked else "")
+                     if f.check_rate is not None else "nothing to check yet"),
                 tone=check_tone, href="/dashboard/homework"),
             OverviewMetric(
-                key="missing", label="Keep missing it", value=str(missing),
-                sub=("nobody is repeatedly missing homework" if not missing
-                     else "students on a run of not-done"),
-                tone="red" if missing else "green", href="/dashboard/homework"),
+                key="completion", label="Students did it",
+                value=str(f.done + f.late) if f.graded else "—",
+                # Its denominator is `graded`, not `given` — the gap above is
+                # the teacher's and may never be spent on the children.
+                sub=(f"{round(completion * 100)}% of the {f.graded} with a verdict"
+                     + (f" · {f.late} late" if f.late else "")
+                     if completion is not None else "nothing checked yet"),
+                tone=done_tone, href="/dashboard/homework",
+                spark=[d.completion for d in board.daily]),
         ]
 
         notes = [
@@ -396,15 +412,17 @@ class OverviewService:
                       f"{_plural(t.unchecked_overdue, 'set')} set but never checked"),
                 tone="amber", href="/dashboard/homework"))
 
-        if not ov.assigned:
+        if not f.given:
             headline = f"No homework was set in the last {ov.window_days} days."
         elif completion is None:
-            headline = (f"{ov.assigned} sets given out, none checked — "
+            headline = (f"{f.given} homeworks given out, none checked — "
                         "completion is unknown, not zero.")
         else:
-            headline = (f"{round(completion * 100)}% of checked homework was done"
-                        + (f"; {unchecked} {_plural(unchecked, 'set')} are past due "
-                           "and unchecked." if unchecked else "."))
+            waiting = max(0, f.given - f.checked)
+            headline = (f"{round(completion * 100)}% of the {f.graded} checked "
+                        "homeworks were done"
+                        + (f"; {waiting} of {f.given} are still waiting to be "
+                           "checked." if waiting else "."))
 
         return OverviewSection(
             key="homework", label="Homework", href="/dashboard/homework",

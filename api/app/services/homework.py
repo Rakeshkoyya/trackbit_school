@@ -42,8 +42,11 @@ from app.models import (
     User,
 )
 from app.schemas.homework import (
+    HomeworkDay,
+    HomeworkFunnel,
     HomeworkLoad,
     HomeworkLoadCell,
+    HomeworkMatrixCell,
     HomeworkOverview,
     HomeworkQueue,
     HomeworkQueueItem,
@@ -73,6 +76,36 @@ def _label(name: str, section: str | None) -> str:
 
 def _pct(done: int, total: int) -> float | None:
     return round(done / total, 3) if total else None
+
+
+def _tone(pct: float | None) -> str:
+    """Percent → the board's tone. One place, so the matrix cell, the row bar
+    and the summary block cannot each decide what "low" means."""
+    if pct is None:
+        return "neutral"
+    return "green" if pct >= 0.75 else "amber" if pct >= 0.60 else "red"
+
+
+def bucket_days(window_days: int) -> int:
+    """One column per day for a fortnight, one per week beyond it.
+
+    A year at one column per day is 365 marks nobody can read, and the shape —
+    which is the only reason the series exists — survives weekly buckets fine.
+    """
+    return 1 if window_days <= 21 else 7
+
+
+def _bucket_label(start: date, days: int) -> str:
+    """The bucket's own name. Composed here rather than in the browser because
+    a week bucket is not a date and the client has no way to know which it got.
+    """
+    if days == 1:
+        # Built by hand rather than with %-d/%#d, which differ by platform.
+        return f"{start.strftime('%a')} {start.day}"
+    end = start + timedelta(days=days - 1)
+    if start.month == end.month:
+        return f"{start.day}–{end.day} {start.strftime('%b')}"
+    return f"{start.day} {start.strftime('%b')} – {end.day} {end.strftime('%b')}"
 
 
 class HomeworkService:
@@ -177,12 +210,22 @@ class HomeworkService:
             # `not_checked` is carried through the accumulators so it can be
             # reported, and `graded` deliberately excludes it — that separation
             # is HW-1's load-bearing rule and this is where it is enforced.
-            return {"assigned": 0, "checked": 0, "done": 0, "late": 0, "partial": 0,
+            #
+            # `students_set` / `students_checked` are the funnel's first two
+            # stages. They live in the same accumulator as the verdicts so every
+            # scope — school, class, subject, day, class×subject — gets all
+            # three stages from one addition and none of them can drift.
+            return {"assigned": 0, "checked": 0, "students_set": 0,
+                    "students_checked": 0, "done": 0, "late": 0, "partial": 0,
                     "not_done": 0, "carried": 0, "waived": 0, "not_checked": 0,
                     "graded": 0}
 
         by_class: dict[str, dict[str, int]] = defaultdict(_acc)
         by_subject: dict[str, dict[str, int]] = defaultdict(_acc)
+        # The two cuts the old board could not draw: one bucket per day (the
+        # shape) and one per class×subject (where a low number actually lives).
+        by_day: dict[date, dict[str, int]] = defaultdict(_acc)
+        by_cell: dict[tuple[str, str], dict[str, int]] = defaultdict(_acc)
         # teacher → [assigned, checked, unchecked_overdue, last_checked_at]
         by_teacher: dict[uuid.UUID | None, list] = defaultdict(lambda: [0, 0, 0, None])
         per_student: dict[uuid.UUID, dict] = {}
@@ -236,10 +279,19 @@ class HomeworkService:
 
             counts["assigned"] = 1
             counts["checked"] = 1 if checked else 0
+            # Stage 1 and stage 2 of the funnel, in student-homeworks. An
+            # unchecked set contributes its whole roster to `students_set` and
+            # nothing to `students_checked` — which is exactly the gap the
+            # board exists to show, and exactly what the old three numbers
+            # (two of them counted in sets) could not express.
+            counts["students_set"] = len(targets)
+            counts["students_checked"] = len(targets) if checked else 0
             for bucket, key in ((by_class, a["class_label"]), (by_subject, a["subject"])):
                 for k, v in counts.items():
                     bucket[key][k] += v
             for k, v in counts.items():
+                by_day[hw.date][k] += v
+                by_cell[(a["class_label"], a["subject"])][k] += v
                 totals[k] += v
 
             misses = counts["not_done"] + counts["partial"]
@@ -270,8 +322,10 @@ class HomeworkService:
                 (HomeworkScopeRow(
                     key=key, assigned=v["assigned"], checked=v["checked"],
                     students_expected=v["graded"],
+                    students_set=v["students_set"],
+                    students_checked=v["students_checked"],
                     done=v["done"], not_done=v["not_done"], partial=v["partial"],
-                    late=v["late"], carried=v["carried"],
+                    late=v["late"], carried=v["carried"], waived=v["waived"],
                     # ONE arithmetic (core/homework_verdict): late counts as done,
                     # partly counts PARTIAL_WEIGHT, carried/waived are not in it.
                     completion=verdicts.completion(v), check_rate=_pct(v["checked"], v["assigned"]))
@@ -285,6 +339,62 @@ class HomeworkService:
                 check_rate=_pct(v[1], v[0]), last_checked_at=v[3])
              for mid, v in by_teacher.items()),
             key=lambda r: (r.check_rate if r.check_rate is not None else 0, -r.unchecked_overdue))
+
+        # ── the funnel: three stages, one unit, both denominators named ──────
+        funnel = HomeworkFunnel(
+            given=totals["students_set"],
+            checked=totals["students_checked"],
+            graded=totals["graded"],
+            done=totals["done"], late=totals["late"], partial=totals["partial"],
+            not_done=totals["not_done"], carried=totals["carried"],
+            waived=totals["waived"],
+            # The one arithmetic. `completion` divides exactly this, so no
+            # screen has to reconstruct the numerator from the parts and get
+            # `partial` wrong on the way.
+            done_weighted=round(
+                totals["done"] + totals["late"]
+                + verdicts.verdict_weight("partial") * totals["partial"], 2),
+            assignments=totals["assigned"],
+            class_subjects=len({(a["class_label"], a["subject"]) for a in assignments}),
+            check_rate=_pct(totals["students_checked"], totals["students_set"]),
+            completion=verdicts.completion(totals))
+
+        # ── the series, bucketed so a long range stays readable ──────────────
+        size = bucket_days(window_days)
+        buckets: dict[date, dict[str, int]] = defaultdict(_acc)
+        for day, v in by_day.items():
+            # Anchored on the window's start so the buckets are stable as the
+            # window slides, rather than on the first day that happened to
+            # carry homework.
+            start = since + timedelta(days=((day - since).days // size) * size)
+            for k, n in v.items():
+                buckets[start][k] += n
+        daily = [
+            HomeworkDay(
+                date=start, label=_bucket_label(start, size), days=size,
+                assigned=v["assigned"], checked=v["checked"],
+                given=v["students_set"], expected=v["graded"],
+                # `done` here means the child did the work — late included,
+                # because late IS done (S-99). Reported beside it, never as a
+                # separate slice that makes the column look short.
+                done=v["done"] + v["late"],
+                partial=v["partial"], not_done=v["not_done"],
+                not_checked=v["not_checked"],
+                completion=verdicts.completion(v))
+            for start, v in sorted(buckets.items())
+        ]
+
+        # ── class × subject: where a low number actually lives ───────────────
+        matrix = [
+            HomeworkMatrixCell(
+                class_key=ck, subject_key=sk, assigned=v["assigned"],
+                checked=v["checked"], given=v["students_set"],
+                graded=v["graded"], completion=verdicts.completion(v),
+                tone=_tone(verdicts.completion(v)))
+            for (ck, sk), v in by_cell.items()
+        ]
+        matrix_classes = sorted({c for c, _ in by_cell})
+        matrix_subjects = sorted({s for _, s in by_cell})
 
         students = []
         for sid, rec in per_student.items():
@@ -316,9 +426,12 @@ class HomeworkService:
             recent = sum(1 for d, st in rec["dated"] if d >= midpoint and verdicts.is_miss(st))
             if early > recent:
                 s2 = s.model_copy()
-                s2.streak = early - recent  # reuse as the improvement delta for sorting
+                # Its own field. This used to overwrite `streak`, so the row
+                # claimed a miss streak it did not have and the screen printed
+                # "N fewer misses" from a field named for the opposite thing.
+                s2.improvement = early - recent
                 improved.append(s2)
-        improved.sort(key=lambda s: -s.streak)
+        improved.sort(key=lambda s: -s.improvement)
 
         rough.sort(key=lambda r: -r[0])
         return HomeworkOverview(
@@ -327,6 +440,8 @@ class HomeworkService:
             check_rate=_pct(totals["checked"], totals["assigned"]),
             overall_completion=verdicts.completion(totals),
             late=totals["late"], carried=totals["carried"],
+            funnel=funnel, daily=daily, matrix=matrix,
+            matrix_classes=matrix_classes, matrix_subjects=matrix_subjects,
             by_class=scope_rows(by_class), by_subject=scope_rows(by_subject),
             teachers=teacher_rows, needs_attention=needs, perfect=perfect,
             most_improved=improved[:10],

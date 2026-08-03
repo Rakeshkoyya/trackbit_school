@@ -22,7 +22,7 @@ from datetime import datetime, time
 from pydantic import BaseModel, Field
 
 from app.schemas.dashboard import AttendancePulse
-from app.schemas.homework import HomeworkOverview
+from app.schemas.homework import HomeworkDay, HomeworkOverview
 
 # ─────────────────────────────────────────────────────────────────────────────
 # M1 — Attendance
@@ -725,13 +725,10 @@ class StaffBoard(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class HomeworkDay(BaseModel):
-    date: date_
-    assigned: int
-    checked: int
-    expected: int
-    done: int
-    completion: float | None = None
+# `HomeworkDay` now lives beside the rest of the homework vocabulary, in
+# `schemas/homework.py`, because it is accumulated inside `overview()`'s single
+# pass rather than by a second walk here. It is imported at the top of this
+# file, so `schemas.insights.HomeworkDay` still resolves for existing importers.
 
 
 class HomeworkBoard(BaseModel):
