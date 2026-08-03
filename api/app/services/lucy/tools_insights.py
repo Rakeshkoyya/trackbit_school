@@ -91,9 +91,13 @@ def get_syllabus_board(m: CurrentMember, db: Session, scope: str = "class",
 
 
 @tool("get_homework_board",
-      "Homework completion by class and subject, which teachers are actually "
-      "checking what they set, students who keep missing it, and the daily trend. "
-      "'not_checked' is the teacher's gap and is never a student's miss.",
+      "Homework: the set -> checked -> done funnel (all three in student-homeworks, "
+      "so they nest), completion by class, by subject and by class-subject cell, "
+      "which teachers are actually checking what they set, students who keep "
+      "missing it, and the trend. Completion is over what has a VERDICT, never "
+      "over what was given: 'not_checked' is the teacher's gap and is never a "
+      "student's miss, and 'carried' (absent when it was set) and 'waived' leave "
+      "the denominator entirely.",
       params={"window_days": {"type": "integer", "description": "default 14"}},
       role="admin", widgets=("table", "stat_group"))
 def get_homework_board(m: CurrentMember, db: Session, window_days: int = 14):
