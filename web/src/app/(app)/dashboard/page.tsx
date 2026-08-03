@@ -33,7 +33,7 @@ import { MeterBar, STATUS_COLOR } from "@/components/charts";
 import { StaffDayBlock } from "@/components/insights/daybook";
 import { ActionRail, CustomSection, MetricCell, SectionCard } from "@/components/insights/overview";
 import { PresencePanorama } from "@/components/insights/presence";
-import { HomeworkOverviewBlock } from "@/components/insights/homework";
+import { HomeworkOverviewBlock, OVERVIEW_WINDOW_DAYS } from "@/components/insights/homework";
 import { SyllabusPulseBlock } from "@/components/insights/syllabus";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { ReasonSheet, type ReasonTarget } from "@/components/insights/reason-sheet";
@@ -289,13 +289,14 @@ function DashboardInner() {
     queryFn: () => insightsApi.daybookGlimpse({ limit: 8 }),
     refetchInterval: 300_000,
   });
-  // A week, because the block's question is "what happened to this week's
-  // homework" — the tab is where a month or a year gets read. Its own request
-  // like the syllabus pulse, so the funnel and the seven-day shape arrive with
-  // the figures they are drawn from rather than being reconstructed here.
+  // The SAME window the server composes the block's sentence over — a mismatch
+  // here put "430 given" in the headline above stage bars reading 205, which is
+  // the one thing this block exists not to do. Its own request like the
+  // syllabus pulse, so the funnel and the shape arrive with the figures they
+  // are drawn from rather than being reconstructed here.
   const { data: homework, isLoading: homeworkLoading } = useQuery({
-    queryKey: ["insights", "homework", 7],
-    queryFn: () => insightsApi.homework(7),
+    queryKey: ["insights", "homework", OVERVIEW_WINDOW_DAYS],
+    queryFn: () => insightsApi.homework(OVERVIEW_WINDOW_DAYS),
   });
   const { data: syllabus, isLoading: syllabusLoading } = useQuery({
     queryKey: ["insights", "syllabus-pulse", yearId, syllabusTerm],

@@ -67,10 +67,16 @@
     checked it" is a hole in the record, and it wears the same dashed/hatched
     no-record texture as an unmarked register cell. Turning it into a step would
     make the teacher's gap read as a low score for the children.
+
+    Widened after looking at it on screen: the first ramp cleared every check,
+    but stages 2 and 3 were hard to tell apart as two bars of different length
+    stacked one above the other — which is the whole reading task. The light end
+    is pinned by the 2:1 surface floor, so the separation has to come from
+    pushing the far end, hence the deep step 3.
   */
   --hw-stage-1: #9fadf0;
-  --hw-stage-2: #7488ec;
-  --hw-stage-3: #3f57c4;
+  --hw-stage-2: #6076e0;
+  --hw-stage-3: #22307e;
 
   --radius: 0.75rem;
 }
@@ -128,8 +134,8 @@
     pass.
   */
   --hw-stage-1: #4a5aa8;
-  --hw-stage-2: #7488ec;
-  --hw-stage-3: #a9b7f5;
+  --hw-stage-2: #8094f0;
+  --hw-stage-3: #ccd6fb;
 }
 
 @theme inline {

@@ -53,8 +53,18 @@ import type {
 const STAGE = ["var(--hw-stage-1)", "var(--hw-stage-2)", "var(--hw-stage-3)"] as const;
 
 // The one no-record texture, shared with the day-book's away cells. 45° only.
+// Pitch tightened from 5px to 4px after looking at it in light mode, where the
+// looser weave read as an empty bar — and "nobody checked it" reading as
+// "nothing there" is the one thing this texture exists to prevent.
 const HATCH =
-  "repeating-linear-gradient(45deg, var(--color-muted-foreground) 0 1px, transparent 1px 5px)";
+  "repeating-linear-gradient(45deg, var(--color-muted-foreground) 0 1px, transparent 1px 4px)";
+
+/** The window the overview block reads, and it MUST match the one the server
+ *  composes its sentence over (`HomeworkInsights.WINDOW_DAYS`). Fetching a
+ *  different one put a 14-day sentence above a 7-day funnel — the block said
+ *  "430 given" over bars reading 205. A constant, so the next person changing
+ *  it changes it once. */
+export const OVERVIEW_WINDOW_DAYS = 14;
 
 export const num = (n: number) => n.toLocaleString("en-IN");
 const pctOf = (part: number, whole: number) => (whole > 0 ? (part / whole) * 100 : 0);
@@ -356,15 +366,25 @@ export function CheckingLedger({ rows }: { rows: TeacherCheckingRow[] }) {
       <ul className="divide-y divide-border/60">
         {rows.map((t) => (
           <li key={t.member_id ?? t.teacher_name}
-            className="grid grid-cols-2 gap-2 px-4 py-2.5 sm:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_minmax(90px,1.2fr)] sm:items-center">
-            <span className="truncate text-sm sm:col-span-1">{t.teacher_name}</span>
-            <span className="text-right font-mono text-[13px] tabular-nums sm:text-left">{t.assigned}</span>
-            <span className="text-right font-mono text-[13px] tabular-nums sm:text-left">{t.checked}</span>
-            <span className={`text-right font-mono text-[13px] tabular-nums sm:text-left ${
+            className="grid grid-cols-1 gap-1.5 px-4 py-2.5 sm:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_minmax(90px,1.2fr)] sm:gap-2 sm:items-center">
+            <span className="truncate text-sm">{t.teacher_name}</span>
+            {/* Below `sm` the column heads are gone, so each figure carries its
+                own word inline. Three bare numbers under a name is a row that
+                cannot be read at all on the device most of this is read on. */}
+            <span className="font-mono text-[13px] tabular-nums">
+              <span className="mr-1 text-[10px] uppercase tracking-[0.1em] text-muted-foreground sm:hidden">set</span>
+              {t.assigned}
+            </span>
+            <span className="font-mono text-[13px] tabular-nums">
+              <span className="mr-1 text-[10px] uppercase tracking-[0.1em] text-muted-foreground sm:hidden">checked</span>
+              {t.checked}
+            </span>
+            <span className={`font-mono text-[13px] tabular-nums ${
               t.unchecked_overdue ? "text-danger" : "text-muted-foreground"}`}>
+              <span className="mr-1 text-[10px] uppercase tracking-[0.1em] text-muted-foreground sm:hidden">overdue</span>
               {t.unchecked_overdue}
             </span>
-            <span className="col-span-2 sm:col-span-1">
+            <span className="sm:col-span-1">
               {t.check_rate == null ? <StateChip>nothing set</StateChip> : (
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
@@ -506,7 +526,9 @@ export function HomeworkOverviewBlock({ section, board, loading }: {
         <StageTrack funnel={f} dense />
         <div className="min-w-0">
           <div className="mb-2 flex items-baseline justify-between gap-2">
-            <ColumnHead>Last {board.daily.length || 7} days</ColumnHead>
+            {/* Taken from the payload, never from how many buckets came back:
+                a window with three quiet days is still a fortnight. */}
+            <ColumnHead>Last {board.overview.window_days} days</ColumnHead>
           </div>
           <LoadStrip days={board.daily} height={84} showLabels={false} />
           <div className="mt-2">
@@ -537,8 +559,11 @@ export function HomeworkOverviewBlock({ section, board, loading }: {
           {more ? (
             <li>
               <Link href="/dashboard/homework"
-                className="flex items-center justify-center gap-1 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground">
-                +{more} more &rarr;
+                className="flex items-center justify-center gap-1.5 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground">
+                {/* One string, so the letter-spacing cannot swallow the space
+                    and render "+8MORE". */}
+                <span>{`+${more} more`}</span>
+                <span aria-hidden>&rarr;</span>
               </Link>
             </li>
           ) : null}

@@ -27,6 +27,7 @@ from datetime import date, timedelta
 
 from app.core import homework_verdict as verdicts
 from app.services.homework import bucket_days
+from app.services.insights import homework as insights_homework
 from tests.test_homework_v1_5 import _check, _set_hw
 from tests.test_homework_v1_5 import _setup as _hw_setup
 
@@ -266,6 +267,36 @@ def test_most_improved_carries_its_own_field_and_not_the_streak(client, cleanup)
     # `streak` still means what its name says: this child's most recent
     # homework day was done, so there is no run of misses.
     assert row["streak"] == 0
+
+
+# ── the overview block reads the same window as its own sentence ─────────────
+def test_the_overview_block_and_its_headline_are_one_window(client, cleanup):
+    """Caught by looking at the built screen: the block's sentence is composed
+    server-side over `HomeworkInsights.WINDOW_DAYS`, and the funnel drawn under
+    it came from whatever window the client asked for. A fortnight's sentence
+    sat above a week's bars — "430 given" over a bar reading 205.
+
+    Asserting the two agree is the durable version of that fix: the client
+    constant may drift, but this fails the moment the figure the block prints
+    stops matching the figure it draws.
+    """
+    ctx = _hw_setup(client, cleanup)
+    h, th, cs = ctx["h"], ctx["th"], ctx["cs"]["id"]
+    for back in (1, 3, 9):
+        _set_hw(client, th, cs, f"Ex {back}", (date.today() - timedelta(days=back)).isoformat())
+
+    section = next(
+        s for s in client.get("/api/v1/insights/overview", headers=h).json()["sections"]
+        if s["key"] == "homework")
+    board = _board(client, h, window_days=insights_homework.WINDOW_DAYS)
+
+    given = next(m for m in section["metrics"] if m["key"] == "given")
+    checked = next(m for m in section["metrics"] if m["key"] == "checked")
+    assert given["value"] == str(board["overview"]["funnel"]["given"])
+    assert checked["value"] == str(board["overview"]["funnel"]["checked"])
+    # And the block's "+N more" needs a real total, or three-of-eleven reads as
+    # "three things are wrong".
+    assert section["notes_total"] >= len(section["notes"])
 
 
 # ── the invariant, stated once ───────────────────────────────────────────────
