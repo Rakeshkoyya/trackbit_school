@@ -25,6 +25,7 @@
 // due/overdue tasks are listed with Reassign and Extend.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle, BookOpen, CalendarClock, Check, RotateCcw, UserCheck,
 } from "lucide-react";
@@ -37,7 +38,33 @@ import { showApiError } from "@/lib/errors";
 import { insightsApi } from "@/lib/insights-api";
 import type { ImpactPeriod } from "@/lib/insights-types";
 
+import { cn } from "@/lib/utils";
+
 import { Empty } from "./shared";
+
+/**
+ * Every day of an absence, as ISO dates.
+ *
+ * A leave is a span; a marked absence is one day. Capped at two weeks so a long
+ * medical leave does not render sixty buttons — cover past that is planned on
+ * the leave screen, not from a sheet.
+ */
+function spanDays(start?: string, end?: string, fallback?: string): string[] {
+  if (!start || !end) return fallback ? [fallback] : [];
+  const out: string[] = [];
+  const d = new Date(`${start}T00:00:00`);
+  const last = new Date(`${end}T00:00:00`);
+  while (d <= last && out.length < 14) {
+    // Formatted from the LOCAL parts, never `toISOString()`. The Date is local
+    // midnight, and in any timezone east of UTC that serialises to the previous
+    // day — which silently opened cover on the wrong date for every school in
+    // India.
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+      + `-${String(d.getDate()).padStart(2, "0")}`);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
 
 function PeriodBlock({
   period, memberId, date, onDone, busy,
@@ -140,18 +167,33 @@ function PeriodBlock({
 }
 
 export function CoverSheet({
-  memberId, memberName, onDate, onClose,
+  memberId, memberName, onDate, leaveStart, leaveEnd, onClose,
 }: {
   memberId: string | null;
   memberName?: string;
   /** D-27 — a future day from an approved leave. Omitted = today. */
   onDate?: string;
+  /** V1-14: the whole span an approved leave covers. Cover is arranged for the
+   *  absence, not for one day of it — a teacher away Mon–Wed leaves three days
+   *  of periods, and a sheet pinned to "today" showed *"no lessons today"* for
+   *  a person with nine periods to hand out. */
+  leaveStart?: string;
+  leaveEnd?: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const days = useMemo(
+    () => spanDays(leaveStart, leaveEnd, onDate),
+    [leaveStart, leaveEnd, onDate]);
+  const [day, setDay] = useState<string | undefined>(onDate);
+
+  // The picked day resets whenever the sheet opens on a different person, so it
+  // can never show one teacher's Tuesday under another's name.
+  const active = day && days.includes(day) ? day : days[0] ?? onDate;
+
   const { data, isLoading } = useQuery({
-    queryKey: ["insights", "impact", memberId, onDate ?? "today"],
-    queryFn: () => insightsApi.staffImpact(memberId!, onDate),
+    queryKey: ["insights", "impact", memberId, active ?? "today"],
+    queryFn: () => insightsApi.staffImpact(memberId!, active),
     enabled: !!memberId,
   });
 
@@ -175,10 +217,28 @@ export function CoverSheet({
         <div className="h-40 animate-pulse rounded-lg bg-muted/60" />
       ) : (
         <div className="space-y-4">
-          <p className="text-xs font-medium text-muted-foreground">
-            {new Date(`${data.date}T00:00:00`).toLocaleDateString("en-IN", {
-              weekday: "long", day: "numeric", month: "long" })}
-          </p>
+          {/* Every day of the absence, so the periods on Tuesday are one tap
+              away from the periods on Monday. One day = just the date. */}
+          {days.length > 1 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {days.map((d) => (
+                <button key={d} type="button" onClick={() => setDay(d)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 font-mono text-[11px] tabular-nums",
+                    d === active
+                      ? "border-primary bg-primary/10 font-medium text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted")}>
+                  {new Date(`${d}T00:00:00`).toLocaleDateString(undefined, {
+                    weekday: "short", day: "numeric", month: "short" })}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="font-mono text-[11px] text-muted-foreground">
+              {new Date(`${data.date}T00:00:00`).toLocaleDateString(undefined, {
+                weekday: "long", day: "numeric", month: "long" })}
+            </p>
+          )}
           {data.reason ? (
             <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               {data.on_leave ? "On approved leave — " : ""}{data.reason}
@@ -198,7 +258,12 @@ export function CoverSheet({
                 ))}
               </div>
             ) : (
-              <Empty>No lessons on today’s timetable for them.</Empty>
+              <Empty>
+                Nothing on their timetable for{" "}
+                {new Date(`${data.date}T00:00:00`).toLocaleDateString(undefined, {
+                  weekday: "long", day: "numeric", month: "short" })}
+                {days.length > 1 ? " — try another day of the leave." : "."}
+              </Empty>
             )}
           </div>
 

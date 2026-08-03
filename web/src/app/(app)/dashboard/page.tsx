@@ -21,7 +21,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, CalendarClock, ChevronDown, ChevronUp, RefreshCw, Send, Sparkles, Wand2, Zap,
+  AlertTriangle, CalendarClock, ChevronDown, ChevronUp, RefreshCw, Send, Sparkles,
+  UserCheck, Wand2, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -29,7 +30,12 @@ import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { MeterBar, STATUS_COLOR } from "@/components/charts";
+import { StaffDayBlock } from "@/components/insights/daybook";
 import { ActionRail, CustomSection, MetricCell, SectionCard } from "@/components/insights/overview";
+import { PresencePanorama } from "@/components/insights/presence";
+import { SyllabusPulseBlock } from "@/components/insights/syllabus";
+import { CoverSheet } from "@/components/insights/cover-sheet";
+import { ReasonSheet, type ReasonTarget } from "@/components/insights/reason-sheet";
 import { SetupGate } from "@/components/school/setup-gate";
 import { WhatsOnCard } from "@/components/school/whats-on";
 import { YearSwitcher } from "@/components/school/year-switcher";
@@ -257,10 +263,40 @@ function DashboardInner() {
   const { yearId } = useYear();
   const [alertFor, setAlertFor] = useState<DashboardAlert | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [coverFor, setCoverFor] = useState<{ id: string; name: string } | null>(null);
+  const [reasonFor, setReasonFor] = useState<ReasonTarget | null>(null);
+  // V1-15: the syllabus block is narrowable to a term. Its own state and its own
+  // read, so pressing the switcher re-fetches one module rather than all seven.
+  const [syllabusTerm, setSyllabusTerm] = useState("");
 
   const { data: board, isLoading: boardLoading } = useQuery({
     queryKey: ["insights", "overview", yearId],
     queryFn: () => insightsApi.overview(yearId ?? undefined),
+  });
+  // V1-14: presence is its own read, and it leads the page. Three rings and
+  // three named blocks answer "who is in, who is missing, and what do I do
+  // about it" — which the single attendance card could state but never resolve.
+  const { data: presence, isLoading: presenceLoading } = useQuery({
+    queryKey: ["insights", "presence", yearId],
+    queryFn: () => insightsApi.presence(yearId ?? undefined),
+  });
+  // V1-16: the staff day. Its own read for the same reason presence has one —
+  // it moves with the bell and the timesheet all morning, while the module
+  // blocks below do not, so refetching one must not refetch seven.
+  const { data: daybook, isLoading: daybookLoading } = useQuery({
+    queryKey: ["insights", "daybook", "glimpse"],
+    queryFn: () => insightsApi.daybookGlimpse({ limit: 8 }),
+    refetchInterval: 300_000,
+  });
+  const { data: syllabus, isLoading: syllabusLoading } = useQuery({
+    queryKey: ["insights", "syllabus-pulse", yearId, syllabusTerm],
+    queryFn: () => insightsApi.syllabusPulse({
+      yearId: yearId ?? undefined, termId: syllabusTerm || undefined,
+    }),
+    // The term switch is a filter, not a navigation: keeping the previous board
+    // on screen while the next one loads stops the whole block collapsing to a
+    // skeleton and back every time somebody compares two terms.
+    placeholderData: (prev) => prev,
   });
   const { data } = useQuery({
     queryKey: ["dashboard", yearId],
@@ -292,7 +328,14 @@ function DashboardInner() {
   ];
 
   const sections = board?.sections ?? [];
-  const modules = sections.filter((s) => s.key !== "exams");
+  // Attendance and staff have graduated out of the one-card-per-module grid into
+  // the panorama above it — keeping their old cards here would state the same
+  // two facts twice, and worse the second time. V1-15 does the same for
+  // syllabus: the pulse block below says everything the card said, plus which
+  // class, which subject, and whether the figure is good for the date.
+  const modules = sections.filter(
+    (s) => s.key !== "exams" && s.key !== "attendance" && s.key !== "staff"
+      && s.key !== "syllabus");
   const exams = sections.find((s) => s.key === "exams");
 
   // An alert the rail already carries is noise: "2 staff away today" under
@@ -330,6 +373,41 @@ function DashboardInner() {
 
       <div className="mb-6"><Briefing /></div>
 
+      {/* V1-14 — who is in. Three rings (students · teachers · admin staff) and,
+          beside them, the people missing from each with the button that deals
+          with them. Named at three or fewer, counted above that; the server
+          decides which, so the tab below can never disagree with this. */}
+      <section className="mb-6">
+        <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+          <UserCheck className="h-4 w-4" /> Who is in
+        </h2>
+        {presenceLoading || !presence ? (
+          <div className="grid gap-4 lg:grid-cols-[minmax(240px,300px)_1fr]">
+            <div className="h-52 animate-pulse rounded-xl border border-border bg-card" />
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-40 animate-pulse rounded-xl border border-border bg-card" />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <PresencePanorama
+            board={presence}
+            onCover={(row) => setCoverFor({ id: row.id, name: row.name })}
+            onReason={(row) => setReasonFor({ student_id: row.id, full_name: row.name })}
+          />
+        )}
+      </section>
+
+      {/* V1-16 — what the staff's day actually looked like. It sits directly
+          under "who is in" because the two are one question asked twice: the
+          rings say who turned up, this says what their day was spent on. The
+          timesheet has existed since SF-1 and until now the admin could only
+          read it one person at a time. */}
+      <section className="mb-6">
+        <StaffDayBlock book={daybook} loading={daybookLoading} />
+      </section>
+
       {/* What's waiting — things to do, not things to know. */}
       <section className="mb-6">
         <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
@@ -357,6 +435,12 @@ function DashboardInner() {
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
+            {/* Full width, and first: it is the only block that carries a
+                filter, and the ring plus two breakdowns need the room. */}
+            <div className="lg:col-span-2">
+              <SyllabusPulseBlock pulse={syllabus} termId={syllabusTerm}
+                onTerm={setSyllabusTerm} loading={syllabusLoading && !syllabus} />
+            </div>
             {modules.map((s) => <SectionCard key={s.key} section={s} />)}
             {data?.fees ? <FeesSection fees={data.fees} /> : null}
             {exams ? <SectionCard section={exams} /> : null}
@@ -428,6 +512,11 @@ function DashboardInner() {
         )}
       </section>
 
+      {/* The same cover sheet the staff tab uses — an absence on the overview
+          is resolvable where it is read, not two screens away. */}
+      <CoverSheet memberId={coverFor?.id ?? null} memberName={coverFor?.name}
+        onDate={presence?.date} onClose={() => setCoverFor(null)} />
+      <ReasonSheet target={reasonFor} onClose={() => setReasonFor(null)} />
       <AlertToTaskSheet alert={alertFor} onClose={() => setAlertFor(null)} />
       <DigestSheet open={digestOpen} onClose={() => setDigestOpen(false)} yearId={yearId} />
     </div>

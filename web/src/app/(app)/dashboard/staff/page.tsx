@@ -22,6 +22,9 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import {
   ChartCard, ColumnChart, RowBars, SERIES_COLORS, StatTile, STATUS_COLOR, type ChartRow,
 } from "@/components/charts";
+import {
+  DayNav, DaybookGrid, DaybookLegend,
+} from "@/components/insights/daybook";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { NowBoard } from "@/components/insights/now-board";
 import {
@@ -31,27 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { insightsApi } from "@/lib/insights-api";
-import type { LoadStripCell, SlackProfile } from "@/lib/insights-types";
-import { cn } from "@/lib/utils";
-
-const STRIP: Record<LoadStripCell["kind"], string> = {
-  class: "bg-[color:var(--chart-green)]/70",
-  substituting: "bg-[color:var(--chart-amber)]/70",
-  work: "bg-muted-foreground/30",
-  free: "bg-muted",
-  absent: "bg-danger/25",
-};
-
-function DayStrip({ cells }: { cells: LoadStripCell[] }) {
-  return (
-    <span className="flex gap-0.5">
-      {cells.map((c) => (
-        <span key={c.period_no} title={`Period ${c.period_no}: ${c.label ?? c.kind}`}
-          className={cn("h-3.5 w-3.5 rounded-[2px]", STRIP[c.kind])} />
-      ))}
-    </span>
-  );
-}
+import type { SlackProfile } from "@/lib/insights-types";
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -104,6 +87,63 @@ function SlackProfileCard({ slack }: { slack: SlackProfile }) {
   );
 }
 
+/** Local Y-M-D. Never `toISOString()`: east of UTC that returns the PREVIOUS
+ *  day for a local-midnight Date, which is the defect V1-14 had to fix twice. */
+function localIso(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The day-book (V1-16) — the school's whole day, people down and periods across.
+ *
+ * It leads the tab because it is the only view here that answers the question an
+ * admin actually walks in with: *what is everybody doing today?* Everything
+ * below it is a consequence — who is missing, what that breaks, who is carrying
+ * more than their share.
+ *
+ * The date is navigable, and the board says what a past date WAS: a Sunday reads
+ * "not a school day" rather than showing an empty grid, which would read as a
+ * school where nobody worked.
+ */
+function DaybookSection() {
+  const today = localIso();
+  const [on, setOn] = useState(today);
+  const { data, isLoading } = useQuery({
+    queryKey: ["insights", "daybook", on],
+    queryFn: () => insightsApi.daybook(on),
+    // Navigating a day should not collapse the grid to a skeleton and back —
+    // the previous day stays on screen while the next one loads.
+    placeholderData: (prev) => prev,
+  });
+
+  return (
+    <Section
+      title="The day, period by period"
+      hint="From the timetable, the timesheet, the cover board and staff attendance — one page. Tap a name for that person’s record."
+      action={<DayNav date={on} onChange={setOn} today={today} />}
+    >
+      {isLoading && !data ? (
+        <div className="h-72 animate-pulse rounded-xl border border-border bg-card" />
+      ) : !data ? null : (
+        <div className="space-y-3">
+          <p className="text-sm">{data.headline}</p>
+          <DaybookGrid book={data} hrefFor={(r) => `/staff/member/${r.member_id}`} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <DaybookLegend book={data} />
+            {data.slots_total ? (
+              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                {data.slots_teaching} teaching · {data.slots_work} recorded ·{" "}
+                {data.slots_free} free
+                {data.slots_away ? ` · ${data.slots_away} away` : ""}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function StaffInner() {
   const [coverFor, setCoverFor] =
     useState<{ id: string; name: string; date?: string } | null>(null);
@@ -129,6 +169,8 @@ function StaffInner() {
   return (
     <div>
       <PageHeader title="Staff" subtitle="Who is in, who is free, and what an absence breaks." />
+
+      <DaybookSection />
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile
@@ -309,14 +351,17 @@ function StaffInner() {
           out of. Not a scoreboard, and framed so it cannot become one (S-67). */}
       {week.slack ? <SlackProfileCard slack={week.slack} /> : null}
 
-      <Section title="The day, teacher by teacher"
-        hint="Each cell is one period: teaching · covering · other work · free · away.">
+      {/* V1-16 dropped this table's "Today" column: the day-book at the top of
+          the tab is the same fact at full size, and two renderings of one day on
+          one screen only raise the question of which is authoritative. What
+          survives is the WEEK, which the day-book does not carry. */}
+      <Section title="The week, teacher by teacher"
+        hint="Teaching and recorded work across the whole week, against the staff mean.">
         <ScrollX>
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="py-2 pr-3 font-medium">Teacher</th>
-                <th className="py-2 pr-3 font-medium">Today</th>
                 <th className="py-2 pr-3 text-right font-medium">Teaching</th>
                 <th className="py-2 pr-3 text-right font-medium">Other work</th>
                 <th className="py-2 text-right font-medium">Load</th>
@@ -326,10 +371,11 @@ function StaffInner() {
               {week.teachers.map((t) => (
                 <tr key={t.member_id} className="border-b border-border/60">
                   <td className="py-2 pr-3">
-                    <span className="block truncate">{t.name}</span>
+                    <Link href={`/staff/member/${t.member_id}`} className="hover:underline">
+                      <span className="block truncate">{t.name}</span>
+                    </Link>
                     <span className="block text-xs text-muted-foreground">{t.role}</span>
                   </td>
-                  <td className="py-2 pr-3"><DayStrip cells={t.today} /></td>
                   <td className="py-2 pr-3 text-right tabular-nums">{t.teaching_periods}</td>
                   <td className="py-2 pr-3 text-right tabular-nums">{t.work_periods}</td>
                   <td className="py-2 text-right">

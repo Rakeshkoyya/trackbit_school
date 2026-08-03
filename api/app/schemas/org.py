@@ -128,6 +128,9 @@ class WorkCategoryOut(BaseModel):
     key: str
     label: str
     active: bool = True
+    #: V1-16 — the day-book cell colour. Always resolved server-side, so a client
+    #: never has to know the assignment rules (`core/work_types.py`).
+    color: str = ""
 
 
 class WorkCategoryIn(BaseModel):
@@ -136,6 +139,10 @@ class WorkCategoryIn(BaseModel):
     key: str | None = Field(default=None, max_length=40)
     label: str = Field(min_length=1, max_length=60)
     active: bool = True
+    #: One of `CATEGORY_COLORS` or "slate". Omit to keep whatever is set (or to
+    #: take the next free slot). Anything else is rejected — see the note on
+    #: `CATEGORY_COLORS` for why this is not a free-form hex.
+    color: str | None = Field(default=None, max_length=20)
 
 
 class OrgSettingsOut(BaseModel):

@@ -77,15 +77,24 @@ class StaffAttendanceService:
             .where(StaffAttendanceDay.org_id == org_id, StaffAttendanceDay.date == on))
 
     def _approved_leave(self, org_id: uuid.UUID, on: date
-                        ) -> dict[uuid.UUID, tuple[str, bool, str | None]]:
-        """member_id → (reason, is_half_day, portion) for approved leave on `on`."""
+                        ) -> dict[uuid.UUID, tuple[str, bool, str | None, date, date]]:
+        """member_id → (reason, is_half_day, portion, start, end) for approved
+        leave covering `on`.
+
+        The dates ride along because cover is arranged for the whole absence,
+        not for one day of it (V1-14): a teacher away Monday to Wednesday leaves
+        three days of periods, and a sheet that only ever knew about today made
+        the other two invisible.
+        """
         rows = self.db.execute(
             select(LeaveRequest.member_id, LeaveRequest.reason,
-                   LeaveRequest.is_half_day, LeaveRequest.portion)
+                   LeaveRequest.is_half_day, LeaveRequest.portion,
+                   LeaveRequest.start_date, LeaveRequest.end_date)
             .where(LeaveRequest.org_id == org_id, LeaveRequest.status == "approved",
                    LeaveRequest.start_date <= on, LeaveRequest.end_date >= on)
         ).all()
-        return {mid: (reason, bool(half), portion) for mid, reason, half, portion in rows}
+        return {mid: (reason, bool(half), portion, start, end)
+                for mid, reason, half, portion, start, end in rows}
 
     def roster(self, m: CurrentMember, on: date | None = None) -> StaffAttendanceOut:
         on = on or self._today(m)
@@ -125,6 +134,8 @@ class StaffAttendanceService:
                 present=status in ("present", "late"),
                 status=status, portion=portion,
                 on_leave=leave is not None, leave_reason=leave[0] if leave else None,
+                leave_start=leave[3] if leave else None,
+                leave_end=leave[4] if leave else None,
                 note=existing.note if existing else None,
             ))
 

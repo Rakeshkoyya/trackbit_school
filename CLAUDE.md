@@ -981,6 +981,187 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     `scripts/provision_app_role.py` exists; swapping prod onto the restricted role is the last v1
     release item.
 
+- **V1-14 (the morning roll — presence, visual, 2026-08-02)** — **no migration.** Founder call after
+  walking the shipped v1: the admin dashboard *stated* attendance and could not *resolve* it. One
+  card said `91%`; who the 9% were, whether anybody had rung them, which teacher was away and what
+  that broke were four more screens away. So presence becomes a board with three denominators, a
+  month you can read, and the actions on the row.
+  - **`services/insights/presence.py` is the one read.** It COMPOSES — absence runs from
+    `AttendanceInsights.streaks`, reasons from the new `absence_reasons`, staff from
+    `staff_presence`, "already done today" from `ActionService.done_today`. It does not compute a
+    second version of who was absent, which is the whole of `S-51`'s lesson. `GET /insights/presence`
+    (the rings + blocks) and `GET /insights/presence/month` (the register, the series, the tables).
+  - **Three rings, three denominators** (`students` · `teachers` · `admins`). Averaging them into one
+    "school attendance" would describe nobody. **A cohort nobody has marked is neutral and carries a
+    WORD** — never 0%, never red; the ring is drawn with a dashed track, visibly waiting to be filled
+    in. `in_building`/`roll` are summed **server-side and only over marked cohorts**, so the centre
+    figure can never sweep in a roster nobody has claimed to have seen.
+  - **Named under three, counted over it** (`INLINE_LIMIT`, decided server-side so the overview, the
+    tab and anything reading this board later obey one rule). At or under three absentees the block
+    names them with the buttons beside each; above it, one sentence and a link.
+  - **The board anchors on the last day the school CAPTURED, not the calendar today** — the V1-4 call-
+    board fix, extended. Two bugs it closed: on a Sunday every list came back empty and the board read
+    as *"nobody was absent"* rather than *"the school was shut"*; and anchoring on the last *working*
+    day still put a *"nothing marked"* ring beside a block naming two absent students. `date`/
+    `is_today` ride on the payload and the headline distinguishes **closed** from **not captured yet**.
+  - Also fixed, both pre-existing: **a non-working day that was actually taught on** (an exam Saturday)
+    vanished from the month grid — the same defect V1-4 fixed in the timesheet, so a day with marks on
+    it now appears; and **`ScrollX` did not actually contain its table** — `overflow-x: auto` alone
+    does not stop a child's `min-width` propagating its min-content contribution up the tree, so a
+    `min-w-[520px]` table scrolled *and* dragged the whole page sideways at 390px. `contain: layout
+    inline-size` (both keywords — inline-size alone does not take) fixes it for every tab.
+  - **The design is the school's own artifact, the register.** The roll is a **medallion** of three
+    concentric arcs — arcs keyed by **cohort identity** (teal/magenta/violet, from the app's validated
+    series palette, all pairs passing CVD and normal-vision separation on both surfaces; deliberately
+    NOT amber, which on this board means attention), because three arcs in one status hue are three
+    green rings and say nothing. Status lives in text on the ledger row beside it. The month is a
+    **class × day grid**, not a line: attendance sits at ninety-something percent every day, so a line
+    is a flat line, while a bad day is a vertical stripe and a struggling class a horizontal one. The
+    ramp is sequential on absence with an explicit zero; **`unmarked` is a dashed outline, its own
+    texture and never a step on the ramp**. **Geist Mono** — bundled and previously unused here —
+    carries every figure, denominator, date column and column head, so the board reads as a document
+    of record. `components/insights/{presence,presence-tables,month-grid,reason-sheet}.tsx`,
+    `RollMedallion` in the chart kit.
+  - The overview's attendance and staff cards are **removed**: the panorama says both, better, and
+    keeping them would state the same two facts twice. `ReasonSheet` was extracted from the tab so
+    the dashboard's "Add reason" is not a dead button. `ColumnChart` gained `xInterval` (a month of
+    dates at `interval={0}` was a smear). `test_presence_v1_14.py` (9). Full suite **501 passing**.
+  - **Revision 1 (same day, founder walkthrough).** Six fixes, three of them real defects:
+    · **the ring gap.** A round stroke cap extends the arc by `stroke/2` at EACH end, so 238 of 240
+      drew as a closed circle — identical to 240 of 240, which is the one thing a presence ring may
+      never do. `arcGeometry` subtracts the cap overhang, floors a tiny-but-real share at a visible
+      mark, and draws the closed circle only at a true 100%.
+    · **`spanDays` / `ReasonSheet` serialised dates through `toISOString()`**, which in any timezone
+      east of UTC returns the PREVIOUS day for a local-midnight Date. Cover opened on the wrong day
+      for every Indian school, and an absence reason recorded before 05:30 was filed against
+      yesterday. Both now format from local Y-M-D.
+    · **"Arrange cover" only ever knew about today** — a teacher away Mon–Wed showed *"no lessons
+      today"* while nine periods went uncovered. `_approved_leave` now carries the leave's span,
+      `StaffAbsentee` carries `date`/`leave_start`/`leave_end`, and the sheet gains a day switcher
+      across the absence.
+    Plus: **"Follow up" asks who** (a member picker with the class teacher as the one-tap default —
+    it used to fire straight at the server, which guessed the class teacher and told the admin
+    nothing about whose list it landed in); the attendance tab shows **three separate rings** side
+    by side and drops the three blocks beside them (the tables below are the fuller version of the
+    same lists, and saying it twice raises the question of which is authoritative); the **admin
+    section is hidden when no admin is away**; and the three tables are rebuilt in the **task
+    module's table language** — `Popover` extracted to `components/ui/popover.tsx` and shared with
+    `boards/board-table.tsx`, plus its card shell, colour-barred group headers, uppercase column
+    heads over CSS-grid rows and `Avatar`. The difference kept deliberately: these rows END in an
+    action rail rather than inline edits, because a task row is a thing you change and an absence
+    row is a thing you respond to. The register's class margin and month total are now **sticky** to
+    both edges, and the staff chart drops unmarked days rather than plotting empty slots.
+
+- **V1-15 (the syllabus panorama, 2026-08-02)** — **no migration.** Founder call: the module could
+  say *how much* and never *is that good for today*. A percentage is unreadable without the
+  calendar — 47% is excellent in July and alarming in February — so the board answered "how much?"
+  four times (four stat tiles, a coverage bar chart, then a table of the same nodes with a
+  percentage column) and left the verdict to a RAG chip three columns away.
+  - **The device: every figure is drawn on a track carrying the plan's own marker** — the share the
+    approved plan had scheduled by today. The verdict becomes a distance you can see: arc past the
+    tick is ahead, arc short of it is behind, and the gap is the size of the problem. `PaceRing` and
+    `PaceBar` in the chart kit, repeated at three scales (school ring · ledger row · matrix cell), so
+    one visual habit reads the module. It is `S-51`'s law applied to the drawing.
+  - **Both markers ship, and a marker is only ever drawn against the figure it shares a denominator
+    with**: `expected_pct` beside `coverage_pct` (of the plan), `expected_syllabus_pct` beside
+    `syllabus_pct` (of the whole portion). Divided server-side, like every other percentage here —
+    a component dividing `due / planned` for itself is how the browser got its two `.reduce()`
+    calls the first time.
+  - **`GET /insights/syllabus/pulse` + `SyllabusInsights.pulse()`** — the overview's block: the ring
+    and the class/subject breakdowns, **narrowable to a term**, worst-first. The same `_rows` batch
+    and the same `_node` roll-up the tab uses (no exam checkpoints, no trend), so the summary and
+    the board it links to cannot quote different numbers for the same morning. Its own route because
+    the term switcher re-reads on every press and recomposing seven modules to change one filter is
+    a cost the other six never asked for. The overview's syllabus `SectionCard` is **removed** — the
+    precedent V1-14 set for attendance and staff.
+  - **`SyllabusNode` now carries what it needs to be DRAWN** — `tone` and `pace_caption` decided
+    server-side, because three surfaces render these nodes and a tone each worked out for itself
+    would be three verdicts about one teacher on one morning. Plus `due/taught_due/behind_topics`,
+    `taught_full`/`taught_partial`/`untaught_topics` (a weighted figure cannot be taken back
+    apart — 12.5 is 12 finished plus one half-done or 11 plus three), and `classes`/`subjects`,
+    the load a teacher's pace has to be read against.
+  - ⚠️ **The marker exposed a disagreement that was always there.** The forecast answers *will it
+    finish* — plan against remaining calendar — so a subject that has taught nothing in April is
+    still green if the year has room; `behind_topics` answers *is it on schedule today*, and that
+    is what the arc draws. Painting a visible gap green would make the device lie, so overdue
+    topics take the tone to amber and the caption names which question each answer is to (*"all 1
+    on course to finish · 5 topics overdue"*). Neither figure is invented and neither overrides the
+    other. `behind_topics` on a node counts **rated rows only** (`S-42`) — every due topic of an
+    unlogged class-subject is untaught *on the record*, so counting it would report a school as
+    badly overdue on a record nobody wrote, and it orders the worst-first lists.
+  - **New analytics, all from capture that already existed.** `causes` — `S-41`'s four causes
+    **counted**, zeroes kept, in the order capture → calendar → sizing → teaching, because "6
+    subjects behind" and "4 of those 6 are behind because nobody wrote a lesson log" are different
+    findings and only the last cause is about teaching (the tally counts the row but contributes no
+    topic figure for `not_logged` — `S-42` again). `PortionMeter` — finished / part-taught / not
+    started, which a weighted percentage cannot say. **`FinishForecast`** — `baseline_finish` and
+    `projected_finish` have ridden on every row since P1 and were rendered **nowhere**, so the board
+    could say a subject was three weeks behind and never that at this pace it lands after the year
+    ends (`overrun_days`, `overruns_year`). **`TeacherMatrix`** — teacher × class, cells are
+    class-subjects and never an average of them; a row's width is the load, the fill of its cells is
+    the pace, and load and pace are one conversation a list can only show half of.
+  - Also fixed, pre-existing: **`arcGeometry` drew a coloured nub at 0%** — the visible-minimum floor
+    (there so a tiny-but-real share is still a mark) applied to a true zero, which is the mirror of
+    V1-14's closed-circle bug and just as much a lie; it hit every `ActivityRing` and the roll
+    medallion. `Fraction` and `ColumnHead` are now **one component each** in `insights/shared.tsx` —
+    both had been written twice.
+  - Web: `components/insights/syllabus.tsx` (the kit), `PaceRing`/`PaceBar` in `components/charts`,
+    the rewritten `/dashboard/syllabus`. `test_syllabus_v1_15.py` (12). Full suite **513 passing**,
+    ruff clean; web tsc + eslint + `next build` clean; no sideways scroll at 360px with the matrix
+    open; reviewed in the browser in light and dark.
+
+- **V1-16 (the day-book — staff time, seen, 2026-08-02)** — **no migration** (the category
+  colour rides on the existing `organizations.work_categories` JSONB). The timesheet has
+  existed since SF-1 and the admin could only ever read it **one person at a time**
+  (`/timesheet`) or **one period at a time** (`/staff/today`); nobody could see the school's
+  day. Now `/dashboard/staff` leads with a grid — people down, periods across, one cell each —
+  and `/dashboard` carries the same board trimmed, beside the one figure it implies: how much
+  of the day's staff period capacity was spoken for.
+  - **`services/insights/daybook.py` COMPOSES, it does not recompute.** `TimesheetService.org_day`
+    is the three-query batch that already unions the timetable, the timesheet, the cover board
+    and staff attendance (`S-72`/`Q-37`), so the day-book and the timesheet cannot disagree
+    about the same Tuesday (`S-51`). It adds only the tally and the sentence.
+    `GET /insights/daybook` (any date) + `/daybook/glimpse` — **the same payload**, trimmed,
+    with `rows_total` so the overview says "and 6 more" rather than showing a partial school
+    as if it were the whole one.
+  - **`services/staff_record.py`** + `GET /insights/staff/{id}/record` — one person's day,
+    month, categories and the SF-1/V1-4 attendance and leave figures, with a written summary
+    (`ai/staff_record.py`, env-gated, deterministic floor). 🔴 **It is a record, not an
+    appraisal, and that is enforced rather than intended** (`D-25`/`S-67`): no score, no rank,
+    no completeness percentage, no path to pay — and the model's system prompt forbids
+    appraisal language **in the negative**, because a model asked to "summarise a teacher's
+    month" reaches for *productive* / *needs improvement* unprompted. The suite greps the whole
+    written payload for it. `/staff/me/record` exists so the self-access the service already
+    allowed has a door (`/timesheet/month` links to it).
+  - **`core/work_types.py::CATEGORY_COLORS` — five colours, from a fixed list, never a hex an
+    admin types.** They were run through the dataviz six-checks against BOTH surfaces, in the
+    ring order they are assigned in, together with the teaching ink they sit beside. There are
+    five because a sixth fails a check: categories past the fifth render **slate** and are read
+    by name, which makes the colour budget the short-picker rule with teeth. `other` is pinned
+    to gold so it means the same thing in every school. **Do not add a sixth by eye.** The grid
+    paints ONLY recorded work: teaching is the day's default state and a wall of green says
+    nothing, so the hues land on the cells the timesheet ADDS.
+  - **New cell kind `closed`** — a period nobody was asked to work. It is not free, it leaves
+    every denominator, and `occupied_pct` is **None** rather than a share of nothing. Found by
+    looking at a Sunday: the board said "not a school day, nothing was expected of anybody" and
+    then drew 43 FREE cells and a ring reading 4%.
+  - **Two pre-existing defects fixed, both in `TimesheetService.month`:** it **zeroed every
+    non-working day**, so a warden's Sunday prep and a Saturday exam duty vanished from the
+    month's totals while sitting plainly in `timesheet_entries` (V1-4 fixed exactly this in
+    `week` and never carried it here — **this also lands on the teacher's own
+    `/timesheet/month`**); and the record **counted the future as worked**, so on the 2nd of
+    August it read *"Teaching — 38 of 38 periods (100%)"*. Together those two put **109%** on
+    the page, the ring's slices and the totals beside them having come from two different day
+    sets. Totals now stop at today and the slices use the same window.
+  - Also: `away` became a hatch (a dashed hairline at 84px in dark mode was indistinguishable
+    from an empty cell — the two facts the board exists to separate), "FREE"/"AWAY" typed into
+    forty cells was deleted in favour of texture + tooltip + the row's own summary, the shared
+    `Donut` legend **wraps instead of truncating**, and the record's month line needs 5 points
+    before it draws. `test_daybook_v1_16.py` (9). Web: `components/insights/daybook.tsx` (one
+    component at two densities), `components/staff/record-view.tsx`,
+    `/staff/member/[memberId]`. The Staff tab's old "Today" strip column is **deleted** — the
+    day-book above it is the same fact at full size.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
