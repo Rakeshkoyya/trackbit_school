@@ -457,3 +457,92 @@ ring · day nav, one component at two densities), `components/staff/record-view.
 subject as well as to an admin). The Staff tab's old "The day, teacher by teacher" strip
 column is **deleted**: the day-book above it is the same fact at full size, and two renderings
 of one day on one screen only raise the question of which is authoritative.
+
+---
+
+## V1-17 — homework: the funnel · 2026-08-03
+
+**No migration, no new capture.** Founder call after walking the shipped board: the information
+was there and the presentation could not carry it.
+
+### What was actually wrong
+
+The tab opened on four stat tiles and then drew the **same measure three times** — completion
+over the window, completion by class, completion by subject. Three charts, one number. Nothing
+on the screen said *how much homework there was* or *whether anyone had looked at it*, and the
+two bar charts each collapsed a whole axis, so *"6-B is low"* and *"Hindi is low"* could never
+resolve into *"6-B Hindi is where it happens"* — the only version an admin can act on.
+
+Underneath it, the three figures that matter were **in two different units**: `assigned` and
+`checked` counted **sets of homework** while `done` counted **students**. That is why they could
+not be drawn on one track and did not read as one story.
+
+### The device
+
+`HomeworkFunnel` — everything in *student-homeworks*, one row per student a homework was given
+to, so the stages **nest** and each gap is a length:
+
+```
+GIVEN    1,240  ########################################
+CHECKED    922  ##########################//////////////
+DID IT     806  #######################...//////////////
+```
+
+The two gaps are two findings and are never the same colour. `//////` is nobody having gone
+through it — HW-1's rule, the **teacher's** gap: the no-record hatch (V1-14's unmarked cell,
+V1-16's away cell), in the same right-hand zone on both bars so the eye reads how much of the
+page is simply unknown; never a colour, never a zero. `...` is the part that IS about the
+children, and the only part that may carry a judgement. Between `checked` and `graded` sit
+`carried` + `waived` (`D-34`/`S-98`), reported in words rather than absorbed into either side.
+
+**`completion` divides by `graded`, never by `given`.** A school that checked nothing can never
+read as a school that did nothing.
+
+### 🔴 The defect this turned up
+
+The daily series was a **second walk over the window with its own arithmetic**. It re-ran
+`HomeworkService._load` (ten queries to draw one board, against a docstring promising five),
+counted `status == "done"` literally so **`late` was dropped from the numerator**, kept
+`carried`/`waived` **in** the denominator, and never ran the absent→carried rewrite. So the
+chart read lower than the sentence printed directly above it, and a child off sick pulled the
+line down. Now accumulated inside `overview()`'s single pass through `core/homework_verdict` —
+`S-51` closed for the third time in this module.
+
+### Also fixed, all pre-existing
+
+- **`waived` was missing from `HomeworkScopeRow` entirely**, so waived work was invisible on the
+  by-class and by-subject tables while the student history reported it.
+- The improvement delta was **written over `streak`**, so a row claimed a miss streak it did not
+  have and the screen printed *"N fewer misses"* out of a field named for the opposite thing.
+  It has its own `improvement` now — any second consumer would have inherited the lie.
+- **`homework:unchecked` had been rendering twice** on the dashboard since DASH3: once on the
+  rail as something to go and do, once in the alert feed as something to file a task about.
+
+### ⚠️ Found by looking at the built screen
+
+The new overview block printed a **14-day sentence over a 7-day funnel** — *"430 given"* above
+stage bars reading 205 — because the server composes that sentence over
+`HomeworkInsights.WINDOW_DAYS` and the client asked for its own window. The same
+two-computations defect this packet exists to remove, reintroduced in the block that summarises
+it, and invisible to every gate: tsc, eslint, ruff and the suite were all green. One exported
+`OVERVIEW_WINDOW_DAYS`, the strip's label read off the payload, and a test asserting the
+section's metrics equal the board's funnel.
+
+The stage ramp also cleared every validator check and still read as one colour at the size it is
+actually drawn. It was widened and re-validated; the light end is pinned by the 2:1 surface
+floor, so the separation had to come from pushing the far end.
+
+### Deliberate
+
+- **Best/worst goes to classes and subjects only.** Ranking teachers by their children's
+  completion would make a person's standing a function of forty other people's evenings. The
+  checking ledger rates a teacher on **her own act** — did she go through what she set — and
+  that is the only thing on the screen that rates her at all (`D-39`/`S-92`).
+- **No `opened_at` "teacher started checking" capture**, which was asked about. A
+  `homework_checks` row already means *she went through it*, and its absence meaning
+  `not_checked` is the load-bearing rule of the module; a second, weaker definition would let a
+  teacher who merely opened the sheet count as having checked.
+
+`test_homework_v1_17.py` (12). Range filter Week · Month · Term · Year; the endpoint's 60-day
+clamp is gone (400) and the series buckets weekly past 21 days. Reviewed at 1440px and 360px in
+both themes against a month of seeded homework.
