@@ -1016,6 +1016,11 @@ class OverviewSection(BaseModel):
     tone: str = "neutral"
     metrics: list[OverviewMetric] = []
     notes: list[OverviewNote] = []
+    # How many named rows there were BEFORE the block kept its first few. A
+    # block that silently shows three of eleven reads as "three things are
+    # wrong"; carrying the total is what lets it say "+8 more" and stay honest
+    # about what it dropped.
+    notes_total: int = 0
 
 
 class QuickAction(BaseModel):

@@ -1940,19 +1940,106 @@ export interface HomeworkSheet {
   partial_count: number;
 }
 
+/** V1-17 — set → checked → done, and all three in ONE unit.
+ *
+ *  Every figure here counts *student-homeworks*: one per student a homework was
+ *  given to. That is what makes the stages nest (`given ⊇ checked ⊇ graded`) and
+ *  the two gaps readable as lengths. They are two different problems and never
+ *  the same colour:
+ *
+ *  - `given − checked` — nobody has gone through it. HW-1's rule: the teacher's
+ *    gap, never a child's. Drawn as the no-record texture, never a zero, never
+ *    red.
+ *  - `graded − done_weighted` — the work that was not done. The only one of the
+ *    two that may carry a judgement.
+ *
+ *  `carried` and `waived` sit between them: checked, but out of the denominator
+ *  entirely (D-34/S-98), so they are reported and never silently absorbed. */
+export interface HomeworkFunnel {
+  given: number;
+  checked: number;
+  graded: number;
+  done: number;
+  late: number;
+  partial: number;
+  not_done: number;
+  carried: number;
+  waived: number;
+  /** done + late + 0.5·partial — the numerator `completion` divides. Carried so
+   *  no screen re-derives it and gets `partial` wrong on the way. */
+  done_weighted: number;
+  assignments: number;
+  class_subjects: number;
+  /** checked / given. Named apart from `completion` because they are different
+   *  denominators, and reading one as the other is the whole defect. */
+  check_rate: number | null;
+  /** done_weighted / graded. Never over `given`. */
+  completion: number | null;
+}
+
+/** One class × one subject. The two bar charts each collapsed a whole axis, so
+ *  "6-B is low" and "Hindi is low" could not resolve into "6-B Hindi is where it
+ *  happens". `completion === null` means nothing here was checked — a state,
+ *  drawn as the no-record texture, never a 0%. */
+export interface HomeworkMatrixCell {
+  class_key: string;
+  subject_key: string;
+  assigned: number;
+  checked: number;
+  given: number;
+  graded: number;
+  completion: number | null;
+  /** Decided server-side: three surfaces render these cells, and a tone each
+   *  worked out for itself would be three verdicts about one teacher. */
+  tone: "neutral" | "green" | "amber" | "red";
+}
+
+/** One bucket of the series — a day, or a week once the range is long.
+ *
+ *  Accumulated inside the same server-side pass as the funnel, so it goes
+ *  through `core/homework_verdict` like every other figure. It used to be a
+ *  second walk with its own arithmetic: `late` dropped from the numerator,
+ *  `carried`/`waived` left in the denominator, the absent→carried rewrite never
+ *  run — so the chart read lower than the sentence above it. */
+export interface HomeworkDay {
+  date: string;
+  /** Server-formatted. A week bucket is not a date, and the client has no way
+   *  to know which it got. */
+  label: string;
+  days: number;
+  assigned: number;
+  checked: number;
+  given: number;
+  /** Of those, graded — the completion denominator. */
+  expected: number;
+  /** done + late: whole students who did the work. */
+  done: number;
+  partial: number;
+  not_done: number;
+  not_checked: number;
+  completion: number | null;
+}
+
 export interface HomeworkScopeRow {
   key: string;
   id: string | null;
   assigned: number;
   checked: number;
   students_expected: number;
+  /** The funnel's first two stages at this scope, so a row can be drawn on the
+   *  same track as the school figure. */
+  students_set: number;
+  students_checked: number;
   done: number;
   not_done: number;
   partial: number;
   /** V1-5: `late` is inside `completion` (it IS done — S-99) and reported
-   *  beside it; `carried` is outside the denominator entirely (D-34). */
+   *  beside it; `carried` and `waived` are outside the denominator entirely
+   *  (D-34/S-98). `waived` was missing from this row until V1-17, so waived
+   *  work was invisible here while the student history reported it. */
   late: number;
   carried: number;
+  waived: number;
   completion: number | null;
   check_rate: number | null;
 }
@@ -1976,8 +2063,15 @@ export interface StudentHomeworkRow {
   done: number;
   not_done: number;
   partial: number;
+  late: number;
+  carried: number;
   completion: number | null;
   streak: number;
+  /** Misses in the earlier half of the window minus the recent half. Its own
+   *  field since V1-17: the delta used to be written over `streak`, so a row
+   *  claimed a miss streak it did not have and the screen printed "N fewer
+   *  misses" out of a field named for the opposite thing. */
+  improvement: number;
   subjects: string[];
   teachers: string[];
 }
@@ -1986,12 +2080,22 @@ export interface HomeworkOverview {
   window_days: number;
   from_date: string;
   to_date: string;
+  /** These two count SETS of homework, not students — the teacher checking
+   *  table is denominated in sets ("she set 9 and went through 4"). Anything
+   *  comparing set → checked → done reads `funnel`. */
   assigned: number;
   checked: number;
   check_rate: number | null;
   overall_completion: number | null;
   late: number;
   carried: number;
+  funnel: HomeworkFunnel;
+  daily: HomeworkDay[];
+  matrix: HomeworkMatrixCell[];
+  /** The matrix axes, ordered by the server so every renderer draws the same
+   *  grid and an empty pair is a hole rather than a missing column. */
+  matrix_classes: string[];
+  matrix_subjects: string[];
   by_class: HomeworkScopeRow[];
   by_subject: HomeworkScopeRow[];
   teachers: TeacherCheckingRow[];

@@ -424,9 +424,15 @@ class OverviewService:
                         + (f"; {waiting} of {f.given} are still waiting to be "
                            "checked." if waiting else "."))
 
+        # Everything that would have earned a named row, so the block can say
+        # what it left out rather than implying three is all there is.
+        notes_total = (len(ov.needs_attention)
+                       + sum(1 for t in ov.teachers if t.unchecked_overdue))
+
         return OverviewSection(
             key="homework", label="Homework", href="/dashboard/homework",
             headline=headline, metrics=metrics, notes=notes,
+            notes_total=notes_total,
             tone=_worst(done_tone, check_tone, "red" if missing else "green"))
 
     # ── M5 tasks + duties ────────────────────────────────────────────────────

@@ -33,6 +33,7 @@ import { MeterBar, STATUS_COLOR } from "@/components/charts";
 import { StaffDayBlock } from "@/components/insights/daybook";
 import { ActionRail, CustomSection, MetricCell, SectionCard } from "@/components/insights/overview";
 import { PresencePanorama } from "@/components/insights/presence";
+import { HomeworkOverviewBlock } from "@/components/insights/homework";
 import { SyllabusPulseBlock } from "@/components/insights/syllabus";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { ReasonSheet, type ReasonTarget } from "@/components/insights/reason-sheet";
@@ -288,6 +289,14 @@ function DashboardInner() {
     queryFn: () => insightsApi.daybookGlimpse({ limit: 8 }),
     refetchInterval: 300_000,
   });
+  // A week, because the block's question is "what happened to this week's
+  // homework" — the tab is where a month or a year gets read. Its own request
+  // like the syllabus pulse, so the funnel and the seven-day shape arrive with
+  // the figures they are drawn from rather than being reconstructed here.
+  const { data: homework, isLoading: homeworkLoading } = useQuery({
+    queryKey: ["insights", "homework", 7],
+    queryFn: () => insightsApi.homework(7),
+  });
   const { data: syllabus, isLoading: syllabusLoading } = useQuery({
     queryKey: ["insights", "syllabus-pulse", yearId, syllabusTerm],
     queryFn: () => insightsApi.syllabusPulse({
@@ -333,10 +342,14 @@ function DashboardInner() {
   // two facts twice, and worse the second time. V1-15 does the same for
   // syllabus: the pulse block below says everything the card said, plus which
   // class, which subject, and whether the figure is good for the date.
+  // V1-17 does the same for homework: the generic three-metric card could not
+  // show that its three figures NEST, because two of them counted sets and one
+  // counted students. The block below draws the funnel instead.
   const modules = sections.filter(
     (s) => s.key !== "exams" && s.key !== "attendance" && s.key !== "staff"
-      && s.key !== "syllabus");
+      && s.key !== "syllabus" && s.key !== "homework");
   const exams = sections.find((s) => s.key === "exams");
+  const homeworkSection = sections.find((s) => s.key === "homework");
 
   // An alert the rail already carries is noise: "2 staff away today" under
   // Alerts, right below "Assign cover — 15 periods", is the same fact told
@@ -347,6 +360,11 @@ function DashboardInner() {
   const alerts = (data?.alerts ?? []).filter((a) => {
     if (a.id === "leave:pending") return !railKeys.has("leave");
     if (a.type === "staff") return !railKeys.has("cover") && !railKeys.has("staff_attendance");
+    // "N homework past due with no check recorded" is the rail's "Chase
+    // homework checks" verbatim, and it has been rendering twice on this page
+    // since DASH3 — once as something to go and do, once as something to file a
+    // task about. The rail wins: it links to the screen that clears it.
+    if (a.id === "homework:unchecked") return !railKeys.has("unchecked");
     return true;
   });
 
@@ -440,6 +458,13 @@ function DashboardInner() {
             <div className="lg:col-span-2">
               <SyllabusPulseBlock pulse={syllabus} termId={syllabusTerm}
                 onTerm={setSyllabusTerm} loading={syllabusLoading && !syllabus} />
+            </div>
+            {/* Also full width: three stacked stage bars beside a week of
+                columns need the room, and squeezing them into half a grid
+                column is how the funnel stops being readable as a funnel. */}
+            <div className="lg:col-span-2">
+              <HomeworkOverviewBlock section={homeworkSection} board={homework}
+                loading={homeworkLoading && !homework} />
             </div>
             {modules.map((s) => <SectionCard key={s.key} section={s} />)}
             {data?.fees ? <FeesSection fees={data.fees} /> : null}

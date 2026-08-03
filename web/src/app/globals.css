@@ -53,6 +53,25 @@
   --chart-amber: #bd8a1c;
   --chart-red: #93231c;
 
+  /*
+    V1-17 — the homework funnel's three stages: given → checked → did it.
+    An ORDINAL ramp, not categorical: the stages are ordered and nested, so one
+    hue deepening is the honest encoding and a categorical trio would invent
+    three identities where there is one quantity narrowing. Stepped off series
+    slot 1 and validated with scripts/validate_palette.js --ordinal against the
+    card surface (#ffffff here, #21211b in dark): lightness monotone, adjacent
+    ΔL >= 0.06, light end clears 2:1 on the surface, single hue. Do not adjust
+    by eye — re-run the validator.
+
+    The gaps between stages are deliberately NOT on this ramp: "nobody has
+    checked it" is a hole in the record, and it wears the same dashed/hatched
+    no-record texture as an unmarked register cell. Turning it into a step would
+    make the teacher's gap read as a low score for the children.
+  */
+  --hw-stage-1: #9fadf0;
+  --hw-stage-2: #7488ec;
+  --hw-stage-3: #3f57c4;
+
   --radius: 0.75rem;
 }
 
@@ -101,6 +120,16 @@
   --chart-green: #43a771;
   --chart-amber: #dba63a;
   --chart-red: #d05a41;
+
+  /*
+    The funnel ramp re-stepped for the dark card (#21211b), not flipped: on a
+    dark surface "more" has to be BRIGHTER, so the deepest stage is the lightest
+    step here. Validated the same way (--ordinal, surface #21211b): all checks
+    pass.
+  */
+  --hw-stage-1: #4a5aa8;
+  --hw-stage-2: #7488ec;
+  --hw-stage-3: #a9b7f5;
 }
 
 @theme inline {

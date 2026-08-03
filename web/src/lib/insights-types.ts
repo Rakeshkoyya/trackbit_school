@@ -12,7 +12,7 @@
 //   * unplanned / unallocated / unestimated are STATES, never a RAG colour.
 //     Painting them green is exactly the regression V2-P11 fixed.
 
-import type { AttendancePulse, HomeworkOverview } from "@/lib/school-types";
+import type { AttendancePulse, HomeworkDay, HomeworkOverview } from "@/lib/school-types";
 
 // ── M1 attendance ────────────────────────────────────────────────────────────
 
@@ -609,16 +609,11 @@ export interface StaffBoard {
 
 // ── M4 homework ──────────────────────────────────────────────────────────────
 
-export interface HomeworkDay {
-  date: string;
-  assigned: number;
-  checked: number;
-  /** Student-assignments under CHECKED homework — the completion denominator.
-   *  Unchecked homework is excluded, never counted as done or as missed. */
-  expected: number;
-  done: number;
-  completion: number | null;
-}
+/** `HomeworkDay` now lives beside the rest of the homework vocabulary in
+ *  `school-types`, because the server accumulates it in the same pass as the
+ *  funnel rather than in a second walk. Re-exported so existing importers of
+ *  `insights-types`'s `HomeworkDay` keep resolving. */
+export type { HomeworkDay };
 
 export interface HomeworkBoard {
   /** V1-12 §7: the sentence the tab opens with, composed server-side. */
@@ -884,6 +879,9 @@ export interface OverviewSection {
   tone: Tone;
   metrics: OverviewMetric[];
   notes: OverviewNote[];
+  /** How many named rows there were before the block kept its first few — so it
+   *  can say "+8 more" instead of implying three is all there is. */
+  notes_total: number;
 }
 
 /** Something waiting on the admin now, with the screen that clears it. Derived,
