@@ -167,7 +167,7 @@ def syllabus_pulse(year_id: uuid.UUID | None = None,
 
 # ── M4 homework ──────────────────────────────────────────────────────────────
 @router.get("/homework", response_model=HomeworkBoard)
-def homework_board(window_days: int = Query(14, ge=1, le=60),
+def homework_board(window_days: int = Query(14, ge=1, le=400),
                    m: CurrentMember = Depends(require_admin),
                    db: Session = Depends(get_db)):
     return HomeworkInsights(db).board(m, window_days)

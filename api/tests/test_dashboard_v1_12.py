@@ -49,8 +49,12 @@ def test_homework_headline_never_reads_an_unchecked_set_as_zero_percent(client, 
     assert aid, hw
     _check(client, th, aid, [])          # capture-by-exception: everyone did it
     after = client.get("/api/v1/insights/homework", headers=h).json()["headline"]
-    assert "100% done" in after
-    assert "of 1 set" in after, "§7: every figure carries its denominator"
+    assert "100%" in after
+    # §7: every figure carries its denominator. Asserted as a SHAPE rather than
+    # a phrase — the percentage must be immediately followed by what it is a
+    # percentage OF, so no rewording can quietly drop the denominator the way a
+    # literal-string assertion would have allowed.
+    assert re.search(r"100% of the \d+", after), after
 
 
 def test_tasks_headline_names_who_the_overdue_work_is_sitting_with(client, cleanup):

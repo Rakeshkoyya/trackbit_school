@@ -1,31 +1,40 @@
 """M4 — homework: is it being done, and is anyone checking (DASH3 §4.4).
 
-`HomeworkService` (HW-1) already answers most of this: completion by class and
-subject, the red list of repeat non-doers with the responsible teacher, teacher
-checking discipline, perfect-week and most-improved. This module adds the one
-thing a board needs that a roll-up cannot give — **the shape over time** — and
-otherwise deliberately delegates rather than writing a second set of numbers that
-could disagree with the homework screen.
+`HomeworkService` (HW-1) answers all of it: the funnel, the shape over time,
+completion by class and subject and class×subject, the red list of repeat
+non-doers with the responsible teacher, teacher checking discipline,
+perfect-week and most-improved. This module adds the **sentence** and nothing
+else — it deliberately owns no arithmetic, because a second set of numbers here
+is a second set of numbers that can disagree with the homework screen.
+
+That is not hypothetical: this file used to compute the daily series itself, by
+re-running `HomeworkService._load` and walking the window a second time with its
+own rules. `late` was dropped from the numerator, `carried` and `waived` stayed
+in the denominator, and the absent→carried rewrite never ran — so the chart read
+lower than the sentence directly above it, and a child off sick pulled the line
+down. The series is now accumulated inside `overview()`'s single pass, through
+`core/homework_verdict` like every other figure. It also halves the query count:
+the old path ran `_load` twice, ten statements to draw one board.
 
 The `not_checked` distinction rides all the way through (HW-1): a missing
 `homework_checks` row means the teacher never went through it, which is never
-"everyone did it" and is never rendered as a student's miss. On the daily series
-it is why `expected` (student-assignments under *checked* homework) is the
-completion denominator, and `assigned` is not.
+"everyone did it" and is never rendered as a student's miss. It is why the
+funnel's first gap is drawn as a texture rather than a colour, and why the
+completion figure's denominator is `graded` and not `given`.
 """
 
 import uuid
-from collections import defaultdict
-from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
-from app.schemas.insights import HomeworkBoard, HomeworkDay
+from app.schemas.insights import HomeworkBoard
 from app.services.homework import HomeworkService
-from app.services.school_clock import today_in
 
 WINDOW_DAYS = 14
+# A year, so the tab's Year range is a real range rather than a clamp. The load
+# is still five queries; only the number of rows joined in memory grows.
+MAX_WINDOW_DAYS = 400
 
 
 def _plural(n: int, word: str) -> str:
@@ -39,26 +48,33 @@ def _headline(ov) -> str:
     overview block and Lucy cannot describe the same week differently.
 
     The care here is HW-1's rule, restated: **`not_checked` is the teacher's gap
-    and never a child's miss**, so unchecked sets are named separately and are
-    never inside the completion figure. A percentage with nothing checked behind
-    it is not a low score, it is no score — and saying "0% done" there would
-    blame children for a teacher who has not opened the notebooks.
+    and never a child's miss**, so unchecked work is named in its own clause,
+    with its own denominator, and is never inside the completion figure. A
+    percentage with nothing checked behind it is not a low score, it is no
+    score — and saying "0% done" there would blame children for a teacher who
+    has not opened the notebooks.
     """
-    if not ov.assigned:
+    f = ov.funnel
+    if not f.given:
         return f"No homework has been set in the last {ov.window_days} days."
-    unchecked = max(0, ov.assigned - ov.checked)
-    if ov.overall_completion is None:
-        return (f"{ov.assigned} {_plural(ov.assigned, 'set')} of homework set, "
-                "none checked yet — completion cannot be read until somebody checks.")
 
-    pct = round(ov.overall_completion * 100)
-    parts = [f"{pct}% done across the {ov.checked} of {ov.assigned} "
-             f"{_plural(ov.assigned, 'set')} that were checked."]
-    # `S-99`: late is done, and reported beside completion rather than inside it.
-    if ov.late:
-        parts.append(f"{ov.late} done late.")
+    unchecked = max(0, f.given - f.checked)
+    if f.completion is None:
+        return (f"{f.given} {_plural(f.given, 'homework')} given out across "
+                f"{f.assignments} {_plural(f.assignments, 'set')} — none checked "
+                "yet, so completion is unknown rather than zero.")
+
+    parts = [f"{round(f.completion * 100)}% of the {f.graded} "
+             f"{_plural(f.graded, 'homework')} that carry a verdict were done"
+             + (f", {f.late} of them late." if f.late else ".")]
     if unchecked:
-        parts.append(f"{unchecked} still unchecked.")
+        # Its own clause with its own denominator: this is about the teachers,
+        # and folding it into the sentence above would read as a figure about
+        # the children.
+        parts.append(f"{unchecked} of the {f.given} given are still waiting to "
+                     "be checked.")
+    else:
+        parts.append(f"Everything given has been gone through ({f.given} in all).")
     # A named row beats a count (DASH3) — say who, not how many.
     if ov.delayed_teachers:
         t = ov.delayed_teachers[0]
@@ -73,37 +89,13 @@ class HomeworkInsights:
         self.db = db
 
     def board(self, m: CurrentMember, window_days: int = WINDOW_DAYS) -> HomeworkBoard:
-        window = max(1, min(window_days, 60))
-        service = HomeworkService(self.db)
-        overview = service.overview(m, window)
-        until = today_in(m.org.timezone)
-        since = until - timedelta(days=window - 1)
-
-        # One more pass over the same loaded window — five queries, shared with
-        # the overview's own load, and no per-day query.
-        assignments, checks, results, roster, _teachers = service._load(m, since, until)
-        per_day: dict[date, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
-        for a in assignments:
-            hw = a["hw"]
-            checked = hw.id in checks
-            targets = service._targets(a, roster)
-            acc = per_day[hw.date]
-            acc[0] += 1
-            if not checked:
-                continue
-            acc[1] += 1
-            acc[2] += len(targets)
-            acc[3] += sum(
-                1 for sid, _n, _r in targets
-                if service._status(a, sid, checks, results) == "done")
-
-        daily = [
-            HomeworkDay(
-                date=d, assigned=v[0], checked=v[1], expected=v[2], done=v[3],
-                completion=round(v[3] / v[2], 3) if v[2] else None)
-            for d, v in sorted(per_day.items())
-        ]
-        return HomeworkBoard(headline=_headline(overview), overview=overview, daily=daily)
+        window = max(1, min(window_days, MAX_WINDOW_DAYS))
+        overview = HomeworkService(self.db).overview(m, window)
+        # `daily` is mirrored onto the board because that is where every client
+        # already reads it from; it is the same list the overview carries,
+        # never a recomputation.
+        return HomeworkBoard(headline=_headline(overview), overview=overview,
+                             daily=overview.daily)
 
     def student(self, m: CurrentMember, student_id: uuid.UUID,
                 window_days: int = WINDOW_DAYS):
