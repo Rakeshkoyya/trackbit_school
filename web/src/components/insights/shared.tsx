@@ -41,6 +41,66 @@ export const pct = (v: number | null | undefined, digits = 0) =>
 export const dayLabel = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
+export const TONE_DOT: Record<Tone, string> = {
+  neutral: "bg-muted-foreground/40",
+  green: "bg-success",
+  amber: "bg-warning",
+  red: "bg-danger",
+};
+
+/**
+ * The one place a figure and its denominator are set: `3 ⁄ 22` in tabular mono,
+ * the divisor recessive, the slash a real fraction slash because that is what
+ * the figure is.
+ *
+ * Every board on this dashboard renders these, and the rule they enforce is the
+ * house rule — a figure never appears without what it is a figure OF (`S-118`,
+ * `S-124`, `S-51`). One component, so the rule cannot be half-kept.
+ */
+export function Fraction({
+  n, of, className = "text-[13px]",
+}: {
+  n: number | string;
+  of: number | string;
+  className?: string;
+}) {
+  return (
+    <span className={cn("font-mono tabular-nums", className)}>
+      {n}<span className="px-0.5 text-muted-foreground/60">⁄</span>
+      <span className="text-muted-foreground">{of}</span>
+    </span>
+  );
+}
+
+/**
+ * The register's column head (V1-14): mono, uppercase, widely tracked.
+ *
+ * Lives here rather than in one board because it is the thing that makes the
+ * dashboard read as ONE document of record — a heading style that exists twice
+ * is a heading style that will diverge twice.
+ */
+export function ColumnHead({
+  children, tone = "neutral", count,
+}: {
+  children: ReactNode;
+  tone?: Tone;
+  count?: number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", TONE_DOT[tone])} />
+      <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        {children}
+      </span>
+      {count != null && count > 0 ? (
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          {String(count).padStart(2, "0")}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** A titled block. One heading style across all seven tabs. */
 export function Section({
   title, hint, action, children, className = "",
@@ -171,7 +231,22 @@ export function StateChip({ children }: { children: ReactNode }) {
   );
 }
 
-/** Horizontal scroll container for wide tables — the page body never scrolls. */
+/**
+ * Horizontal scroll container for wide tables — the page body never scrolls.
+ *
+ * `contain: layout inline-size` is load-bearing, not a flourish. `overflow-x: auto`
+ * alone does NOT stop a child's `min-width` from propagating its min-content
+ * contribution up the tree: a table with `min-w-[520px]` inside a plain scroller
+ * still widened the whole document at 390px, so the page scrolled sideways next
+ * to a table that was already scrolling on its own. Containing the inline axis
+ * makes the scroller size itself from its parent and its content scroll inside,
+ * which is what it always claimed to do. Inline-size containment needs the
+ * layout containment beside it — on its own it does not take.
+ */
 export function ScrollX({ children }: { children: ReactNode }) {
-  return <div className="-mx-1 overflow-x-auto px-1">{children}</div>;
+  return (
+    <div className="-mx-1 overflow-x-auto px-1" style={{ contain: "layout inline-size" }}>
+      {children}
+    </div>
+  );
 }

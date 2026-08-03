@@ -342,6 +342,10 @@ export interface WorkCategory {
   key: string;
   label: string;
   active: boolean;
+  /** V1-16 — the day-book cell colour, resolved server-side. One of the five
+   *  validated hues in `core/work_types.CATEGORY_COLORS`, or `"slate"` for a
+   *  category past the fifth (read by its label, not its colour). */
+  color: string;
 }
 
 export type AttendanceMode = "every_period" | "first_period" | "twice_daily";

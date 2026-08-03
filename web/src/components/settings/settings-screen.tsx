@@ -180,6 +180,53 @@ function CaptureSection({ s }: { s: OrgSettings }) {
   );
 }
 
+/**
+ * V1-16 — the day-book swatch.
+ *
+ * A fixed list, not a colour wheel, and that is the whole point. These five were
+ * run through the dataviz six-checks against both surfaces, in the order they
+ * sit beside each other and beside the teaching ink: lightness band, chroma
+ * floor, colour-blind separation, the normal-vision floor, contrast. A hex an
+ * admin typed passes none of them, and nothing downstream could ever tell.
+ */
+const SWATCHES: { value: string; label: string }[] = [
+  { value: "#3f6fd8", label: "Blue" },
+  { value: "#a94f8f", label: "Orchid" },
+  { value: "#c99a1e", label: "Gold" },
+  { value: "#7b5ea8", label: "Violet" },
+  { value: "#d1603a", label: "Brick" },
+  { value: "slate", label: "Slate — no colour, read by name" },
+];
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {SWATCHES.map((sw) => {
+        const active = value === sw.value;
+        const fill = sw.value === "slate" ? "var(--color-muted-foreground)" : sw.value;
+        return (
+          <button
+            key={sw.value}
+            type="button"
+            title={sw.label}
+            aria-label={sw.label}
+            aria-pressed={active}
+            onClick={() => onChange(sw.value)}
+            className={cn(
+              "h-5 w-5 rounded-[3px] transition-transform hover:scale-110",
+              active && "ring-2 ring-foreground ring-offset-1 ring-offset-card",
+            )}
+            style={{
+              background: `color-mix(in oklab, ${fill} 22%, transparent)`,
+              boxShadow: `inset 0 -3px 0 0 ${fill}`,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 /** D-19/S-69: work categories — stable keys, mutable labels, retire never
  *  delete. Unticking hides a category from the picker; its historical rows keep
  *  rendering. `other` cannot be retired. */
@@ -195,7 +242,7 @@ function WorkCategoriesSection({ s }: { s: OrgSettings }) {
       // the STABLE key from the label, once (D-19 rule 1).
       work_categories: cats.map((c) => ({
         key: c.key.startsWith("__new") ? undefined : c.key,
-        label: c.label, active: c.active,
+        label: c.label, active: c.active, color: c.color,
       })),
     }),
     onSuccess: (res) => {
@@ -216,7 +263,8 @@ function WorkCategoriesSection({ s }: { s: OrgSettings }) {
       <p className="mb-4 text-xs text-muted-foreground">
         What a teacher can pick for a non-teaching period. Rename freely — old entries
         follow the new name. Unticked categories leave the picker but keep showing on
-        past days; nothing is ever deleted.
+        past days; nothing is ever deleted. The colour is what the category looks
+        like on the staff day-book.
       </p>
       <div className="space-y-1.5">
         {cats.map((c) => (
@@ -227,16 +275,24 @@ function WorkCategoriesSection({ s }: { s: OrgSettings }) {
               className="h-4 w-4 accent-[var(--primary)]" />
             <Input value={c.label} onChange={(e) => patch(c.key, { label: e.target.value })}
               className={cn("h-8", !c.active && "opacity-50")} />
+            <ColorPicker value={c.color} onChange={(color) => patch(c.key, { color })} />
           </div>
         ))}
       </div>
+      <p className="mt-2.5 text-[11px] leading-snug text-muted-foreground">
+        Five colours, and that is deliberate: a sixth cannot be told apart from these
+        by a colour-blind reader, so categories past the fifth show as slate and are
+        read by their name. If you want them all coloured, retire the ones you do not
+        use.
+      </p>
       <div className="mt-3 flex items-center gap-2">
         <Input value={newLabel} onChange={(e) => setNewLabel(e.target.value)}
           placeholder="Add your own, e.g. Assembly duty" className="h-8" />
         <Button variant="outline" size="sm" disabled={!newLabel.trim()}
           onClick={() => {
             setDraft([...cats.filter((c) => c.key !== "other"),
-              { key: `__new_${Date.now()}`, label: newLabel.trim(), active: true },
+              { key: `__new_${Date.now()}`, label: newLabel.trim(), active: true,
+                color: "slate" },
               ...cats.filter((c) => c.key === "other")]);
             setNewLabel("");
           }}>

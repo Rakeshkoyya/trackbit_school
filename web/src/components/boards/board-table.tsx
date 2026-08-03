@@ -3,9 +3,9 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CornerUpLeft, MoreHorizontal, Plus, Repeat2, Trash2, UserPlus, X } from "lucide-react";
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 import { Avatar } from "@/components/ui/avatar";
+import { Popover } from "@/components/ui/popover";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { dayLabel, GROUP_PALETTE, groupColor, PRIORITY, priorityMeta, timeLabel } from "@/lib/format";
@@ -35,42 +35,6 @@ function colsFor(columns: ColumnKey[]): string {
 
 function gridStyle(cols: string): React.CSSProperties {
   return { display: "grid", gridTemplateColumns: cols, alignItems: "center" };
-}
-
-/** Portal popover positioned against an anchor — never clipped by overflow. */
-function Popover({
-  open,
-  onClose,
-  rect,
-  width = 240,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  rect: DOMRect | null;
-  width?: number;
-  children: React.ReactNode;
-}) {
-  if (!open || typeof document === "undefined" || !rect) return null;
-  const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-  const spaceBelow = window.innerHeight - rect.bottom;
-  const pos: React.CSSProperties =
-    spaceBelow < 300
-      ? { bottom: window.innerHeight - rect.top + 4, left, width }
-      : { top: rect.bottom + 4, left, width };
-
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[55]" onClick={onClose} />
-      <div
-        style={{ position: "fixed", ...pos }}
-        className="z-[56] rounded-lg border border-border bg-card p-2 shadow-lg"
-      >
-        {children}
-      </div>
-    </>,
-    document.body,
-  );
 }
 
 export const TaskTable = forwardRef<TaskTableHandle, {

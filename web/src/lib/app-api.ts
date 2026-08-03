@@ -137,7 +137,9 @@ export const appApi = {
     phone?: string | null;
     attendance_mode?: string; min_attendance_pct?: number; homework_gap_days?: number;
     training_data_opt_in?: boolean;
-    work_categories?: { key?: string | null; label: string; active: boolean }[];
+    work_categories?: {
+      key?: string | null; label: string; active: boolean; color?: string;
+    }[];
   }) => api.patch<OrgSettings>("/org/settings", body),
   // Members
   members: () => api.get<{ members: Member[] }>("/org/members"),

@@ -269,6 +269,7 @@ class AttendanceInsights:
                 StaffAbsentee(
                     member_id=r.member_id, name=r.name, role=r.role, on_leave=r.on_leave,
                     reason=r.leave_reason or r.note,
+                    date=on, leave_start=r.leave_start, leave_end=r.leave_end,
                     status=r.status, portion=r.portion,
                     periods_due=due.get(r.member_id, 0),
                     periods_covered=covered.get(r.member_id, 0))
@@ -394,12 +395,19 @@ class AttendanceInsights:
                 select(Membership.id, User.name).join(User, User.id == Membership.user_id)
                 .where(Membership.id.in_(teacher_ids))).all()
         } if teacher_ids else {}
-        guardians = {
-            sid: int(n) for sid, n in self.db.execute(
-                select(Guardian.student_id, func.count(Guardian.id))
-                .where(Guardian.student_id.in_(ids))
-                .group_by(Guardian.student_id)).all()
-        }
+        # One query for the count AND the person to ring: primary first, so the
+        # name on the row is the number the office would actually dial (`Q-70`
+        # gives the fee reminder the same rule).
+        guardians: dict[uuid.UUID, int] = defaultdict(int)
+        primary: dict[uuid.UUID, tuple[str, str | None]] = {}
+        for sid, gname, phone, is_primary in self.db.execute(
+            select(Guardian.student_id, Guardian.name, Guardian.phone, Guardian.is_primary)
+            .where(Guardian.student_id.in_(ids))
+            .order_by(Guardian.is_primary.desc(), Guardian.created_at)
+        ).all():
+            guardians[sid] += 1
+            if sid not in primary or is_primary:
+                primary.setdefault(sid, (gname, phone))
         done = ActionService(self.db).done_today(m.org_id, "student", today, m.org.timezone)
 
         for r in rows:
@@ -412,6 +420,9 @@ class AttendanceInsights:
             r.class_teacher_member_id = teacher_member_id
             r.class_teacher_name = teachers.get(teacher_member_id)
             r.guardian_count = guardians.get(r.student_id, 0)
+            gname, gphone = primary.get(r.student_id, (None, None))
+            r.guardian_name = gname
+            r.guardian_phone = gphone
             r.reminded_today = ("guardian_reminded", r.student_id) in done
             r.followup_assigned_today = ("followup_assigned", r.student_id) in done
         rows.sort(key=lambda r: (-r.streak, r.class_label or "", r.full_name))
@@ -429,12 +440,51 @@ class AttendanceInsights:
         return days[-1] if days else today
 
     # ── V1-3: the tab's questions (S-08) ─────────────────────────────────────
+    def absence_reasons(self, m: CurrentMember, sids: list[uuid.UUID],
+                        today: date) -> dict[uuid.UUID, tuple[str | None, str | None]]:
+        """student_id → (reason_code, note) for everyone whose absence somebody
+        has explained (`D-86`).
+
+        Extracted so the call board and the presence panorama read ONE
+        definition of "explained": a row that is amber on the tab and red on the
+        overview is the exact class of defect V1-0 exists to remove. Two queries
+        however long the list — the recorded reason on the absence itself, then
+        the covering informed-absence note (`S-24`), which wins because it is
+        the more recent statement about the same days.
+        """
+        from app.models import StudentAbsenceNote  # noqa: PLC0415
+
+        reasons: dict[uuid.UUID, tuple[str | None, str | None]] = {}
+        if not sids:
+            return reasons
+        for sid, code, note in self.db.execute(
+            select(AttendanceException.student_id,
+                   AttendanceException.reason_code, AttendanceException.reason_note)
+            .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+            .where(AttendanceException.org_id == m.org_id,
+                   AttendanceException.student_id.in_(sids),
+                   AttendanceException.status == "absent",
+                   AttendanceException.reason_at.is_not(None),
+                   ClassPeriod.date >= today - timedelta(days=STREAK_WINDOW_DAYS))
+            .order_by(ClassPeriod.date)
+        ).all():
+            reasons[sid] = (code, note)  # later dates overwrite → latest wins
+        for sid, code, note in self.db.execute(
+            select(StudentAbsenceNote.student_id, StudentAbsenceNote.reason_code,
+                   StudentAbsenceNote.note)
+            .where(StudentAbsenceNote.org_id == m.org_id,
+                   StudentAbsenceNote.student_id.in_(sids),
+                   StudentAbsenceNote.from_date <= today,
+                   StudentAbsenceNote.to_date >= today - timedelta(days=7))
+            .order_by(StudentAbsenceNote.created_at)
+        ).all():
+            reasons[sid] = (code, note)
+        return reasons
+
     def call_board(self, m: CurrentMember, year_id: uuid.UUID | None = None) -> CallBoard:
         """Needs-a-call · drifting · chronic late · left-after-lunch — each a
         named list with its denominator, statuses computed HERE (S-22), painted
         by the UI."""
-        from app.models import StudentAbsenceNote  # noqa: PLC0415
-
         today = self._today(m)
         year = self._year(m, year_id)
         board = CallBoard(date=today, min_attendance_pct=m.org.min_attendance_pct,
@@ -445,32 +495,7 @@ class AttendanceInsights:
         # ── needs a call: every current absence run, D-86-coloured ───────────
         streaks = self.streaks(m, min_days=1, year_id=year.id)
         sids = [r.student_id for r in streaks.rows]
-        # Latest recorded reason per student on a recent absent day…
-        reasons: dict[uuid.UUID, tuple[str | None, str | None]] = {}
-        if sids:
-            for sid, code, note in self.db.execute(
-                select(AttendanceException.student_id,
-                       AttendanceException.reason_code, AttendanceException.reason_note)
-                .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
-                .where(AttendanceException.org_id == m.org_id,
-                       AttendanceException.student_id.in_(sids),
-                       AttendanceException.status == "absent",
-                       AttendanceException.reason_at.is_not(None),
-                       ClassPeriod.date >= today - timedelta(days=STREAK_WINDOW_DAYS))
-                .order_by(ClassPeriod.date)
-            ).all():
-                reasons[sid] = (code, note)  # later dates overwrite → latest wins
-            # …or a covering informed-absence note (S-24).
-            for sid, code, note in self.db.execute(
-                select(StudentAbsenceNote.student_id, StudentAbsenceNote.reason_code,
-                       StudentAbsenceNote.note)
-                .where(StudentAbsenceNote.org_id == m.org_id,
-                       StudentAbsenceNote.student_id.in_(sids),
-                       StudentAbsenceNote.from_date <= today,
-                       StudentAbsenceNote.to_date >= today - timedelta(days=7))
-                .order_by(StudentAbsenceNote.created_at)
-            ).all():
-                reasons[sid] = (code, note)
+        reasons = self.absence_reasons(m, sids, today)
         calls = []
         for r in streaks.rows:
             code, note = reasons.get(r.student_id, (None, None))

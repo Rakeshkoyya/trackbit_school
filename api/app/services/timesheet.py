@@ -372,11 +372,22 @@ class TimesheetService:
                 state, label = "future", None
             else:
                 state, label = "working", None
+            # V1-16: a non-working day that was ACTUALLY worked keeps its counts.
+            #
+            # V1-4 fixed exactly this in `week` — a period genuinely worked on a
+            # sports Sunday or an exam Saturday could not be seen OR recorded —
+            # and never carried the fix here. So a warden's Sunday evening prep
+            # and a Saturday exam duty were both zeroed, and the month's totals
+            # disagreed with the entries that were plainly in the table. The
+            # STATE is unchanged, so the grid still draws the holiday; only the
+            # counts stop lying about it.
+            worked = built.teaching_count + built.work_count + built.cover_count
+            counts = state in ("working", "future") or worked > 0
             days.append(TimesheetMonthDay(
                 date=d, weekday=d.weekday(), state=state, label=label,
-                teaching=built.teaching_count if state in ("working", "future") else 0,
-                work=built.work_count if state in ("working", "future") else 0,
-                cover=built.cover_count if state in ("working", "future") else 0,
+                teaching=built.teaching_count if counts else 0,
+                work=built.work_count if counts else 0,
+                cover=built.cover_count if counts else 0,
                 free=built.free_count if state == "working" else 0))
             d += timedelta(days=1)
 

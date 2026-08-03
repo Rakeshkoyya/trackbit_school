@@ -57,6 +57,11 @@ export interface StaffAbsentee {
   role: string;
   on_leave: boolean;
   reason: string | null;
+  /** The day this row describes, and — for approved leave — the whole span it
+   *  covers. Cover is arranged for the absence, not for one day of it. */
+  date: string | null;
+  leave_start: string | null;
+  leave_end: string | null;
   periods_due: number;
   periods_covered: number;
 }
@@ -91,6 +96,10 @@ export interface AbsenceStreak {
   last_present: string | null;
   days_partial: number;
   guardian_count: number;
+  /** V1-14: the primary guardian, named and dialable — the row's whole purpose
+   *  is the call, and "2 guardians on file" is not a phone number. */
+  guardian_name: string | null;
+  guardian_phone: string | null;
   class_teacher_member_id: string | null;
   class_teacher_name: string | null;
   reminded_today: boolean;
@@ -265,8 +274,24 @@ export interface SyllabusRow {
   due_topics: number;
   taught_due: number;
   behind_topics: number;
+
+  // ── V1-15 ──────────────────────────────────────────────────────────────────
+  /** The two halves of the weighted figure. 1.5 topics is 1 finished + 1
+   *  half-done, or 3 half-done — never reconstruct it, render these. */
+  taught_full: number;
+  taught_partial: number;
+  /** Where the plan said this would be by today. `expected_pct` shares
+   *  `coverage_pct`'s denominator, `expected_syllabus_pct` shares
+   *  `syllabus_pct`'s — a marker is only ever drawn against the figure it was
+   *  divided by. Both server-divided (S-51). */
+  expected_pct: number | null;
+  expected_syllabus_pct: number | null;
+  /** Days the projection runs past its own baseline; `overruns_year` = past the
+   *  end of the academic year, which is the only lateness a parent notices. */
+  overrun_days: number | null;
+  overruns_year: boolean;
   /** Why it is behind (S-41). Absent on a row that is not behind. */
-  cause: "not_logged" | "periods_lost" | "never_sized" | "slower" | null;
+  cause: SyllabusCause | null;
   cause_detail: string | null;
   periods_not_held: number;
   next_topic_title: string | null;
@@ -329,6 +354,64 @@ export interface SyllabusNode {
   score: number | null;
   /** The sentence the ordering rests on — show THIS, never the raw score (S-45). */
   rank_reason: string | null;
+
+  // ── V1-15 ──────────────────────────────────────────────────────────────────
+  due_topics: number;
+  taught_due: number;
+  behind_topics: number;
+  taught_full: number;
+  taught_partial: number;
+  /** total − full − partial, carried so no component subtracts a weighted
+   *  figure from a count of topics by accident. */
+  untaught_topics: number;
+  periods_not_held: number;
+  /** The plan marker on each denominator — draw the one matching your arc. */
+  expected_pct: number | null;
+  expected_syllabus_pct: number | null;
+  /** Server-decided, because three surfaces draw these nodes and a tone each
+   *  worked out for itself would be three verdicts about one teacher. */
+  tone: Tone;
+  /** The tone in words. A colour alone never carries a verdict here. */
+  pace_caption: string | null;
+  /** The teacher pivot's denominators — "62% covered" needs "across 3 classes". */
+  classes: number;
+  subjects: number;
+}
+
+export type SyllabusCause = "not_logged" | "periods_lost" | "never_sized" | "slower";
+
+/** S-41 counted. Four rows always, zeroes included — the proportions between
+ *  them are the finding, and a tally that drops empty rows can't show one. */
+export interface CauseTally {
+  key: SyllabusCause;
+  label: string;
+  detail: string;
+  count: number;
+  behind_topics: number;
+}
+
+export interface TermOption {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  /** Decided against the school's clock, not the browser's. */
+  is_current: boolean;
+}
+
+/** The overview's syllabus block — the same roll-up the tab renders, minus what
+ *  only the tab has room for. Its own read so the term switch re-fetches one
+ *  module rather than all seven. */
+export interface SyllabusPulse {
+  as_of: string;
+  academic_year_id: string | null;
+  term_id: string | null;
+  term_label: string | null;
+  headline: string;
+  school: SyllabusNode | null;
+  classes: SyllabusNode[];
+  subjects: SyllabusNode[];
+  terms: TermOption[];
 }
 
 export interface ExamCheckpointSubject {
@@ -378,6 +461,11 @@ export interface SyllabusBoard {
   headline: string | null;
   trend: SyllabusTrendPoint[];
   sections: SectionCompare[];
+  /** V1-15 — S-41 rolled up, plus the switcher's terms and the year's end date
+   *  (which is what makes a projected finish *late* rather than merely later). */
+  causes: CauseTally[];
+  terms: TermOption[];
+  year_end_date: string | null;
 }
 
 // ── M3 staff ─────────────────────────────────────────────────────────────────
@@ -816,4 +904,322 @@ export interface OverviewBoard {
   period_label: string | null;
   sections: OverviewSection[];
   actions: QuickAction[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V1-14 — the presence panorama: three rings, three named blocks, one month
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One of the three rings. `marked=false` means nobody has taken it — `pct` is
+ *  null and the ring is drawn neutral with its caption, never at 0% and never
+ *  red. Those are opposite facts and must not share a colour. */
+export interface PresenceRing {
+  key: "students" | "teachers" | "admins";
+  label: string;
+  marked: boolean;
+  present: number;
+  absent: number;
+  total: number;
+  pct: number | null;
+  caption: string;
+  tone: Tone;
+  href: string;
+}
+
+/** The verbs the action rail already implements, plus two the UI resolves
+ *  locally (a sheet, a screen) rather than firing straight at the server. */
+export type PresenceAction =
+  | "remind_guardian"
+  | "assign_followup"
+  | "record_reason"
+  | "arrange_cover"
+  | "reassign_work";
+
+export interface PresenceRow {
+  id: string;
+  name: string;
+  subtitle: string;
+  tone: Tone;
+  href: string | null;
+  actions: PresenceAction[];
+  /** Already fired today — the rail refusing to pester, rendered as a state. */
+  done: PresenceAction[];
+  badge: string | null;
+}
+
+/** At or under `inline_limit` the people are NAMED with their buttons; above it
+ *  the block is one sentence and a link. The threshold is decided server-side
+ *  so every surface obeys the same rule. */
+export interface PresenceGroup {
+  key: "students" | "teachers" | "admins";
+  label: string;
+  headline: string;
+  tone: Tone;
+  count: number;
+  inline_limit: number;
+  inline: boolean;
+  rows: PresenceRow[];
+  href: string;
+  action_label: string;
+  note: string | null;
+  note_href: string | null;
+}
+
+export interface PresenceBoard {
+  /** The last day the school actually RAN — not necessarily today. */
+  date: string;
+  is_today: boolean;
+  rings: PresenceRing[];
+  groups: PresenceGroup[];
+  headline: string;
+  /** The roll, summed server-side over the cohorts that were actually MARKED —
+   *  `roll_caption` says which. A total that quietly swept in an unmarked
+   *  cohort would be the exact lie three denominators exist to prevent. */
+  in_building: number;
+  roll: number;
+  away: number;
+  roll_caption: string;
+}
+
+export interface PresenceDay {
+  date: string;
+  marked: boolean;
+  present: number;
+  absent: number;
+  total: number;
+  pct: number | null;
+}
+
+export interface ClassMonthCell {
+  date: string;
+  state: "marked" | "unmarked" | "closed";
+  absent: number;
+  roster: number;
+  pct: number | null;
+}
+
+export interface ClassMonthRow {
+  class_id: string;
+  class_label: string;
+  roster: number;
+  cells: ClassMonthCell[];
+  marked_days: number;
+  absent_days: number;
+  pct: number | null;
+  tone: Tone;
+}
+
+export interface AbsenceProfile {
+  student_id: string;
+  full_name: string;
+  class_id: string | null;
+  class_label: string | null;
+  roll_no: string | null;
+  days_absent: number;
+  marked_days: number;
+  pct: number | null;
+  current_streak: number;
+  absent_today: boolean;
+  status: "explained" | "unexplained";
+  reason_code: string | null;
+  reason_note: string | null;
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  class_teacher_name: string | null;
+  reminded_today: boolean;
+  followup_assigned_today: boolean;
+  /** The row read aloud, composed server-side so the table, the overview and
+   *  Lucy cannot describe the same child differently. */
+  summary: string;
+  tone: Tone;
+}
+
+export interface PresenceAnomaly {
+  key: string;
+  title: string;
+  detail: string;
+  tone: Tone;
+  href: string | null;
+}
+
+export interface AdminWorkRow {
+  member_id: string;
+  user_id: string;
+  name: string;
+  present: boolean;
+  on_leave: boolean;
+  reason: string | null;
+  open_tasks: number;
+  overdue: number;
+  critical_overdue: number;
+  due_today: number;
+  rows: TaskRedRow[];
+  tone: Tone;
+  summary: string;
+}
+
+export interface PresenceMonth {
+  date: string;
+  window_days: number;
+  from_date: string;
+  to_date: string;
+  dates: string[];
+  students: PresenceDay[];
+  teachers: PresenceDay[];
+  admins: PresenceDay[];
+  classes: ClassMonthRow[];
+  profiles: AbsenceProfile[];
+  staff_absent: StaffAbsentee[];
+  admin_work: AdminWorkRow[];
+  anomalies: PresenceAnomaly[];
+  admin_options: PresenceRow[];
+  headline: string;
+}
+
+// ── V1-16 · the day-book ─────────────────────────────────────────────────────
+// The whole staff's day as one grid, and the person's record you reach by
+// tapping a name. Every colour is resolved server-side (`core/work_types.py`),
+// so the grid, the ring and the settings swatch cannot each have their own idea
+// of what "Exam work" looks like.
+
+/** A column. `label` is set only on breaks. */
+export interface DaybookPeriod {
+  period_no: number;
+  start: string;
+  end: string;
+  label: string | null;
+}
+
+/** `closed` = a period nobody was asked to work (a holiday, a non-school day, a
+ *  locked period). It is NOT free: it leaves every denominator, and it is the
+ *  difference between "the school was shut" and "nobody worked". */
+export type DaybookKind =
+  | "class" | "cover" | "work" | "free" | "away" | "closed";
+
+export interface DaybookCell {
+  period_no: number;
+  kind: DaybookKind;
+  label: string | null;
+  detail: string | null;
+  work_type: string | null;
+  /** A category hex, `"slate"`, or the structural tokens `"teaching"`/`"free"`. */
+  color: string;
+}
+
+export interface DaybookRow {
+  member_id: string;
+  name: string;
+  role: string;
+  cells: DaybookCell[];
+  teaching: number;
+  cover: number;
+  work: number;
+  free: number;
+  away_reason: string | null;
+  summary: string;
+  teaches: boolean;
+}
+
+export interface DaybookSlice {
+  key: string;
+  label: string;
+  periods: number;
+  color: string;
+}
+
+export interface Daybook {
+  date: string;
+  is_today: boolean;
+  weekday: number;
+  is_working_day: boolean;
+  closed_reason: string | null;
+  locked_periods: number[];
+  periods: DaybookPeriod[];
+  breaks: DaybookPeriod[];
+  rows: DaybookRow[];
+  /** Set only by the glimpse, where rows are trimmed. */
+  rows_total: number | null;
+  slots_total: number;
+  slots_teaching: number;
+  slots_work: number;
+  slots_free: number;
+  slots_away: number;
+  occupied_pct: number | null;
+  slices: DaybookSlice[];
+  headline: string;
+}
+
+export interface RecordDaySlot {
+  period_no: number;
+  start: string;
+  end: string;
+  kind: DaybookKind;
+  label: string | null;
+  detail: string | null;
+  work_type: string | null;
+  color: string;
+}
+
+export type RecordDayState = "working" | "off" | "holiday" | "leave" | "future";
+
+export interface RecordMonthDay {
+  date: string;
+  weekday: number;
+  state: RecordDayState;
+  label: string | null;
+  teaching: number;
+  cover: number;
+  work: number;
+  free: number;
+  busy: number;
+}
+
+export interface RecordPoint {
+  date: string;
+  teaching: number;
+  work: number;
+}
+
+export interface StaffRecord {
+  member_id: string;
+  name: string;
+  role: string;
+  month: string;
+  start_date: string;
+  end_date: string;
+  date: string;
+  is_today: boolean;
+
+  today: RecordDaySlot[];
+  today_breaks: DaybookPeriod[];
+  today_summary: string;
+  away_reason: string | null;
+  evening_labels: string[];
+
+  days: RecordMonthDay[];
+  series: RecordPoint[];
+  slices: DaybookSlice[];
+  teaching_periods: number;
+  cover_periods: number;
+  work_periods: number;
+  evening_sessions: number;
+  busiest_day: string | null;
+  busiest_periods: number;
+
+  working_days: number;
+  days_marked: number;
+  days_not_marked: number;
+  days_present: number;
+  days_absent: number;
+  half_days: number;
+  lates: number;
+  leave_days: number;
+  leave_remaining: number;
+
+  headline: string;
+  where_time_went: string[];
+  highlights: string[];
+  watch: string[];
+  summary: string;
+  summary_source: "computed" | "ai";
 }

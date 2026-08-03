@@ -38,9 +38,63 @@ def label_for(work_type: str, org=None) -> str:
     return WORK_TYPES.get(work_type) or work_type.replace("_", " ").strip().capitalize()
 
 
+# ── the colour vocabulary (V1-16) ────────────────────────────────────────────
+# The day-book paints one cell per person per period, so a category finally needs
+# a COLOUR as well as a word. Two rules, and they are both load-bearing:
+#
+#   1. **The school picks from a list, never types a hex.** A colour a human
+#      typed is a colour nobody validated: the five below were run through the
+#      dataviz six-checks against BOTH surfaces, in this order, together with the
+#      teaching green they sit beside — lightness band, chroma floor, adjacent
+#      CVD separation, the normal-vision floor and contrast. An admin with a
+#      colour wheel produces a board that two of every hundred readers cannot
+#      read, and no test can catch it.
+#   2. **There are FIVE, and that is the point.** A sixth hue cannot be told
+#      apart from the five without failing a check, so categories past the fifth
+#      render in a plain slate and are read by their label. The colour budget is
+#      the short-picker rule (see this module's docstring) with teeth: a school
+#      that wants every category coloured has to retire the ones it never uses.
+#
+# `other` is pinned to the gold slot rather than taking its turn: it is the one
+# category every school has, so it must mean the same colour in every school.
+CATEGORY_COLORS: list[str] = [
+    "#3f6fd8",  # blue
+    "#a94f8f",  # orchid
+    "#7b5ea8",  # violet
+    "#d1603a",  # brick
+    "#c99a1e",  # gold — pinned to `other`
+]
+OTHER_COLOR = "#c99a1e"
+#: Categories past the fifth. Not a colour — the absence of one, read by label.
+SLATE = "slate"
+ALLOWED_COLORS = {*CATEGORY_COLORS, SLATE}
+
+
+def _assign_colors(rows: list[dict]) -> None:
+    """Fill in each row's `color`, in place, honouring what the org chose.
+
+    Position among the ACTIVE categories decides the default, so the same school
+    reads the same colours from one term to the next; a retired category keeps
+    whatever it was given so last month's grid still renders in the colours the
+    admin remembers.
+    """
+    free = [c for c in CATEGORY_COLORS if c != OTHER_COLOR]
+    taken = {r["color"] for r in rows if r.get("color") in CATEGORY_COLORS}
+    queue = [c for c in free if c not in taken]
+    for row in rows:
+        if row.get("color") in ALLOWED_COLORS:
+            continue
+        if row["key"] == DEFAULT_WORK_TYPE:
+            row["color"] = OTHER_COLOR
+        elif row["active"] and queue:
+            row["color"] = queue.pop(0)
+        else:
+            row["color"] = SLATE
+
+
 # ── org-configurable categories (V1-2, D-19/S-69) ────────────────────────────
-# `organizations.work_categories` = [{key, label, active}] or NULL (= defaults).
-# Four rules, enforced here and in OrgService.update:
+# `organizations.work_categories` = [{key, label, active, color}] or NULL
+# (= defaults). Four rules, enforced here and in OrgService.update:
 #   1. Stable key, mutable label — a rename must not orphan last term's rows.
 #   2. Retire, never delete — a disabled category keeps rendering on old rows.
 #   3. Keep the list short (~10 visible).
@@ -60,18 +114,32 @@ def org_categories(org) -> list[dict]:
             continue
         seen.add(key)
         entry = config.get(key, {})
+        color = entry.get("color")
         out.append({
             "key": key,
             "label": (entry.get("label") or "").strip() or label_for(key),
             "active": bool(entry.get("active", True)),
+            "color": color if color in ALLOWED_COLORS else None,
         })
     for row in out:  # rule 4 — "other" can be relabelled, never retired
         if row["key"] == DEFAULT_WORK_TYPE:
             row["active"] = True
     if not any(r["key"] == DEFAULT_WORK_TYPE for r in out):
         out.append({"key": DEFAULT_WORK_TYPE, "label": WORK_TYPES[DEFAULT_WORK_TYPE],
-                    "active": True})
+                    "active": True, "color": OTHER_COLOR})
+    _assign_colors(out)
     return out
+
+
+def color_for(work_type: str, org=None) -> str:
+    """The colour a category is painted in. Always resolves — a work type the
+    picker has never heard of (an import, a renamed key) reads as slate, which
+    is a legible state, not a missing one."""
+    if org is not None:
+        for c in org_categories(org):
+            if c["key"] == work_type:
+                return c["color"]
+    return OTHER_COLOR if work_type == DEFAULT_WORK_TYPE else SLATE
 
 
 def active_work_types(org) -> dict[str, str]:

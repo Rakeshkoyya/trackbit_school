@@ -25,6 +25,10 @@ class StaffRosterRow(BaseModel):
     # unchecked and says why, so the admin isn't retyping what they approved.
     on_leave: bool = False
     leave_reason: str | None = None
+    # The whole span the leave covers — cover is arranged for all of it, not
+    # just for the day somebody happens to be looking at (V1-14).
+    leave_start: Date | None = None
+    leave_end: Date | None = None
     note: str | None = None
 
 

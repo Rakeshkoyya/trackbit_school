@@ -14,33 +14,41 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_admin
+from app.core.dependencies import require_academic, require_admin
 from app.schemas.insights import (
     ActionIn,
     ActionOut,
     AttendanceBoard,
     CallBoard,
+    Daybook,
     ExamsBoard,
     FollowupRow,
     HomeworkBoard,
     OverviewBoard,
+    PresenceBoard,
+    PresenceMonth,
     ReachBoard,
     StaffBoard,
     StaffImpact,
+    StaffRecord,
     StreakBoard,
     SubstitutionOut,
     SyllabusBoard,
+    SyllabusPulse,
     TaskBoardOut,
 )
 from app.services.insights.actions import ActionService
 from app.services.insights.attendance import STREAK_ALERT_DAYS, AttendanceInsights
+from app.services.insights.daybook import DaybookService
 from app.services.insights.exams import ExamInsights
 from app.services.insights.homework import HomeworkInsights
 from app.services.insights.overview import OverviewService
+from app.services.insights.presence import MONTH_DAYS, PresenceService
 from app.services.insights.reach import ReachInsights
 from app.services.insights.syllabus import SyllabusInsights
 from app.services.insights.tasks import TaskInsights
 from app.services.insights.workload import WorkloadInsights
+from app.services.staff_record import StaffRecordService
 
 router = APIRouter()
 
@@ -78,6 +86,29 @@ def attendance_calls(year_id: uuid.UUID | None = None,
     """V1-3 (S-08): the tab's questions — needs a call (D-86 coloured), the
     drifting band, chronic late, left after lunch."""
     return AttendanceInsights(db).call_board(m, year_id)
+
+
+@router.get("/presence", response_model=PresenceBoard)
+def presence_board(year_id: uuid.UUID | None = None,
+                   m: CurrentMember = Depends(require_admin),
+                   db: Session = Depends(get_db)):
+    """V1-14: the three rings and the three named blocks under them.
+
+    Students, teachers and admin staff are three questions with three
+    denominators; this is the one read that answers all three, plus who is away
+    in each and what can be done about them right there."""
+    return PresenceService(db).board(m, year_id)
+
+
+@router.get("/presence/month", response_model=PresenceMonth)
+def presence_month(year_id: uuid.UUID | None = None,
+                   days: int = Query(MONTH_DAYS, ge=7, le=90),
+                   m: CurrentMember = Depends(require_admin),
+                   db: Session = Depends(get_db)):
+    """The attendance tab's visual + action layer: the class × day grid, the
+    three day-series, every student with an absence, the away staff, the admin
+    desk and what stands out."""
+    return PresenceService(db).month(m, year_id, days)
 
 
 @router.get("/attendance/reach", response_model=ReachBoard)
@@ -118,6 +149,20 @@ def syllabus_board(year_id: uuid.UUID | None = None,
                    m: CurrentMember = Depends(require_admin),
                    db: Session = Depends(get_db)):
     return SyllabusInsights(db).board(m, year_id, scope, checkpoint, term_id)
+
+
+@router.get("/syllabus/pulse", response_model=SyllabusPulse)
+def syllabus_pulse(year_id: uuid.UUID | None = None,
+                   term_id: uuid.UUID | None = None,
+                   m: CurrentMember = Depends(require_admin),
+                   db: Session = Depends(get_db)):
+    """The overview's syllabus block — the school ring plus the class and
+    subject breakdowns, narrowable to a term.
+
+    Its own route rather than a field on `/insights/overview` because the term
+    switcher re-reads on every press, and recomposing seven modules to change
+    one filter is a cost the other six never asked for."""
+    return SyllabusInsights(db).pulse(m, year_id, term_id)
 
 
 # ── M4 homework ──────────────────────────────────────────────────────────────
@@ -180,3 +225,55 @@ def list_substitutions(on_date: date | None = None,
     from app.services.substitution import SubstitutionService  # noqa: PLC0415
 
     return SubstitutionService(db).list_for_date(m, on_date or today_in(m.org.timezone))
+
+
+# ── V1-16 the day-book ───────────────────────────────────────────────────────
+@router.get("/daybook", response_model=Daybook)
+def daybook(on: date | None = None, year_id: uuid.UUID | None = None,
+            m: CurrentMember = Depends(require_admin),
+            db: Session = Depends(get_db)):
+    """The whole staff's day, people down and periods across.
+
+    `on` is any date — the board says what that date WAS, so navigating back to
+    a Sunday reads "the school was shut" rather than an empty grid.
+    """
+    return DaybookService(db).board(m, on, year_id)
+
+
+@router.get("/daybook/glimpse", response_model=Daybook)
+def daybook_glimpse(on: date | None = None,
+                    limit: int = Query(10, ge=1, le=60),
+                    m: CurrentMember = Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    """The overview's block — the same computation, trimmed to what fits."""
+    return DaybookService(db).glimpse(m, on, limit)
+
+
+# Declared BEFORE the `{member_id}` route: FastAPI matches in declaration order,
+# and "me" is not a UUID — the other way round it would 422 rather than resolve.
+@router.get("/staff/me/record", response_model=StaffRecord)
+def my_record(month: str | None = None, on: date | None = None,
+              m: CurrentMember = Depends(require_academic),
+              db: Session = Depends(get_db)):
+    """A teacher's own record, without needing to know their membership id.
+
+    The session carries no membership id, so without this the self-access the
+    service already allows would have no door — and the fairness rule it is
+    written for ("a person whose time is being written down must be able to read
+    it") would be a comment rather than a feature.
+    """
+    return StaffRecordService(db).record(m, m.membership.id, month, on)
+
+
+@router.get("/staff/{member_id}/record", response_model=StaffRecord)
+def staff_record(member_id: uuid.UUID, month: str | None = None,
+                 on: date | None = None,
+                 m: CurrentMember = Depends(require_academic),
+                 db: Session = Depends(get_db)):
+    """One person's record — their day, their month, and where the time went.
+
+    `require_academic` rather than `require_admin` on purpose: a teacher may open
+    their OWN record, and the service refuses anyone else's. A person whose time
+    is being written down must be able to read what was written.
+    """
+    return StaffRecordService(db).record(m, member_id, month, on)

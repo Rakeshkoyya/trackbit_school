@@ -64,14 +64,17 @@ from app.models import (
     User,
 )
 from app.schemas.insights import (
+    CauseTally,
     ExamCheckpoint,
     ExamCheckpointSubject,
     SectionCompare,
     SectionCompareRow,
     SyllabusBoard,
     SyllabusNode,
+    SyllabusPulse,
     SyllabusRow,
     SyllabusTrendPoint,
+    TermOption,
 )
 from app.services.coverage import CoverageReader
 from app.services.planner import PlannerService
@@ -79,6 +82,26 @@ from app.services.school_clock import today_in
 
 MIN_CLASS_SUBJECTS = 3
 MIN_LOGGED_PERIODS = 10
+
+# `S-41`'s four causes, in the order they must be read: the first two are not
+# about teaching at all, and putting them first is the point of counting them.
+# A school looking at "6 subjects behind" acts very differently once it can see
+# that four of those six are behind because nobody wrote a lesson log.
+CAUSE_META: list[tuple[str, str, str]] = [
+    ("not_logged", "Nothing logged",
+     "Taught or not, we cannot tell — no lesson was recorded. A capture gap, "
+     "not a teaching one."),
+    ("periods_lost", "Periods lost",
+     "The classes did not run — an exam week, a function, a day out. Nobody's "
+     "fault, and it needs a re-plan rather than a conversation."),
+    ("never_sized", "Chapters not sized",
+     "Chapters with no estimate are never scheduled, so the plan is short "
+     "before anybody teaches anything."),
+    ("slower", "Behind on teaching",
+     "Everything was recorded, the periods ran, and the portion is still "
+     "behind. This is the one that is about teaching."),
+]
+
 
 def _label(name: str, section: str | None) -> str:
     return name + (f"-{section}" if section else "")
@@ -119,9 +142,12 @@ class SyllabusInsights:
         rows, trend = self._rows(m, year, scoped_term, today)
         board.rows = rows
         board.trend = trend
+        board.causes = self._causes(rows)
+        board.terms = self._terms(m, year, today)
+        board.year_end_date = year.end_date
         if term_id is not None:
-            board.term_label = self.db.scalar(
-                select(Term.name).where(Term.id == term_id, Term.org_id == m.org_id))
+            board.term_label = next(
+                (t.name for t in board.terms if t.id == term_id), None)
 
         board.school = self._node("school", None, m.org.name, "whole school", rows,
                                   min_cs=1, min_logged=0)
@@ -206,8 +232,21 @@ class SyllabusInsights:
                 current_term_unplanned=bool(f.current_term_unplanned),
                 logged_periods=f.logged_periods,
                 periods_not_held=not_held.get(cs_id, 0),
+                taught_full=cov.taught_full if cov else 0,
+                taught_partial=cov.taught_partial if cov else 0,
                 next_topic_title=cov.next_topic_title if cov else None,
                 next_chapter_title=cov.next_chapter_title if cov else None)
+            # The plan's marker. Divided here, once, so no screen ever divides
+            # a coverage figure for itself (`S-51`).
+            if row.planned_topics:
+                row.expected_pct = round(row.due_topics / row.planned_topics * 100, 1)
+            if row.total_topics:
+                row.expected_syllabus_pct = round(
+                    row.due_topics / row.total_topics * 100, 1)
+            if f.projected_finish and f.baseline_finish:
+                row.overrun_days = (f.projected_finish - f.baseline_finish).days
+            row.overruns_year = bool(
+                f.projected_finish and f.projected_finish > year.end_date)
             self._attribute(row)
             got = catchups.get(cs_id)
             if got is not None:
@@ -400,7 +439,31 @@ class SyllabusInsights:
             syllabus_pct=round(taught / total * 100, 1) if total else None,
             weeks_behind_max=max((r.weeks_behind for r in rated), default=0),
             unestimated_topics=sum(r.unestimated_topics for r in rows),
-            logged_periods=logged_periods)
+            logged_periods=logged_periods,
+            due_topics=sum(r.due_topics for r in rows),
+            taught_due=round(sum(r.taught_due for r in rows), 1),
+            # RATED rows only (`S-42`). A class-subject nobody has logged a
+            # lesson against has every due topic counted as untaught, so
+            # including it here would report a school as "40 topics overdue" on
+            # the strength of a record nobody wrote — and this figure orders the
+            # worst-first lists, so it would put the unobserved rows on top and
+            # describe them as the ones behind.
+            behind_topics=round(sum(r.behind_topics for r in rated), 1),
+            taught_full=sum(r.taught_full for r in rows),
+            taught_partial=sum(r.taught_partial for r in rows),
+            untaught_topics=max(0, total - sum(r.taught_full + r.taught_partial
+                                               for r in rows)),
+            periods_not_held=sum(r.periods_not_held for r in rows),
+            classes=len({r.class_id for r in rows}),
+            subjects=len({r.subject_id for r in rows if r.subject_id}))
+        # The plan's marker, on the same denominator as `coverage_pct` so the
+        # two can be drawn on one track: how much of the planned portion was
+        # due by today, against how much of it has actually been taught.
+        if planned:
+            node.expected_pct = round(node.due_topics / planned * 100, 1)
+        if total:
+            node.expected_syllabus_pct = round(node.due_topics / total * 100, 1)
+        node.tone, node.pace_caption = self._pace(node, rated)
         # The guard: below the minimum sample the node carries its numbers but is
         # never ranked, and the UI says "not enough data yet".
         node.rank_eligible = len(rated) >= min_cs and logged_periods >= min_logged
@@ -415,6 +478,188 @@ class SyllabusInsights:
                 if node.coverage_pct is not None else
                 f"{len([r for r in rated if r.status == 'green'])} of {len(rated)} on track")
         return node
+
+    @staticmethod
+    def _pace(node: SyllabusNode, rated: list[SyllabusRow]) -> tuple[str, str | None]:
+        """A node's tone AND the words that go with it, decided in one place.
+
+        Three surfaces draw these nodes — the overview block, the scope ledger
+        and the teacher matrix — so a tone each of them worked out for itself
+        would be three verdicts about one teacher on one morning. And it never
+        travels without the caption: a colour alone is not allowed to carry a
+        verdict here any more than it is on the RAG chips.
+
+        The states come first deliberately. A node where nothing has been logged
+        is **neutral**, not green — "we have no evidence" and "it is going well"
+        are opposite findings, and only one of them should be a quiet colour.
+        """
+        if not rated:
+            if node.unknown:
+                return "neutral", "nothing logged against the plan yet"
+            if node.unplanned or node.unallocated:
+                return "neutral", "nothing scheduled yet"
+            return "neutral", "no syllabus set up"
+
+        # Two different questions, and they can honestly disagree. The forecast
+        # answers *will it finish* — plan against remaining calendar — so a
+        # subject that has taught nothing in April is still green if the year
+        # has room. `behind_topics` answers *is it on schedule today*, and it is
+        # the one the marker draws.
+        #
+        # Painting a visible gap green would make the device lie, so overdue
+        # topics take the tone to amber; saying "on track" beside "15 topics
+        # overdue" would read as a contradiction, so the caption says which is
+        # which. Neither figure is invented and neither overrides the other.
+        off = node.behind + node.slipping
+        overdue = node.behind_topics
+        if node.behind:
+            tone = "red"
+        elif node.slipping or overdue > 0:
+            tone = "amber"
+        else:
+            tone = "green"
+        n = len(rated)
+        caption = (f"all {n} on course to finish" if not off
+                   else f"{off} of {n} behind the plan")
+        if overdue > 0:
+            caption += f" · {overdue:g} {_plural(overdue, 'topic')} overdue"
+        if node.unknown:
+            caption += f" · {node.unknown} not logged"
+        return tone, caption
+
+    # ── S-41, counted ────────────────────────────────────────────────────────
+    def _causes(self, rows: list[SyllabusRow]) -> list[CauseTally]:
+        """The four causes as a tally, in fixed order.
+
+        Counted server-side and not in the browser for the boring reason that
+        the same tally has to appear on the tab and in anything that reads this
+        board later — but also because the ORDER is a judgement (capture and
+        calendar before teaching) and a judgement belongs where it can be read
+        and tested, not in a `.sort()` inside a component.
+
+        Causes with nothing in them are still returned: *"nothing lost to
+        cancelled periods"* is a finding, and a row that vanishes when it is
+        zero makes the remaining ones look like the whole story.
+        """
+        counts: dict[str, list[float]] = {key: [0, 0.0] for key, *_ in CAUSE_META}
+        for r in rows:
+            if r.cause not in counts:
+                continue
+            counts[r.cause][0] += 1
+            # The count is always safe — a row IS in this bucket. The topic
+            # figure is not: `behind_topics` on an unlogged row is every due
+            # topic, so `not_logged` would read *"1 class-subject · 10 topics
+            # behind"* about a class nobody observed. `S-42`, exactly: the row
+            # is counted, and the thing we cannot know stays unsaid.
+            if r.status in ("green", "amber", "red"):
+                counts[r.cause][1] += r.behind_topics
+        return [
+            CauseTally(key=key, label=label, detail=detail,
+                       count=int(counts[key][0]),
+                       behind_topics=round(counts[key][1], 1))
+            for key, label, detail in CAUSE_META
+        ]
+
+    def _terms(self, m: CurrentMember, year: AcademicYear,
+               today: date) -> list[TermOption]:
+        """The year's terms, with the running one flagged against the SCHOOL's
+        clock — `today` here is already `today_in(org.timezone)`, so a browser
+        in another timezone cannot disagree about which term it is."""
+        return [
+            TermOption(id=t_id, name=name, start_date=start, end_date=end,
+                       is_current=start <= today <= end)
+            for t_id, name, start, end in self.db.execute(
+                select(Term.id, Term.name, Term.start_date, Term.end_date)
+                .where(Term.org_id == m.org_id, Term.academic_year_id == year.id)
+                .order_by(Term.start_date)).all()
+        ]
+
+    # ── the overview's block ─────────────────────────────────────────────────
+    def pulse(self, m: CurrentMember, year_id: uuid.UUID | None = None,
+              term_id: uuid.UUID | None = None) -> SyllabusPulse:
+        """One ring and two breakdowns, narrowable to a term.
+
+        The same `_rows` batch and the same `_node` roll-up the tab uses, so the
+        block on the overview and the board it links to cannot state different
+        percentages for the same morning — which is the whole of `S-51`, applied
+        between two of our own screens rather than between a parent's and a
+        principal's.
+
+        What it deliberately does NOT do is call `exam_fit_org` or build the
+        trend: the overview needs neither, and the term switcher re-reads this
+        on every press.
+        """
+        today = self._today(m)
+        year = self._year(m, year_id)
+        out = SyllabusPulse(as_of=today, term_id=term_id,
+                            academic_year_id=year.id if year else None)
+        if year is None:
+            out.headline = "No academic year is set up yet."
+            return out
+
+        out.terms = self._terms(m, year, today)
+        # A term id that is not this year's would silently narrow the portion to
+        # nothing and read as a school that has taught none of its syllabus.
+        if term_id is not None and not any(t.id == term_id for t in out.terms):
+            term_id, out.term_id = None, None
+        out.term_label = next((t.name for t in out.terms if t.id == term_id), None)
+
+        rows, _ = self._rows(m, year, term_id, today)
+        out.school = self._node("school", None, m.org.name, "whole school", rows,
+                                min_cs=1, min_logged=0)
+        # Worst first — the point of a capped list on a summary block is that the
+        # rows nobody would otherwise scroll to are the ones shown.
+        out.classes = sorted(self._pivot("class", rows),
+                             key=lambda n: (-n.behind_topics, n.label))
+        out.subjects = sorted(self._pivot("subject", rows),
+                              key=lambda n: (-n.behind_topics, n.label))
+        out.headline = self._pulse_headline(out, rows)
+        return out
+
+    @staticmethod
+    def _pulse_headline(out: SyllabusPulse, rows: list[SyllabusRow]) -> str:
+        """The block's own sentence, in the same words the tab uses.
+
+        Scoped to whatever the switcher is on, because a term-scoped ring above
+        a year-scoped sentence is the kind of quiet mismatch nobody reports and
+        everybody mistrusts.
+        """
+        where = f"In {out.term_label}" if out.term_label else "Across the year"
+        school = out.school
+        if school is None or not rows:
+            return "No class-subject has a syllabus yet."
+        rated = school.on_track + school.slipping + school.behind
+        if not rated:
+            if school.unknown:
+                return (f"{where.lower().capitalize()}, {school.unknown} class-"
+                        f"{_plural(school.unknown, 'subject')} "
+                        f"{'has' if school.unknown == 1 else 'have'} a plan and no "
+                        f"lesson logs — there is nothing to rate yet.")
+            return "No plan has been approved yet."
+        pct = school.syllabus_pct
+        covered = (
+            "no topic has been logged as taught yet" if pct == 0
+            else f"{pct:g}% of the portion is taught" if pct is not None
+            else "no portion is sized yet")
+        if school.behind:
+            return (f"{where}, {covered} and {school.behind} of {rated} class-"
+                    f"{_plural(rated, 'subject')} "
+                    f"{'is' if school.behind == 1 else 'are'} behind the plan.")
+        if school.slipping:
+            return (f"{where}, {covered} — {school.slipping} class-"
+                    f"{_plural(school.slipping, 'subject')} slipping, none a "
+                    f"week or more behind.")
+        # Nothing is behind on the *forecast*, but topics whose week has passed
+        # are still untaught. Said plainly, because "everything is on track" over
+        # a ring visibly short of its marker is the one sentence this block must
+        # never print.
+        if school.behind_topics > 0:
+            n = school.behind_topics
+            return (f"{where}, {covered} — {n:g} {_plural(n, 'topic')} due by "
+                    f"today {'has' if n == 1 else 'have'} not been taught, "
+                    f"though every subject still has room to finish.")
+        return (f"{where}, {covered} and every rated class-subject is on course "
+                f"to finish.")
 
     # ── the headline (S-50, rule 3) ──────────────────────────────────────────
     def _headline(self, board: SyllabusBoard, today: date) -> str:

@@ -165,7 +165,7 @@ export function PulseArea({
 // ── bars ─────────────────────────────────────────────────────────────────────
 
 export function ColumnChart({
-  rows, series, height = 220, yUnit = "", yDomain, stacked = false,
+  rows, series, height = 220, yUnit = "", yDomain, stacked = false, xInterval = 0,
 }: {
   rows: ChartRow[];
   series: Series[];
@@ -173,6 +173,10 @@ export function ColumnChart({
   yUnit?: string;
   yDomain?: [number, number];
   stacked?: boolean;
+  /** Recharts tick interval. Defaults to 0 — every category labelled, which is
+   *  right for the eight-or-so buckets most callers pass. A month of dates needs
+   *  thinning: 25 labels in one axis is a smear, not an axis. */
+  xInterval?: number | "preserveStartEnd";
 }) {
   return (
     <div>
@@ -181,8 +185,10 @@ export function ColumnChart({
           <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: -18 }} barGap={2}>
             <CartesianGrid vertical={false} stroke="var(--color-border)" />
             <XAxis dataKey="x" tick={AXIS_TICK} tickLine={false}
-              axisLine={{ stroke: "var(--color-border)" }} interval={0} />
+              axisLine={{ stroke: "var(--color-border)" }} interval={xInterval}
+              minTickGap={4} />
             <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={44}
+              allowDecimals={false}
               unit={yUnit} domain={yDomain ?? [0, "auto"]} />
             <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "var(--color-muted)", opacity: 0.4 }}
               formatter={(v: unknown) => `${v}${yUnit}`} />
@@ -270,14 +276,17 @@ export function Donut({
           </div>
         ) : null}
       </div>
-      {/* Direct labels with values — never colour-alone, never a number on the arc. */}
+      {/* Direct labels with values — never colour-alone, never a number on the arc.
+          The label WRAPS rather than truncates: this legend is the chart (six
+          arcs read as six arcs and nothing more), and "Notebook checki…" names
+          nothing. Two lines of text cost less than an unreadable key. */}
       <ul className="min-w-0 flex-1 space-y-1.5">
         {slices.map((s, i) => (
-          <li key={s.label} className="flex items-center gap-2 text-sm">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-sm"
+          <li key={s.label} className="flex items-start gap-2 text-sm">
+            <span className="mt-[5px] h-2.5 w-2.5 shrink-0 rounded-sm"
               style={{ background: s.color ?? SERIES_COLORS[i % SERIES_COLORS.length] }} />
-            <span className="min-w-0 flex-1 truncate">{s.label}</span>
-            <span className="tabular-nums text-muted-foreground">
+            <span className="min-w-0 flex-1 leading-snug">{s.label}</span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
               {s.value}{total > 0 ? ` · ${Math.round((s.value / total) * 100)}%` : ""}
             </span>
           </li>

@@ -387,3 +387,73 @@ Updated at the close of every working session. **Read this first when resuming v
   dev + test databases. If that happens again: chain the second migration off the first
   (`alembic heads` before writing one), and expect an occasional `deadlock detected` when a
   migration's `ALTER TABLE` meets the other session's running suite — retry, don't diagnose.
+
+---
+
+## V1-16 — the day-book (staff time, seen) · 2026-08-02
+
+**No migration.** The category colour rides on the existing `organizations.work_categories`
+JSONB; everything else is a read over tables SF-1 and V1-4 already fill.
+
+The gap: the timesheet has existed since SF-1 and the admin could only ever read it **one
+person at a time** (`/timesheet`) or **one period at a time** (`/staff/today`). Nobody could
+see the school's day. So:
+
+- **`services/insights/daybook.py`** — people down, periods across, one cell each. It
+  **composes**: `TimesheetService.org_day` is the three-query batch that already unions the
+  timetable, the timesheet, the cover board and staff attendance (`S-72`/`Q-37`), so the
+  day-book and the timesheet cannot disagree about the same Tuesday (`S-51`). Adds only the
+  tally and the sentence. `GET /insights/daybook` (any date) + `/daybook/glimpse` (the
+  overview's block — *the same payload*, trimmed, with `rows_total` so the block can say "and
+  6 more" instead of showing a partial school as if it were the whole one).
+- **`services/staff_record.py`** + `GET /insights/staff/{id}/record` (and `/staff/me/record`,
+  so the self-access the service already allowed has a door) — one person's day, month,
+  categories and the SF-1/V1-4 attendance and leave figures, plus a written summary
+  (`ai/staff_record.py`, env-gated, deterministic floor).
+  🔴 **It is a record, not an appraisal, and that is enforced rather than intended** (`D-25`/
+  `S-67`): no score, no rank, no completeness percentage, no path to pay — and the model's
+  system prompt forbids appraisal language *in the negative*, because a model asked to
+  "summarise a teacher's month" reaches for it unprompted. `test_daybook_v1_16.py` greps the
+  whole written payload for it.
+- **The five-colour budget** (`core/work_types.py::CATEGORY_COLORS`). A category needed a
+  colour, so it got one from a **fixed validated list, never a hex an admin types** — the five
+  were run through the dataviz six-checks against both surfaces, in the ring order they are
+  assigned in, together with the teaching ink they sit beside. There are five because a sixth
+  fails a check: categories past the fifth render slate and are read by name, which makes the
+  colour budget the short-picker rule with teeth. `other` is pinned to gold so it means the
+  same thing in every school. Settings → Timesheet categories gains the swatch row.
+
+### Four defects, three of them found by looking at the screen
+
+The suite was green before any of these. A screenshot at 1440px found all four.
+
+1. 🔴 **The board manufactured 43 free periods on a Sunday** — it said "not a school day,
+   nothing was expected of anybody" and then drew a full grid of FREE cells and a ring reading
+   "4% spoken for". Both halves are the mistake `day_lock` exists to prevent (`S-145`): a
+   locked period leaves the denominator entirely, it does not become capacity the school
+   failed to use. New cell kind **`closed`**, `occupied_pct` is **None** rather than a share
+   of nothing, and anything actually recorded on a closed day still shows (`Q-65`).
+2. 🔴 **`TimesheetService.month` zeroed every non-working day** — V1-4 fixed exactly this in
+   `week` (a period genuinely worked on a sports Sunday could not be seen OR recorded) and
+   never carried the fix to `month`. So a warden's Sunday evening prep and a Saturday exam
+   duty vanished from the month's totals while sitting plainly in `timesheet_entries`. **This
+   fix also lands on the teacher's own `/timesheet/month`.**
+3. 🔴 **The record counted the future as worked** — `TimesheetMonth` totals the whole month
+   including days that have not happened (right for the teacher's planning grid), so on the
+   2nd of August the record read *"Teaching — 38 of 38 periods (100%)"*. Combined with (2) the
+   ring's slices and the totals beside them came from two different day sets and the page
+   showed **109%**. Totals now stop at today, and the slices use the same window.
+4. **`away` was a dashed hairline** and at 84px in dark mode was indistinguishable from an
+   empty cell — the two facts the board exists to separate. It is a hatch now.
+
+Also: "FREE"/"AWAY" typed into forty cells was deleted (texture + tooltip + the row's own
+one-line summary carry it), the `Donut` legend **wraps instead of truncating** ("Notebook
+checki…" names nothing), and the record's month line needs **5 points** before it draws —
+not-enough-data is a word, never a chart with three points on it.
+
+`test_daybook_v1_16.py` (9). Web: `components/insights/daybook.tsx` (grid · strip · legend ·
+ring · day nav, one component at two densities), `components/staff/record-view.tsx`,
+`/staff/member/[memberId]` (tabs hidden — it is a detail page, and it is open to its own
+subject as well as to an admin). The Staff tab's old "The day, teacher by teacher" strip
+column is **deleted**: the day-book above it is the same fact at full size, and two renderings
+of one day on one screen only raise the question of which is authoritative.

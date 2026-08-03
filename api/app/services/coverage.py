@@ -71,6 +71,15 @@ class CoverageRow:
     taught_count: int = 0          # distinct topics with any log at all
     logged_periods: int = 0        # lesson logs written — the sample size
 
+    # The two halves of `taught_count`, kept apart because the weighted figure
+    # cannot be taken back apart: 12.5 topics is 12 finished + 1 half-done, or
+    # 11 finished + 3 half-done, and a screen that draws "where the portion
+    # stands" has to know which. Derived here rather than by a caller doing
+    # `2 * weighted - count`, which is the kind of arithmetic `S-51` exists to
+    # stop being re-invented per screen.
+    taught_full: int = 0           # topics with a `full` log
+    taught_partial: int = 0        # topics logged, but only partly covered
+
     # `S-46` — the reason a teacher opens the screen at all.
     next_topic_id: uuid.UUID | None = None
     next_topic_title: str | None = None
@@ -310,6 +319,10 @@ class CoverageReader:
             row.taught_weighted += weight
             if t.best:
                 row.taught_count += 1
+                if t.best == "full":
+                    row.taught_full += 1
+                else:
+                    row.taught_partial += 1
                 if row.last_taught_on is None or (
                         t.last_on is not None and t.last_on >= row.last_taught_on):
                     row.last_taught_on = t.last_on

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.core.exceptions import ValidationError
 from app.core.plans import limits_for
-from app.core.work_types import DEFAULT_WORK_TYPE, org_categories
+from app.core.work_types import ALLOWED_COLORS, DEFAULT_WORK_TYPE, org_categories
 from app.models import Board, Membership
 from app.schemas.org import (
     OrgSettingsOut,
@@ -110,8 +110,17 @@ class OrgService:
                 key = f"{base}_{n}"
                 n += 1
             seen.add(key)
+            # V1-16: an unknown colour is refused rather than stored. Silently
+            # dropping it would leave the admin looking at a swatch they picked
+            # and a grid that ignored it.
+            if entry.color is not None and entry.color not in ALLOWED_COLORS:
+                raise ValidationError(
+                    "Pick one of the board colours — a colour typed by hand has not "
+                    "been checked for colour-blind readers.", code="bad_category_color")
+            color = entry.color or current.get(key, {}).get("color")
             out.append({"key": key, "label": entry.label.strip() or key,
-                        "active": entry.active})
+                        "active": entry.active,
+                        **({"color": color} if color else {})})
         # Rule 2: anything the payload dropped is retired, not deleted — its
         # historical rows keep rendering under its last label.
         for key, cat in current.items():
