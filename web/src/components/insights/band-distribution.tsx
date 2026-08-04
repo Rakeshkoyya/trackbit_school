@@ -138,6 +138,11 @@ function ScopeList({
 
 /** The school pie — the one place a single figure is the whole story. */
 export function BandSchoolDonut({ data, size = 168 }: { data: BandDistribution; size?: number }) {
+  // The label stays a single letter and the ring stays small, and both are the
+  // same fix: `Donut` prints `label … value · pct%` on one flex row, so in a
+  // third-of-a-grid card a longer label ("Band A") wraps onto two lines and
+  // collides with its own percentage. The gloss the letters need is the
+  // `BandLegend` directly underneath, which has a full row to itself.
   const slices = TIERS.map((t) => ({
     label: t,
     value: data.school[t.toLowerCase() as "a" | "b" | "c"],
@@ -203,7 +208,7 @@ export function BandDistributionView({
           hint="One child counts once per monitored subject — there is no overall band."
         >
           <div className="flex flex-col items-center gap-3">
-            <BandSchoolDonut data={data} size={compact ? 148 : 168} />
+            <BandSchoolDonut data={data} size={compact ? 132 : 140} />
             <BandLegend className="justify-center" />
             {data.school.not_assessed ? (
               <p className="text-center text-[11px] text-muted-foreground">
