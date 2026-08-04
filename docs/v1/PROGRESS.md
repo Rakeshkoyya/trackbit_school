@@ -546,3 +546,86 @@ floor, so the separation had to come from pushing the far end.
 `test_homework_v1_17.py` (12). Range filter Week · Month · Term · Year; the endpoint's 60-day
 clamp is gone (400) and the series buckets weekly past 21 days. Reviewed at 1440px and 360px in
 both themes against a month of seeded homework.
+
+---
+
+## V1-18 — fees: collection against the calendar · 2026-08-04
+
+**No migration, no new capture.** Founder call after walking the shipped board: the fee UI did
+not feel good and could not be read.
+
+### What was actually wrong
+
+A collection percentage cannot be read on its own. **45% is excellent in May and alarming in
+February**, and every fee figure in the product was printed without the date that makes it
+readable: `/fees` opened on four bare numbers on one line, then a strip of quarter buttons each
+carrying a percentage. `QuarterRow` has carried `billed / collected / pending / overdue / pct`
+for every quarter since V1-10 — the UI rendered the pct as a button label and discarded the rest.
+
+### The missing number
+
+`Collection.due_by_today` — everything the school has **asked for** by today, paid or not.
+Deliberately **not** `overdue`, which is only the *unpaid* part of it: confusing the two makes a
+school that collected every rupee on time look like it was never asked for anything. It costs one
+extra accumulator on a loop that already had `inst.due_date` and `today` in hand.
+
+The identity worth remembering, and the reason the pace figure adds something the old four-figure
+line could not express:
+
+```
+shortfall = overdue − prepayments
+```
+
+With nobody paying early the two agree exactly. With prepayments the school is *less* behind than
+its overdue figure alone suggests.
+
+### The device
+
+V1-15's, reused so fees reads with the habit the syllabus board already taught — arc = what came
+in, tick = where the schedule says you should be, gap = the finding.
+
+**The year is ONE ring, not three.** The three figures the founder asked for share one
+denominator, so three rings would draw the same track three times and the "total billed" one
+would be a full circle saying nothing. And `collected` can *exceed* `due_by_today` when families
+pay in advance — a marker expresses that; stacked arcs would read as an error. **Quarters get one
+ring each**, because those genuinely are independent scopes.
+
+### 🔴 Two defects found
+
+1. **The dashboard fee block was the last surface on the old fee arithmetic.** `FeeService.summary()`
+   — four fields, no quarters, `opening_dues` excluded — while `/fees` rendered
+   `CollectionService.board()`. That contradicts `collection.py`'s own docstring and repeats
+   exactly what V1-12 fixed for Lucy. It also computed `outstanding = total − collected` **in the
+   browser**, merging pending with overdue — the blend `Collection` has no `outstanding` property
+   in order to prevent (`S-163`).
+2. **`PATCH /fees/installments/{id}/due-date` 500'd on every call** — routed to
+   `FeeService.update_due_date` since P0-D, and the method never existed. V1-13's no-dead-ends
+   sweep hunted orphan *client methods* and orphan *GET* routes; this was neither, so nothing
+   surfaced it. It matters now because an instalment with no due date is `unscheduled`, and this
+   route is the only way to resolve the state the new board names — a board that names a problem
+   whose only fix is a 500 has made the admin's day worse. Implemented.
+   ⚠️ **It still has no web caller.** Deliberately left: the founder deferred fee-module
+   gap-filling to a later deep pass, and building the editor now would be scope creep against
+   that. Wire it then.
+
+### Rules kept
+
+Not-due-yet is **neutral, dashed and a word**, never a bold 0% and never red. `shortfall` floors
+at zero. `carried` stays its own line (`D-88`). `collected / pending / overdue` are still three
+figures that nothing adds. The fee fence holds: `/fees/collection` is admin-only and the
+dashboard page is `AuthGuard allow={["admin"]}`, so a teacher never reaches the component, let
+alone the request — asserted in both directions.
+
+### Also
+
+`TrendLine` gains `yFormat` (the curve's y-axis was rendering clipped as `)0₹` — a rupee figure
+plus a suffix is wider than the 44px gutter) · `by_class` was an unsorted, uncoloured text table
+of seven numeric fields and is now ranked rows with bars, both denominators intact · `shortMoney`
+is the lakh/crore form for ring centres.
+
+Found by looking: the year ring and its ledger were side by side at 360px, leaving the ledger
+~150px — labels wrapped one word per line and the amounts collided with them. They stack below
+`sm` now.
+
+`test_fees_v1_18.py` (11). Reviewed at 1440px and 360px in both themes against a seeded year with
+all four quarter states present (settled / behind / not-due / not-due).

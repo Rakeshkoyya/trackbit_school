@@ -1222,6 +1222,54 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     `not_checked` is the load-bearing rule of the module; a second, weaker definition would let a
     teacher who merely opened the sheet count as having checked.
 
+- **V1-18 (fees — collection against the calendar, 2026-08-04)** — **no migration, no new
+  capture.** A collection percentage cannot be read on its own: 45% is excellent in May and
+  alarming in February, and every fee figure in the product was printed without the date that
+  makes it readable — four bare numbers on one line, then a strip of quarter buttons carrying a
+  percentage each.
+  - **`Collection.due_by_today` is the missing denominator** — everything the school has **asked
+    for** by today, paid or not. It is deliberately **not `overdue`**, which is only the *unpaid*
+    part of it; confusing the two makes a school that collected every rupee on time look like it
+    was never asked for anything. One extra accumulator on a loop that already had
+    `inst.due_date` and `today` in hand. `due_pct` puts the marker on the same track as `pct`,
+    `shortfall` floors at zero (a school that collected early is not "minus ₹40,000 behind"), and
+    **`pace_tone()` decides the colour once, server-side** — three surfaces render these rows.
+  - **`CollectionBoard.year`** — the whole year, which nothing exposed before: the board's
+    top-level figures are the **picked quarter's**, so "how is the year going" could only be got
+    by summing quarter rows in a browser. Accumulated in the same pass as the quarter rows, so
+    the year ring and the quarter rings cannot disagree.
+  - **The device is V1-15's, reused** so fees reads with the habit the syllabus board already
+    taught: the arc is what came in, the tick is where the schedule says you should be, and the
+    distance between them is the finding. **The year is ONE ring, not three** — the three figures
+    share one denominator, so three rings would draw the same track three times and the "billed"
+    one would be a full circle saying nothing; and `collected` can **exceed** `due_by_today` when
+    families pay in advance, which a marker expresses and stacked arcs cannot. **Quarters are one
+    ring each** — those *are* independent scopes.
+  - **A quarter nobody has been asked to pay yet is neutral, dashed, and says "not due yet"** —
+    never a bold 0%, never red. It has not been missed, and painting next January red every
+    August is how a board stops being read (ux §5, §10). `state` (`past|current|future`) rides on
+    the row so no renderer compares dates itself and gets a different answer in another timezone.
+  - 🔴 **The dashboard fee block was the last surface on the old fee arithmetic.** It read
+    `FeeService.summary()` — four fields, no quarters, `opening_dues` excluded — while `/fees`
+    read `CollectionService.board()`, contradicting `collection.py`'s own *"every fee screen is a
+    rendering of `board()`"* and repeating the defect V1-12 fixed for Lucy. It also computed
+    `outstanding = total − collected` **in the browser**: exactly the pending+overdue blend
+    `Collection` refuses to have an `outstanding` property in order to prevent (`S-163`).
+  - 🔴 **`PATCH /fees/installments/{id}/due-date` 500'd on every call** — routed to
+    `FeeService.update_due_date` since P0-D, and that method never existed. Nothing called the
+    route, and V1-13's no-dead-ends sweep looked for orphan *client* methods and orphan *GET*
+    routes, so it was neither. It matters here because an instalment with no due date is
+    **`unscheduled`** and this route is the only way to resolve the state the board now names.
+    Implemented (append-only `installment_edit` row; clearing back to NULL is allowed, because
+    `unscheduled` is a legitimate state). ⚠️ **Still no web caller** — wire it in the fee deep pass.
+  - Also: the collection curve's y-axis rendered clipped as `)0₹` (a rupee figure plus a suffix is
+    wider than the 44px gutter) — `TrendLine` gains **`yFormat`** · `by_class` was an unsorted,
+    uncoloured text table of seven numeric fields, now ranked rows with bars and both
+    denominators (`S-159`) · `shortMoney` is the lakh/crore short form for ring centres, because
+    "₹1,35,000" at 26px either overflows the hole or shrinks below reading size.
+  - `test_fees_v1_18.py` (11), including the identity that makes the pace figure worth having:
+    **`shortfall = overdue − prepayments`**.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
