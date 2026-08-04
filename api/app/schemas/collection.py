@@ -20,6 +20,30 @@ from pydantic import BaseModel, Field
 Date = date
 
 
+class YearCollection(BaseModel):
+    """The whole academic year, on one track.
+
+    Nothing exposed this before: `CollectionBoard`'s top-level figures are the
+    PICKED quarter's, so "how is the year going" could only be got by summing
+    quarter rows in a browser — which the dashboard did, adding pending to
+    overdue on the way (the blend `Collection` has no `outstanding` property
+    precisely to prevent).
+
+    The three figures the board leads with are `billed`, `due_by_today` and
+    `collected`, and they share one denominator, which is why they are drawn as
+    one arc against one marker rather than as three rings.
+    """
+    billed: float = 0            # everything asked for across the year
+    due_by_today: float = 0      # of that, what the schedule has already asked for
+    collected: float = 0         # of that, what is in
+    pending: float = 0
+    overdue: float = 0
+    pct: float | None = None     # collected / billed
+    due_pct: float | None = None # due_by_today / billed — the marker's position
+    shortfall: float = 0         # max(0, due_by_today - collected)
+    tone: str = "neutral"
+
+
 class QuarterRow(BaseModel):
     label: str
     start: Date
@@ -31,6 +55,18 @@ class QuarterRow(BaseModel):
     # None when nothing was billed in the window — a quarter with no instalments
     # is **not** 0% collected.
     pct: float | None = None
+    # The same pace pair as the year, at quarter scale: one ring per quarter,
+    # each on its own denominator, each carrying its own marker.
+    due_by_today: float = 0
+    due_pct: float | None = None
+    shortfall: float = 0
+    # Decided server-side. A quarter with nothing due yet is `neutral` and says
+    # so in a word — it has not been missed, and painting next January red every
+    # August is how a board stops being read.
+    tone: str = "neutral"
+    # past | current | future — so a renderer never has to compare dates itself
+    # and reach a different answer in another timezone.
+    state: str = "current"
 
 
 class ClassCollectionRow(BaseModel):
@@ -88,6 +124,9 @@ class CollectionBoard(BaseModel):
     pending: float = 0
     overdue: float = 0
     pct: float | None = None
+    # The whole year, beside the picked quarter. Accumulated in the same pass,
+    # so the year ring and the quarter rings cannot disagree.
+    year: YearCollection = YearCollection()
     quarters: list[QuarterRow] = []
     curve: list[CollectionPoint] = []
     by_class: list[ClassCollectionRow] = []

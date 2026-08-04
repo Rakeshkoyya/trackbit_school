@@ -112,13 +112,24 @@ class Collection:
     pending: float = 0.0        # unpaid, due date still ahead (or unscheduled)
     overdue: float = 0.0        # unpaid, due date passed
     billed: float = 0.0         # what was asked for in this scope
+    # What the school ASKED for by today: every instalment whose due date has
+    # arrived, paid or not. This is the denominator "are we on schedule?" needs,
+    # and it is not `overdue` — overdue is only the *unpaid* part of it, so a
+    # school that collected every rupee on time has overdue 0 and due_by_today
+    # equal to the whole first half of the year.
+    #
+    # An unscheduled instalment (no due date) is never in here: the school has
+    # not said when it wants that money, so it cannot be late.
+    due_by_today: float = 0.0
 
     def add(self, *, collected: float = 0.0, pending: float = 0.0,
-            overdue: float = 0.0, billed: float = 0.0) -> None:
+            overdue: float = 0.0, billed: float = 0.0,
+            due_by_today: float = 0.0) -> None:
         self.collected += collected
         self.pending += pending
         self.overdue += overdue
         self.billed += billed
+        self.due_by_today += due_by_today
 
     @property
     def pct(self) -> float | None:
@@ -127,6 +138,49 @@ class Collection:
         if self.billed <= 0:
             return None
         return round(self.collected / self.billed * 100, 1)
+
+    @property
+    def due_pct(self) -> float | None:
+        """Where the schedule says we should be, on the same track as `pct`.
+
+        Drawn as a marker beside the collected arc, never as a second arc: the
+        two share a denominator, and the distance between them IS the finding.
+        """
+        if self.billed <= 0:
+            return None
+        return round(self.due_by_today / self.billed * 100, 1)
+
+    @property
+    def shortfall(self) -> float:
+        """How far behind the schedule we are, in money. Zero when level or
+        ahead — a school that collected early is not "minus ₹40,000 behind".
+
+        This is the one addition `Collection` DOES make, because unlike
+        pending+overdue it names a single fact: money the school asked for by
+        today and does not have. It is `overdue` restated on the year's track,
+        and the two agree by construction.
+        """
+        return max(0.0, self.due_by_today - self.collected)
+
+
+def pace_tone(c: Collection) -> str:
+    """Rendered status for a collection scope, decided ONCE, server-side.
+
+    The rule that matters is the first one: a scope with nothing due yet is
+    **neutral and a word**, never 0% and never red. A quarter that has not
+    started has not been missed, and painting next January red every August is
+    how a board stops being read (ux §5, §10).
+    """
+    if c.billed <= 0:
+        return "neutral"          # nothing was asked for here at all
+    if c.due_by_today <= 0:
+        return "neutral"          # asked for, but not yet — not a score
+    ratio = c.collected / c.due_by_today
+    if ratio >= 0.995:            # level or ahead; the 0.5% absorbs rounding
+        return "green"
+    if ratio >= 0.9:
+        return "amber"
+    return "red"
 
 
 def collection_sentence(q: Quarter | None, c: Collection, families_overdue: int,

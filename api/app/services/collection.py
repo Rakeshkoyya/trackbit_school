@@ -51,6 +51,7 @@ from app.core.collection import (
     Quarter,
     collection_sentence,
     current_quarter,
+    pace_tone,
     quarter_of,
     quarter_windows,
 )
@@ -79,6 +80,7 @@ from app.schemas.collection import (
     FeeNoteOut,
     QuarterRow,
     RemindOut,
+    YearCollection,
 )
 from app.services.fee_math import q
 from app.services.notify_guardian import notify_guardians
@@ -121,6 +123,13 @@ class CollectionService:
 
         # ── one pass over every instalment in the year ───────────────────────
         by_quarter: dict[str, Collection] = defaultdict(Collection)
+        # The WHOLE year, which nothing exposed before: `board`'s top-level
+        # figures are the picked quarter's, so "how is the year going" could
+        # only be reconstructed by summing quarter rows in a browser — and the
+        # dashboard did exactly that, in two units, with pending and overdue
+        # added together. It is accumulated here, in the same pass, so the year
+        # ring and the quarter rings can never disagree.
+        year_due = Collection()
         by_class: dict[uuid.UUID | None, Collection] = defaultdict(Collection)
         families_by_class: dict[uuid.UUID | None, set] = defaultdict(set)
         roster_by_class: dict[uuid.UUID | None, set] = defaultdict(set)
@@ -137,9 +146,24 @@ class CollectionService:
                 qlabel = quarter_of(inst.due_date, windows)
                 bucket = by_quarter[qlabel]
                 bucket.add(collected=float(paid), billed=float(amount))
+                # What the school asked for by today, paid or not — the
+                # schedule's own position, and the only thing that makes a
+                # percentage readable in August rather than in March. One extra
+                # accumulator on a loop that already has `inst.due_date` and
+                # `today` in hand: no new query, no new column.
+                #
+                # `<=` not `<`: money due TODAY has been asked for today. The
+                # overdue test below stays strict, because a family has until
+                # the end of the day to pay before anyone rings them.
+                due_now = bool(inst.due_date and inst.due_date <= today)
+                if due_now:
+                    bucket.add(due_by_today=float(amount))
+                    year_due.add(due_by_today=float(amount))
+                year_due.add(collected=float(paid), billed=float(amount))
                 overdue = bool(inst.due_date and inst.due_date < today and unpaid > 0)
                 if unpaid > 0:
                     bucket.add(**{"overdue" if overdue else "pending": float(unpaid)})
+                    year_due.add(**{"overdue" if overdue else "pending": float(unpaid)})
                 if qlabel == picked:
                     cls = by_class[class_id]
                     cls.add(collected=float(paid), billed=float(amount))
@@ -151,6 +175,21 @@ class CollectionService:
             c = by_quarter.get(row.label, Collection())
             row.collected, row.pending, row.overdue = c.collected, c.pending, c.overdue
             row.billed, row.pct = c.billed, c.pct
+            row.due_by_today, row.due_pct = c.due_by_today, c.due_pct
+            row.shortfall = c.shortfall
+            # Decided here, once. Three surfaces render these rows (the
+            # dashboard block, the fees board and Lucy) and a tone each worked
+            # out for itself would be three verdicts about one term's money.
+            row.tone = pace_tone(c)
+            row.state = ("future" if row.start > today
+                         else "current" if row.end >= today else "past")
+
+        out.year = YearCollection(
+            billed=year_due.billed, collected=year_due.collected,
+            pending=year_due.pending, overdue=year_due.overdue,
+            due_by_today=year_due.due_by_today, pct=year_due.pct,
+            due_pct=year_due.due_pct, shortfall=year_due.shortfall,
+            tone=pace_tone(year_due))
         unscheduled = by_quarter.get(UNSCHEDULED)
         if unscheduled and unscheduled.billed:
             # A word, not a bucket — never silently folded into Q1 (ux §10).

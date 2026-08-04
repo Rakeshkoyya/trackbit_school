@@ -77,13 +77,19 @@ export function ChartLegend({ series }: { series: Series[] }) {
 // ── lines ────────────────────────────────────────────────────────────────────
 
 export function TrendLine({
-  rows, series, height = 220, yDomain, yUnit = "", reference,
+  rows, series, height = 220, yDomain, yUnit = "", yFormat, reference,
 }: {
   rows: ChartRow[];
   series: Series[];
   height?: number;
   yDomain?: [number, number];
   yUnit?: string;
+  /** Format a tick yourself when the raw number does not fit the axis gutter.
+   *  Rupee values are the case this exists for: `unit="₹"` on 60000 renders
+   *  "60000₹", which is wider than the 44px axis and gets clipped to ")0₹" —
+   *  a label that reads as nothing at all. Pass a lakh/crore formatter and the
+   *  gutter widens to match. */
+  yFormat?: (v: number) => string;
   reference?: { y: number; label: string };
 }) {
   return (
@@ -94,11 +100,14 @@ export function TrendLine({
             <CartesianGrid vertical={false} stroke="var(--color-border)" />
             <XAxis dataKey="x" tick={AXIS_TICK} tickLine={false}
               axisLine={{ stroke: "var(--color-border)" }} interval="preserveStartEnd" minTickGap={12} />
-            <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={44}
-              domain={yDomain ?? ["auto", "auto"]} unit={yUnit} />
+            <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false}
+              width={yFormat ? 62 : 44}
+              domain={yDomain ?? ["auto", "auto"]}
+              {...(yFormat ? { tickFormatter: (v: number) => yFormat(v) } : { unit: yUnit })} />
             <Tooltip contentStyle={TOOLTIP_STYLE}
               cursor={{ stroke: "var(--color-border)", strokeWidth: 1 }}
-              formatter={(v: unknown) => `${v}${yUnit}`} />
+              formatter={(v: unknown) => (yFormat && typeof v === "number"
+                ? yFormat(v) : `${v}${yUnit}`)} />
             {reference ? (
               <ReferenceLine y={reference.y} stroke="var(--color-muted-foreground)"
                 strokeDasharray="4 4" strokeOpacity={0.6}

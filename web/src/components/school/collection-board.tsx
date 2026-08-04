@@ -30,6 +30,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { ChartCard, TrendLine } from "@/components/charts";
+import {
+  ClassConcentration, PaceLegendFees, QuarterRings, YearFeeRing, shortMoney,
+} from "@/components/school/fee-rings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -115,7 +118,39 @@ export function CollectionBoard({ yearId }: { yearId: string | null }) {
 
   return (
     <div className="space-y-5">
-      {/* the sentence */}
+      {/* ── the year, against the schedule ── */}
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-4 py-2.5">
+          <h2 className="text-sm font-semibold">The year so far</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            The arc is what came in; the mark is what the school had asked for by today.
+          </p>
+        </div>
+        <div className="p-4">
+          <YearFeeRing year={data.year} />
+        </div>
+        <div className="border-t border-border bg-muted/25 px-4 py-2">
+          <PaceLegendFees />
+        </div>
+      </section>
+
+      {/* ── quarter by quarter ── */}
+      <section>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">Quarter by quarter</h2>
+          <p className="text-xs text-muted-foreground">
+            Each on its own denominator. Tap one to scope the detail below it.
+          </p>
+        </div>
+        <QuarterRings quarters={data.quarters} picked={data.quarter}
+          onPick={(label) => setQuarter(label === data.quarter ? undefined : label)} />
+      </section>
+
+      {/* the sentence — about the PICKED quarter, which is why it sits under the
+          quarter rings rather than at the top of the page. `collected`,
+          `pending` and `overdue` stay three figures: pending is a forecast and
+          overdue is a phone call, and `Collection` has no method that adds
+          them (`S-163`). */}
       <div className="rounded-xl border border-border bg-card p-4">
         <p className="text-sm leading-relaxed">{data.headline}</p>
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
@@ -127,20 +162,6 @@ export function CollectionBoard({ yearId }: { yearId: string | null }) {
             <span className="font-semibold text-foreground">{money(data.overdue)}</span> overdue
           </span>
           <span className="text-muted-foreground">of {money(data.billed)} billed</span>
-        </div>
-        {/* Three states, never one "outstanding" figure — one is a forecast and
-            the other is a phone call. */}
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {data.quarters.map((q) => (
-            <button key={q.label} type="button"
-              onClick={() => setQuarter(q.label === data.quarter ? undefined : q.label)}
-              className={`rounded-md border px-3 py-1.5 text-xs transition ${
-                q.label === data.quarter
-                  ? "border-primary bg-primary/10 font-medium text-primary"
-                  : "border-border hover:bg-muted/40"}`}>
-              {q.label} · {q.pct == null ? "nothing due" : `${q.pct}%`}
-            </button>
-          ))}
         </div>
         {data.unscheduled_note ? (
           <p className="mt-2 text-xs text-muted-foreground">{data.unscheduled_note}</p>
@@ -156,44 +177,20 @@ export function CollectionBoard({ yearId }: { yearId: string | null }) {
       {curve.length > 1 ? (
         <ChartCard title="Collection through the quarter"
           hint="Cumulative, with the previous quarter laid over it day for day.">
-          <TrendLine rows={curve} yUnit="₹" height={200}
+          {/* Lakh/crore ticks: the raw rupee figure plus a "₹" suffix is wider
+              than the axis gutter and was rendering clipped as ")0₹". */}
+          <TrendLine rows={curve} height={200} yFormat={shortMoney}
             series={[{ key: "collected", label: data.quarter ?? "This quarter" },
                      { key: "previous", label: "Previous quarter" }]} />
         </ChartCard>
       ) : null}
 
-      {/* which class to push this week */}
+      {/* which class to push this week — was an unsorted, uncoloured text table
+          of seven numeric fields, which the eye cannot rank ten classes from */}
       {data.by_class.length ? (
         <section>
           <h2 className="mb-2 text-sm font-semibold">Where it is concentrated</h2>
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2">Class</th>
-                  <th className="px-2 py-2">Families pending</th>
-                  <th className="px-2 py-2">Overdue</th>
-                  <th className="px-2 py-2">Collected</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.by_class.map((c) => (
-                  <tr key={c.class_label} className="border-t border-border">
-                    <td className="px-3 py-1.5 font-medium">{c.class_label}</td>
-                    {/* Both denominators: ₹1.4L is one big defaulter or fourteen
-                        small ones, and those need opposite actions. */}
-                    <td className="px-2 py-1.5 tabular-nums">
-                      {c.families_pending} of {c.families_total}
-                    </td>
-                    <td className="px-2 py-1.5 tabular-nums">{money(c.overdue)}</td>
-                    <td className="px-2 py-1.5 tabular-nums text-muted-foreground">
-                      {money(c.collected)}{c.pct != null ? ` · ${c.pct}%` : ""}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ClassConcentration rows={data.by_class} />
         </section>
       ) : null}
 

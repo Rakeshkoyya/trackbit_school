@@ -2529,6 +2529,32 @@ export interface StudentIntervention {
 
 
 // ── V1-10 · the collection board ─────────────────────────────────────────────
+
+/** The whole academic year, on one track.
+ *
+ *  The three figures the board leads with — `billed`, `due_by_today`,
+ *  `collected` — share ONE denominator, which is why they are drawn as one arc
+ *  against one marker rather than as three rings: three rings would draw the
+ *  same track three times and the "billed" one would be a full circle saying
+ *  nothing. And `collected` can EXCEED `due_by_today` when families pay in
+ *  advance, which a marker can express and stacked arcs cannot. */
+export interface YearCollection {
+  billed: number;
+  /** Of that, what the schedule has already asked for — paid or not. Not the
+   *  same as `overdue`, which is only the unpaid part of it. */
+  due_by_today: number;
+  collected: number;
+  pending: number;
+  overdue: number;
+  pct: number | null;
+  /** due_by_today / billed — where the marker sits on the same track. */
+  due_pct: number | null;
+  /** max(0, due_by_today − collected). Zero when level or ahead: a school that
+   *  collected early is not "minus ₹40,000 behind". */
+  shortfall: number;
+  tone: "neutral" | "green" | "amber" | "red";
+}
+
 export interface QuarterRow {
   label: string;
   start: string;
@@ -2540,6 +2566,15 @@ export interface QuarterRow {
   /** null when nothing was billed — a quarter with no instalments is **not**
    *  0% collected. */
   pct: number | null;
+  /** The same pace pair at quarter scale: its own denominator, its own marker. */
+  due_by_today: number;
+  due_pct: number | null;
+  shortfall: number;
+  /** Server-decided. A quarter with nothing due yet is `neutral` and says so in
+   *  a word — it has not been missed, and painting next January red every
+   *  August is how a board stops being read. */
+  tone: "neutral" | "green" | "amber" | "red";
+  state: "past" | "current" | "future";
 }
 
 export interface ClassCollectionRow {
@@ -2589,6 +2624,10 @@ export interface CollectionBoard {
   pending: number;
   overdue: number;
   pct: number | null;
+  /** The whole year, beside the picked quarter. The figures above are the
+   *  PICKED QUARTER's — reading them as the year's is the mistake this field
+   *  exists to remove. */
+  year: YearCollection;
   quarters: QuarterRow[];
   curve: CollectionPoint[];
   by_class: ClassCollectionRow[];

@@ -29,9 +29,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { MeterBar, STATUS_COLOR } from "@/components/charts";
 import { StaffDayBlock } from "@/components/insights/daybook";
-import { ActionRail, CustomSection, MetricCell, SectionCard } from "@/components/insights/overview";
+import { ActionRail, CustomSection, SectionCard } from "@/components/insights/overview";
 import { PresencePanorama } from "@/components/insights/presence";
 import { HomeworkOverviewBlock, OVERVIEW_WINDOW_DAYS } from "@/components/insights/homework";
 import { SyllabusPulseBlock } from "@/components/insights/syllabus";
@@ -54,7 +53,8 @@ import { insightsApi } from "@/lib/insights-api";
 import type { QuickAction } from "@/lib/insights-types";
 import { schoolApi } from "@/lib/school-api";
 import { money } from "@/lib/school-format";
-import type { DashboardAlert, FeeSummary } from "@/lib/school-types";
+import { QuarterRings, YearFeeRing } from "@/components/school/fee-rings";
+import type { CollectionBoard, DashboardAlert } from "@/lib/school-types";
 
 const longDate = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
@@ -221,39 +221,49 @@ function Briefing() {
 // ── fees ─────────────────────────────────────────────────────────────────────
 
 /** Fees has no tab of its own — it has a whole screen. The block matches the
- *  module blocks so the overview reads as one board, and it renders only when
- *  the payload carries fees at all (teachers never receive them, §2). */
-function FeesSection({ fees }: { fees: FeeSummary }) {
-  const total = Number(fees.total_fee);
-  const collected = Number(fees.collected_fee);
-  const overdue = Number(fees.overdue_amount);
-  const outstanding = Math.max(0, total - collected);
-  const pct = total > 0 ? Math.round((collected / total) * 100) : null;
+ *  module blocks so the overview reads as one board, and it renders only for an
+ *  admin (teachers never receive fee figures at all, §2).
+ *
+ *  It reads `CollectionService.board()`, the same computation `/fees` renders.
+ *  It used to read `FeeService.summary()` — four fields, no quarters, and
+ *  `opening_dues` excluded — which made this the last surface in the product
+ *  still on the old fee arithmetic after V1-12 moved Lucy off it, and directly
+ *  contradicted collection.py's own "every fee screen is a rendering of
+ *  board()". It also computed `outstanding = total − collected` right here, in
+ *  the browser: exactly the pending+overdue blend `Collection` refuses to have
+ *  an `outstanding` property in order to prevent (`S-163`). Pending is a
+ *  forecast; overdue is a phone call. */
+function FeesSection({ board }: { board: CollectionBoard }) {
+  const y = board.year;
+  const families = new Set(board.defaulters.map((d) => d.student_fee_id)).size;
+  const headline = y.billed <= 0
+    ? "Nothing has been billed for this year yet."
+    : y.due_by_today <= 0
+      ? `${money(y.billed)} billed for the year — no instalment has come due yet.`
+      : y.shortfall > 0
+        ? `${money(y.shortfall)} of what was due by today is not in${
+          families ? `, across ${families} ${families === 1 ? "family" : "families"}.` : "."}`
+        : `Collection is level with the schedule — ${money(y.collected)} of the ${money(y.due_by_today)} due by today.`;
 
   return (
     <CustomSection
       sectionKey="fees" label="Fees" href="/fees"
-      headline={pct == null
-        ? "Nothing has been billed for this year yet."
-        : `${pct}% of the year’s billed fees are in${overdue > 0 ? `, ${money(fees.overdue_amount)} past due.` : "."}`}
+      headline={headline}
       notes={
-        <div className="space-y-1.5">
-          <MeterBar parts={[
-            { value: collected, color: STATUS_COLOR.green, label: "Collected" },
-            { value: outstanding, color: STATUS_COLOR.amber, label: "Outstanding" },
-          ]} />
-          <p className="text-muted-foreground">
-            {money(fees.collected_fee)} collected · {money(outstanding)} still to come
+        <div className="space-y-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+            By quarter
           </p>
+          <QuarterRings quarters={board.quarters} />
+          {board.carried ? (
+            // D-88: never inside the figures above, and never silently dropped.
+            <p className="pt-1 text-[11px] text-muted-foreground">{board.carried.note}</p>
+          ) : null}
         </div>
       }>
-      <MetricCell label="Collected" value={money(fees.collected_fee)}
-        sub={`of ${money(fees.total_fee)} billed`} href="/fees" />
-      <MetricCell label="Overdue" value={money(fees.overdue_amount)}
-        sub={overdue > 0 ? "past the due date" : "nothing past due"}
-        tone={overdue > 0 ? "amber" : "green"} href="/fees" />
-      <MetricCell label="Instalments due" value={String(fees.pending_installments)}
-        sub="unpaid instalments across the school" href="/fees" />
+      <div className="flex-1 px-4 py-3">
+        <YearFeeRing year={y} compact />
+      </div>
     </CustomSection>
   );
 }
@@ -294,6 +304,14 @@ function DashboardInner() {
   // the one thing this block exists not to do. Its own request like the
   // syllabus pulse, so the funnel and the shape arrive with the figures they
   // are drawn from rather than being reconstructed here.
+  // The SAME computation `/fees` renders (`S-152`). This page is admin-only
+  // (`AuthGuard allow={["admin"]}` at the foot), which is what makes calling an
+  // admin-only fee route from here safe — teachers never reach this component,
+  // let alone the request.
+  const { data: feeBoard } = useQuery({
+    queryKey: ["collection", yearId, null],
+    queryFn: () => schoolApi.collectionBoard({ yearId: yearId ?? undefined }),
+  });
   const { data: homework, isLoading: homeworkLoading } = useQuery({
     queryKey: ["insights", "homework", OVERVIEW_WINDOW_DAYS],
     queryFn: () => insightsApi.homework(OVERVIEW_WINDOW_DAYS),
@@ -468,7 +486,12 @@ function DashboardInner() {
                 loading={homeworkLoading && !homework} />
             </div>
             {modules.map((s) => <SectionCard key={s.key} section={s} />)}
-            {data?.fees ? <FeesSection fees={data.fees} /> : null}
+            {/* Full width, like syllabus and homework: a ring beside its ledger
+                and then a row of quarter rings does not fit half a grid column
+                without the quarters collapsing to something unreadable. */}
+            {feeBoard && feeBoard.academic_year_id ? (
+              <div className="lg:col-span-2"><FeesSection board={feeBoard} /></div>
+            ) : null}
             {exams ? <SectionCard section={exams} /> : null}
           </div>
         )}

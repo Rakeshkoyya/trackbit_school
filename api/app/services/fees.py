@@ -25,6 +25,7 @@ from app.models import (
     Transaction,
 )
 from app.schemas.fees import (
+    DueDateUpdate,
     FeeStructureCreate,
     FeeStructureOut,
     FeeSummary,
@@ -40,6 +41,7 @@ from app.schemas.fees import (
 )
 from app.services.fee_math import (
     aggregate_paid,
+    installment_status,
     proportional_installments,
     q,
     recompute_student_fee,
@@ -406,6 +408,44 @@ class FeeService:
         # Compensating row — the original payment is preserved (append-only ledger).
         self.db.add(self._txn(m, sf.id, inst.id, q(-last.amount), "undo",
                               f"Reverted payment of ₹{q(last.amount)}"))
+        recompute_student_fee(sf)
+        self.db.flush()
+        return self._detail(sf)
+
+    def update_due_date(self, m: CurrentMember, inst_id: uuid.UUID,
+                        body: DueDateUpdate) -> StudentFeeDetail:
+        """Move (or clear) the date the school is asking for this instalment by.
+
+        **This method did not exist.** `PATCH /fees/installments/{id}/due-date`
+        has been routed to it since P0-D and raised `AttributeError` — a 500 —
+        on every call. Nothing in the web client called the route, so nothing
+        ever surfaced it; the V1-13 no-dead-ends sweep looked for orphaned
+        *client methods* and for GET routes with no caller, and this is neither.
+
+        It matters now because the collection board reports an instalment with
+        no due date as **`unscheduled`** — in no quarter, in `billed` but never
+        in `due_by_today` — and this route is the only way to resolve that
+        state. A board that names a problem whose only fix is a 500 has made
+        the admin's day worse (ux §7).
+
+        The due date is a plan, not money: it changes no amount, no
+        `paid_amount` and no status, so it writes an `installment_edit` row to
+        the append-only ledger rather than a payment. Clearing it back to NULL
+        is allowed — a school that set a date by mistake has to be able to take
+        it off, and `unscheduled` is a legitimate state, not an error.
+        """
+        inst, sf = self._load_installment(m.org_id, inst_id)
+        was = inst.due_date
+        if was == body.due_date:
+            return self._detail(sf)
+        inst.due_date = body.due_date
+        # Status is derived from the date, so re-derive it: an instalment that
+        # was overdue and has been given a later date is not overdue any more.
+        inst.status = installment_status(inst, date.today())
+        self.db.add(self._txn(
+            m, sf.id, inst.id, q(0), "installment_edit",
+            f"Due date {was.isoformat() if was else 'none'} → "
+            f"{body.due_date.isoformat() if body.due_date else 'none'}"))
         recompute_student_fee(sf)
         self.db.flush()
         return self._detail(sf)
