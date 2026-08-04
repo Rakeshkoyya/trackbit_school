@@ -447,9 +447,13 @@ def test_catalogue_is_platform_owned_and_scoped_by_what_setup_already_asks(clien
 
     _make_super(sup["user"]["id"])
     soon = date.today() + timedelta(days=10)
-    ours = _catalogue(client, sh, cleanup, name="Bathukamma", on=soon, state="Telangana",
+    # V1-19: `states` is a set, not a single state — one row per (key, date),
+    # so a festival observed in five states has to name five.
+    ours = _catalogue(client, sh, cleanup, name="Bathukamma", on=soon,
+                      states=["Telangana"],
                       source="Telangana state holiday list 2026")
-    theirs = _catalogue(client, sh, cleanup, name="Pongal Kerala", on=soon, state="Kerala",
+    theirs = _catalogue(client, sh, cleanup, name="Pongal Kerala", on=soon,
+                        states=["Kerala", "Puducherry"],
                         source="Kerala state list 2026")
     everyone = _catalogue(client, sh, cleanup, name="World Book Day", on=soon, tier="minor",
                           source="UN observances")
@@ -483,11 +487,13 @@ def test_bulk_import_corrects_rather_than_double_suggests(client, cleanup):
         {"key": key, "name": "Diwali", "date": d.isoformat(), "kind": "holiday",
          "source": "Telangana state holiday list 2026", "prep_days": 21}]}
     first = client.post("/api/v1/platform/observances/bulk", headers=sh, json=payload).json()
-    assert first == {"created": 1, "updated": 0}
+    assert (first["created"], first["updated"]) == (1, 0)
+    # V1-19 — an unplaceable state is reported, never silently dropped.
+    assert first["unresolved_states"] == []
 
     payload["entries"][0]["name"] = "Deepavali"
     second = client.post("/api/v1/platform/observances/bulk", headers=sh, json=payload).json()
-    assert second == {"created": 0, "updated": 1}
+    assert (second["created"], second["updated"]) == (0, 1)
 
     rows = [o for o in client.get("/api/v1/platform/observances", headers=sh).json()
             if o["key"] == key]

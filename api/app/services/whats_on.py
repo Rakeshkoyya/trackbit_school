@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.indian_states import normalise
 from app.models import (
     AcademicYear,
     CalendarEvent,
@@ -279,11 +280,21 @@ class WhatsOnService:
         """
         today = on_date or today_in(m.org.timezone)
         end = today + timedelta(days=horizon)
+        # V1-19 — `states` is a set, and the school's own value is free text
+        # normalised to a canonical token. A school whose state we cannot place
+        # sees the all-India rows and no regional ones: thin, but never wrong.
+        # The old `Observance.state == (m.org.state or "")` compared against
+        # `""` for an unset school, which matched nothing and read identically
+        # to an empty catalogue — the failure had no symptom.
+        token = normalise(m.org.state)
+        state_clause = (
+            Observance.states.is_(None) if token is None
+            else or_(Observance.states.is_(None), Observance.states.any(token)))
         rows = list(self.db.scalars(
             select(Observance)
             .where(Observance.is_active.is_(True),
                    Observance.date >= today, Observance.date <= end,
-                   or_(Observance.state.is_(None), Observance.state == (m.org.state or "")),
+                   state_clause,
                    or_(Observance.board.is_(None), Observance.board == (m.org.board or "")))
             .order_by(Observance.date)))
         if not rows:

@@ -167,7 +167,12 @@ class ObservanceIn(BaseModel):
     kind: str = Field(default="festival", pattern="^(holiday|festival|observance)$")
     tier: str = Field(default="major", pattern="^(major|minor)$")
     prep_days: int = Field(default=7, ge=0, le=120)
-    state: str | None = Field(default=None, max_length=80)
+    # V1-19 — the set of states that observe this, canonical tokens from
+    # `core/indian_states.py`. Empty/None = all India. The service normalises
+    # on write and REPORTS what it could not place rather than dropping it
+    # silently, so a typo in a bulk import is visible instead of producing a
+    # state no school will ever match.
+    states: list[str] | None = Field(default=None, max_length=40)
     board: str | None = Field(default=None, max_length=80)
     tradition: str | None = Field(default=None, max_length=80)
     source: str = Field(min_length=1, max_length=200)
@@ -191,7 +196,7 @@ class ObservanceOut(BaseModel):
     kind: str
     tier: str
     prep_days: int
-    state: str | None = None
+    states: list[str] | None = None
     board: str | None = None
     tradition: str | None = None
     source: str
@@ -212,3 +217,9 @@ class ObservanceBulkIn(BaseModel):
 class ObservanceBulkOut(BaseModel):
     created: int = 0
     updated: int = 0
+    # V1-19 — state names the import could not resolve to a canonical token,
+    # de-duplicated. Reported, never silently dropped: an unresolvable state is
+    # the one failure here with no symptom (the row imports fine and then
+    # matches no school forever), so the importer has to say it out loud. Same
+    # rule as the syllabus importer's `unresolved` (V2-P11).
+    unresolved_states: list[str] = []

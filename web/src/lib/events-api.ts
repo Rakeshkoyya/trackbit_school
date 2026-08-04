@@ -104,7 +104,8 @@ export interface Observance {
   kind: "holiday" | "festival" | "observance";
   tier: "major" | "minor";
   prep_days: number;
-  state: string | null;
+  /** V1-19 — the set of states that observe this. null/empty = all India. */
+  states: string[] | null;
   board: string | null;
   tradition: string | null;
   source: string;

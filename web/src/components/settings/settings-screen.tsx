@@ -10,6 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
+import {
+  INDIAN_STATES,
+  INDIAN_UNION_TERRITORIES,
+  isCanonicalState,
+} from "@/lib/indian-states";
 import { schoolApi } from "@/lib/school-api";
 import type { AttendanceMode, OrgSettings, WorkCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -32,6 +37,11 @@ function SchoolSection({ s }: { s: OrgSettings }) {
   const [board, setBoard] = useState<string | null>(null);
   const [phone, setPhone] = useState<string | null>(null);
   const dirty = address !== null || state !== null || board !== null || phone !== null;
+  // A value typed into the old free-text box that the catalogue cannot match.
+  // Kept as an option so saving the form does not silently blank it, and
+  // labelled so the admin can see why no regional dates are being suggested.
+  const currentState = state ?? s.state ?? "";
+  const legacyState = currentState && !isCanonicalState(currentState) ? currentState : "";
 
   const save = useMutation({
     mutationFn: () => appApi.updateSettings({
@@ -83,8 +93,30 @@ function SchoolSection({ s }: { s: OrgSettings }) {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="state">State</Label>
-            <Input id="state" value={state ?? s.state ?? ""}
-              onChange={(e) => setState(e.target.value)} placeholder="e.g. Telangana" />
+            {/* A picker, not a text box (V1-19). The state is what scopes the
+                observance catalogue to this school, so "TN" or a typo means no
+                regional dates at all — and nothing on screen would ever say
+                so. A value typed before this became a picker is kept and
+                flagged rather than rewritten underneath the admin. */}
+            <select id="state" value={currentState}
+              onChange={(e) => setState(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm">
+              <option value="">Not set</option>
+              {legacyState ? (
+                <option value={legacyState}>{legacyState} (unrecognised)</option>
+              ) : null}
+              <optgroup label="States">
+                {INDIAN_STATES.map((n) => <option key={n} value={n}>{n}</option>)}
+              </optgroup>
+              <optgroup label="Union territories">
+                {INDIAN_UNION_TERRITORIES.map((n) => <option key={n} value={n}>{n}</option>)}
+              </optgroup>
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isCanonicalState(currentState)
+                ? "Decides which regional holidays are suggested for your calendar."
+                : "Set this to see your state's holidays suggested on Plan → Year."}
+            </p>
           </div>
           <div>
             <Label htmlFor="board">Board</Label>
