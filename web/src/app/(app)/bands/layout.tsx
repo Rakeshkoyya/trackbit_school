@@ -32,9 +32,17 @@ export default function BandsLayout({ children }: { children: React.ReactNode })
             { label: "Overview", href: "/bands" },
             { label: "Manage bands", href: "/bands/manage" },
             ...(isAdmin
-              ? [{ label: "Teacher allocation", href: "/bands/allocation" }]
+              ? [
+                  { label: "Teacher allocation", href: "/bands/allocation" },
+                  // The programme report is the school-wide read: movement by
+                  // class and subject. A teacher's version of it would be her
+                  // own children, which is exactly what My students already is —
+                  // so she gets no Reports tab rather than one that opens on
+                  // "this is the admin's view" (ux §13, the same rule that
+                  // hides the whole area from a teacher outside the programme).
+                  { label: "Reports", href: "/bands/reports" },
+                ]
               : [{ label: "My students", href: "/bands/my-students" }]),
-            { label: "Reports", href: "/bands/reports" },
           ]}
         />
         {children}
