@@ -1271,7 +1271,10 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     **`shortfall = overdue − prepayments`**.
 
 - **V1-19 (the observance corpus — India's calendar, by state, 2026-08-04)** — migration
-  **`c1d2e3f4a5b6`** (head) **on local dev + test; prod still needs it.** V1-7 built the whole
+  **`c1d2e3f4a5b6`** (head) — **applied to local dev, test AND DO prod on 2026-08-04**, and the
+  668-row corpus is loaded in prod. ⚠️ Unlike every migration before it this one is **not purely
+  additive**: it DROPS `observances.state`, so prod code that predates it 500s on
+  `/events/suggestions` and `/platform/observances` until the deploy lands. V1-7 built the whole
   events module — catalogue tables, approval sheet with an editable date (`D-79`), the cost
   preview, the what's-on feed — and shipped the table **empty** (`Q-63`, deliberately: filling it
   by asking a model when Diwali is would have been `S-123`'s rejected row wearing a table for a
@@ -1513,8 +1516,8 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: test DB and **DO prod are both at head `b0c1d2e3f4a5`** (V1-11), applied
-2026-08-02; 57 tables carry an `org_isolation` policy. **The LOCAL dev DB
+Current state: local dev, test DB and **DO prod are all at head `c1d2e3f4a5b6`** (V1-19), applied
+2026-08-04 (prod was at `b0c1d2e3f4a5` until then); 57 tables carry an `org_isolation` policy. **The LOCAL dev DB
 (`localhost/trackbit_school`) was brought to the same head at V1-13 close** — it had been left one
 migration behind, so anything run against it before then was missing `guardian_messages` and
 `parent_login_attempts`.
