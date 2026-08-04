@@ -151,8 +151,15 @@ export function QuarterRings({ quarters, onPick, picked }: {
   picked?: string | null;
 }) {
   if (!quarters.length) return null;
+  // The count comes from `quarter_windows`, which cuts the academic year into
+  // equal DUE-DATE windows — it is not the number of instalments a school
+  // charges. A school billing in three still gets whatever windows the year was
+  // cut into, so the grid adapts rather than assuming four and leaving a hole.
+  const cols = quarters.length <= 2 ? "sm:grid-cols-2"
+    : quarters.length === 3 ? "sm:grid-cols-3"
+      : quarters.length === 5 ? "sm:grid-cols-5" : "sm:grid-cols-4";
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className={`grid grid-cols-2 gap-3 ${cols}`}>
       {quarters.map((q) => {
         const nothingBilled = q.billed <= 0;
         const nothingDue = !nothingBilled && q.due_by_today <= 0;
