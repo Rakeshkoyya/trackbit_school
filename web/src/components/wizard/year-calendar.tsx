@@ -28,12 +28,40 @@ export interface PaintedRange {
   title: string;
 }
 
+/** A catalogue date this school has not decided on yet (V1-20). */
+export interface SuggestedDay {
+  id: string;
+  date: string; // yyyy-mm-dd
+  name: string;
+  kind: string;
+  tier: string;
+}
+
+/**
+ * Two levels of certainty, and the calendar's whole job is to keep them apart.
+ *
+ *   **Decided** — a row in `calendar_events`. It IS the year: it has already
+ *   changed every plan's capacity. Solid fill, weighted numeral.
+ *
+ *   **Proposed** — a catalogue suggestion nobody has approved. It has changed
+ *   nothing. Dashed outline, faint tint, normal weight.
+ *
+ * Outline-versus-fill rather than two greens, because the difference is
+ * categorical (is this real yet?) not one of degree, and because texture
+ * survives greyscale, a projector and colour blindness where a second tint of
+ * the same hue does not. The dashed outline is the same device the roll
+ * medallion, the day-book's away cell and the homework funnel already use for
+ * "no record here" — one visual habit for one idea.
+ */
 const KIND_STYLE: Record<PaintKind, string> = {
-  holiday: "bg-warning-soft text-warning",
-  exam_block: "bg-danger/12 text-danger",
-  event: "bg-accent text-accent-foreground",
-  celebration: "bg-[#e7efe9] text-[#234a37]",
+  holiday: "bg-warning/25 text-warning font-semibold",
+  exam_block: "bg-danger/18 text-danger font-semibold",
+  event: "bg-accent text-accent-foreground font-semibold",
+  celebration: "bg-primary/18 text-primary font-semibold",
 };
+
+const SUGGESTED_STYLE =
+  "border border-dashed border-primary/45 bg-primary/[0.06] text-primary/85";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -84,16 +112,20 @@ export function YearCalendar({
   startDate,
   endDate,
   ranges = [],
+  suggestions = [],
   paintable = false,
   onPaint,
+  onSuggestion,
   workingWeekdays = [0, 1, 2, 3, 4, 5],
   className,
 }: {
   startDate: string;
   endDate: string;
   ranges?: PaintedRange[];
+  suggestions?: SuggestedDay[];
   paintable?: boolean;
   onPaint?: (start: string, end: string) => void;
+  onSuggestion?: (s: SuggestedDay) => void;
   workingWeekdays?: number[];
   className?: string;
 }) {
@@ -101,6 +133,15 @@ export function YearCalendar({
   const [anchor, setAnchor] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const painting = useRef(false);
+  // The anchor is mirrored in refs because `commit` runs on a window pointerup
+  // that can arrive in the SAME tick as the pointerdown that set it. React
+  // state is async, so a fast tap left `commit` reading a stale `null` anchor
+  // and bailing out — the drag never resolved, the cell stayed stuck in its
+  // selected ring, and nothing was painted or opened. Rare with a slow human
+  // press, reliable with a quick one, and now on the critical path because
+  // tapping a single suggested date is a primary action.
+  const anchorRef = useRef<string | null>(null);
+  const hoverRef = useRef<string | null>(null);
 
   const months = useMemo(() => {
     if (!startDate || !endDate) return [];
@@ -113,15 +154,34 @@ export function YearCalendar({
   // A drag can end anywhere on the page (or outside it), so commit on a window
   // pointerup rather than on the cell's — otherwise releasing off-grid leaves the
   // selection stuck mid-drag.
+  const suggestionFor = useCallback(
+    (day: string) => suggestions.find((s) => s.date === day),
+    [suggestions],
+  );
+
   const commit = useCallback(() => {
-    if (!painting.current || !anchor) return;
+    const start = anchorRef.current;
+    if (!painting.current || !start) return;
     painting.current = false;
-    const other = hover ?? anchor;
-    const [a, b] = anchor <= other ? [anchor, other] : [other, anchor];
-    onPaint?.(a, b);
+    const other = hoverRef.current ?? start;
+    const [a, b] = start <= other ? [start, other] : [other, start];
+    anchorRef.current = null;
+    hoverRef.current = null;
     setAnchor(null);
     setHover(null);
-  }, [anchor, hover, onPaint]);
+    // A TAP on a suggested day opens that suggestion; a DRAG always paints.
+    // Without this split the two gestures collide on exactly the days the
+    // admin most wants to act on — and painting a fresh "Holiday" over Diwali
+    // would throw away the name, the source and the note the catalogue carries.
+    if (a === b) {
+      const hit = suggestionFor(a);
+      if (hit && onSuggestion) {
+        onSuggestion(hit);
+        return;
+      }
+    }
+    onPaint?.(a, b);
+  }, [onPaint, onSuggestion, suggestionFor]);
 
   useEffect(() => {
     if (!paintable) return;
@@ -194,30 +254,43 @@ export function YearCalendar({
                   const weekday = (date.getDay() + 6) % 7;
                   const working = workingWeekdays.includes(weekday);
                   const hit = rangeFor(day);
+                  // A decided event always wins the cell: it is what the year
+                  // actually is. The suggestion underneath it has been answered.
+                  const suggested = hit ? undefined : suggestionFor(day);
                   const selecting = pending && within(day, pending.start, pending.end);
+                  const label = hit
+                    ? `${hit.title} · ${hit.kind.replace("_", " ")}`
+                    : suggested
+                      ? `${suggested.name} — suggested, not on your calendar yet`
+                      : day;
 
                   return (
                     <button
                       key={day}
                       type="button"
                       disabled={!paintable || !inYear}
-                      aria-label={day}
-                      title={hit ? `${hit.title} · ${hit.kind.replace("_", " ")}` : day}
+                      aria-label={suggested ? `${day}: ${suggested.name}, suggested` : day}
+                      title={label}
                       onPointerDown={() => {
                         if (!paintable || !inYear) return;
                         painting.current = true;
+                        anchorRef.current = day;
+                        hoverRef.current = day;
                         setAnchor(day);
                         setHover(day);
                       }}
                       onPointerEnter={() => {
-                        if (painting.current) setHover(day);
+                        if (!painting.current) return;
+                        hoverRef.current = day;
+                        setHover(day);
                       }}
                       className={cn(
                         "aspect-square rounded-[3px] text-[10px] leading-none transition-colors",
                         "flex items-center justify-center",
                         !inYear && "opacity-25",
                         inYear && !working && "text-muted-foreground/60",
-                        inYear && working && !hit && "bg-muted/60",
+                        inYear && working && !hit && !suggested && "bg-muted/60",
+                        suggested && SUGGESTED_STYLE,
                         hit && KIND_STYLE[hit.kind],
                         selecting && "ring-2 ring-ring ring-offset-1",
                         paintable && inYear && "cursor-pointer hover:brightness-95",
@@ -236,9 +309,9 @@ export function YearCalendar({
   );
 }
 
-export function CalendarLegend() {
+export function CalendarLegend({ showSuggested = false }: { showSuggested?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
       {(
         [
           ["holiday", "Holiday"],
@@ -252,6 +325,14 @@ export function CalendarLegend() {
           {label}
         </span>
       ))}
+      {showSuggested ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className={cn("h-3 w-3 rounded-[3px]", SUGGESTED_STYLE)} />
+          {/* Named for what the admin has to DO, not for where it came from.
+              "Observance" is our word; "tap to decide" is their next move. */}
+          Suggested — tap to decide
+        </span>
+      ) : null}
     </div>
   );
 }

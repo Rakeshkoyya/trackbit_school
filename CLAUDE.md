@@ -1332,6 +1332,71 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     the `states` contract. ⚠️ Birthday/event **notifications are NOT in this packet** — the corpus
     and its scoping only; the notification surfaces are the next piece.
 
+- **V1-20 (the calendar, in use — xlsx import, the year board, Show events, 2026-08-04)** —
+  **no migration.** V1-19 filled the catalogue; this is the two surfaces that make it usable —
+  the operator adding **next** year without a deploy, and the school admin actually deciding
+  dates on the calendar they already look at.
+  - **Super-admin: `services/observance_import.py` + `/platform/observances/import/{analyze,commit}`.**
+    `S-151`'s "a small importer per source plus one annual human review", made real. Two calls
+    on purpose: **nothing is written until the operator has seen every row**, and what commits is
+    the values they looked at (the client posts the *parsed* rows back under an identity mapping,
+    so a parser change between the two calls cannot save something nobody saw).
+    `ingest.py`'s division of labour holds — **the model maps COLUMNS and never decides a date**
+    (`S-123`); the suite runs AI-off and the keyword heuristic alone must place a plainly named
+    sheet. `_parse_date` reads Excel serials, real datetimes and fourteen written formats and is
+    **day-first**: `%m/%d/%Y` is *absent*, because accepting it turns 3 April into 4 March on
+    exactly the rows where both readings parse — a calendar's worst failure and a completely
+    silent one. **Broken rows come back WITH their problems, never dropped** (an importer that
+    discards 8 of 150 reports "142 imported" and nobody finds the 8; here each one is a day a
+    school stays open for), blocked rows sort to the top of the preview, and a **duplicate
+    (key, date) inside one file** is caught and named rather than silently upserting over itself.
+  - **School: the year calendar carries two levels of certainty**, which is the whole design.
+    **Decided** = a `calendar_events` row that has already changed every plan's capacity — solid
+    fill, weighted numeral. **Proposed** = an undecided catalogue date that has changed nothing —
+    **dashed outline**, faint tint. Outline-vs-fill rather than two greens because the difference
+    is categorical (is this real yet?) not one of degree, and because texture survives greyscale,
+    a projector and CVD; the dashed device is the roll medallion's / day-book's / homework
+    funnel's own "no record here". A **tap** on a suggested day opens the V1-7 approval sheet
+    (date still editable `D-79`, open/closed still the central act `D-58`, cost still shown
+    `S-143`); a **drag** still paints. Splitting them matters — painting a fresh "Holiday" over
+    Diwali would throw away the name, the source and the note the catalogue carries.
+  - **`GET /events/catalogue` + `EventsBrowser`** — the **Show events** modal: the whole researched
+    corpus, grouped by month, filterable by state/year/search, the school's own state
+    **preselected**. Deliberately not fenced to that state (the feed answers *what should I act
+    on*; this answers *what is in the calendar you shipped*, and hiding other states leaves an
+    admin unable to tell a missing date from an out-of-scope one). Every row carries
+    `applies_here`, and decided rows are **labelled, not hidden**. `decided_count` is never sent
+    to a school — how many other schools acted on a row is platform telemetry.
+    ⚠️ **Absent `state` ≠ "all states"**: omitting the param means *this school's state* (what the
+    dropdown shows first) and the sentinel `state=all` means every state. They cannot be collapsed
+    — and `""` cannot carry it, because the browser's `qs` helper drops empty params, which would
+    have made "All states" silently mean "my state".
+  - 🔴 **Two defects found by running the built screen, not by reading it.**
+    · **`suggestions()` had no tier filter.** Written when the catalogue was empty, it returned
+    **248 rows over a year** the moment a real corpus landed — "World Steelpan Day" beside
+    Independence Day — painting a third of the calendar as *decide me* and running the sidebar
+    queue down the whole page. `S-125` had already called this: the feed is **major-tier by
+    default** (90/year, 23 in the 90-day queue), `include_minor=true` is the escape hatch, and the
+    sidebar caps at 6 with the rest one tap away in Show events.
+    · **A fast tap could not paint or open anything.** `commit` runs on a window `pointerup` that
+    can arrive in the same tick as the `pointerdown` that set the anchor; React state is async, so
+    it read a stale `null`, bailed, and left the cell stuck in its selection ring. Invisible with a
+    slow human press, reliable with a quick one — and now on the critical path, since tapping one
+    date is a primary action. Anchor/hover are mirrored in refs.
+    Also fixed: the header row hit 393px at a 390px viewport once "Show events" joined it, scrolling
+    the whole page sideways (`flex-wrap`).
+  - Web: `components/ui/modal.tsx` (centred dialog — the sibling of `Sheet`: `Sheet` is for acting
+    on one thing, this is for looking something up), `school/events-browser.tsx`,
+    `school/observance-import.tsx`; the catalogue screen gains year + state filters (editing "any
+    saved date" is the operator's job and a flat search over two 334-row years cannot get them
+    there) and keeps the paste box for fixing six rows without opening Excel. Seed: the demo org is
+    now **Telangana / CBSE**, without which the whole regional feature is invisible in the one org
+    anyone clicks through. `test_events_v1_20.py` (17). Full suite **576 passing**, ruff clean; web
+    tsc + eslint + `next build` clean; verified in a real browser end-to-end — tap a suggested date
+    → approve → 45 suggestions become 44, the cell turns solid, and teaching days correctly stay
+    297 for a *school-open* approval. One V1-7 test updated to the major-tier contract, pinned in
+    both directions.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep

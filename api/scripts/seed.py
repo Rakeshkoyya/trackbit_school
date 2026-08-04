@@ -787,8 +787,13 @@ def seed() -> None:
         # the demo org needs a FIXED one — a random code would be unguessable
         # for whoever is reviewing the portal. Real schools get a random 6–8
         # characters (`S-57`, `core/school_code.py`), never a readable word.
+        # V1-19/V1-20: `state` is what scopes the observance catalogue to this
+        # school (`D-61`). Without it the demo sees only the national dates and
+        # the whole regional-calendar feature is invisible in the one org anyone
+        # actually clicks through. Telangana because the seed's other fixtures
+        # already read as a Hyderabad school.
         org = Organization(name=DEMO_ORG_NAME, timezone="Asia/Kolkata", plan="pro",
-                           school_code="DEMO123")
+                           school_code="DEMO123", state="Telangana", board="CBSE")
         db.add(org)
         db.flush()
 

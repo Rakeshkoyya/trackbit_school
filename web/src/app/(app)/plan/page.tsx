@@ -15,12 +15,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, Trash2 } from "lucide-react";
+import { CalendarDays, CalendarSearch, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { SuggestionList } from "@/components/school/approve-date";
+import { ApproveDateSheet, SuggestionList } from "@/components/school/approve-date";
+import { EventsBrowser } from "@/components/school/events-browser";
 import { ExamFitPanel } from "@/components/school/exam-fit-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { ExamPortions } from "@/components/wizard/exam-portions";
@@ -29,6 +30,7 @@ import {
   YearCalendar,
   type PaintKind,
   type PaintedRange,
+  type SuggestedDay,
 } from "@/components/wizard/year-calendar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -38,6 +40,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
+import { eventsApi, type Suggestion } from "@/lib/events-api";
 import type { CalendarEventType } from "@/lib/school-types";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +66,8 @@ function PlanYearInner() {
   // because affects_teaching defaulted true server-side and the UI never sent it.
   // The open/closed choice is now explicit; celebrations/events default to OPEN.
   const [schoolOpen, setSchoolOpen] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  const [decide, setDecide] = useState<Suggestion | null>(null);
 
   const { data: summary } = useQuery({
     queryKey: ["calendar", yearId],
@@ -76,6 +81,17 @@ function PlanYearInner() {
   });
   // The approval sheet offers periods to lock (D-58's middle level), so it
   // needs the school day's length — the same config the timetable draws from.
+  // The sidebar queue asks "what should I act on soon" and stays short. The
+  // CALENDAR has to show every undecided date inside the year it is drawing, or
+  // a February festival simply is not on the February it is painted on — so
+  // this is the same endpoint at the horizon the artifact needs. React Query
+  // matches by prefix, so approving still invalidates both.
+  const { data: yearSuggestions } = useQuery({
+    queryKey: ["suggestions", 400],
+    queryFn: () => eventsApi.suggestions(400),
+    enabled: canEdit,
+  });
+
   const { data: periodConfig } = useQuery({
     queryKey: ["period-config", yearId],
     queryFn: () => schoolApi.periodConfig(yearId!),
@@ -129,6 +145,12 @@ function PlanYearInner() {
   }));
   const exams = summary.events.filter((e) => e.type === "exam_block");
 
+  // Only the ones that land inside the year being drawn. A suggestion outside
+  // it has no cell to sit on, and passing it would silently do nothing.
+  const suggestedDays: SuggestedDay[] = (yearSuggestions ?? [])
+    .filter((s) => s.date >= summary.start_date && s.date <= summary.end_date)
+    .map((s) => ({ id: s.id, date: s.date, name: s.name, kind: s.kind, tier: s.tier }));
+
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -136,10 +158,22 @@ function PlanYearInner() {
           title="Academic year"
           subtitle={`${fmt(summary.start_date)} → ${fmt(summary.end_date)}`}
         />
-        <div className="flex items-center gap-2">
+        {/* flex-wrap: adding "Show events" took this row to 393px at a 390px
+            viewport, which scrolled the whole page sideways. */}
+        <div className="flex flex-wrap items-center gap-2">
           <Badge tone="primary">
             <CalendarDays className="h-3 w-3" /> {summary.teaching_days} teaching days
           </Badge>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => setBrowsing(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-muted"
+            >
+              <CalendarSearch className="h-3.5 w-3.5" />
+              Show events
+            </button>
+          ) : null}
           <YearSwitcher />
         </div>
       </div>
@@ -219,7 +253,8 @@ function PlanYearInner() {
               other route (S-122). */}
           {canEdit ? (
             <SuggestionList yearId={yearId}
-                            periodsPerDay={periodConfig?.periods_per_day ?? 8} />
+                            periodsPerDay={periodConfig?.periods_per_day ?? 8}
+                            onSeeAll={() => setBrowsing(true)} />
           ) : null}
 
           {canEdit ? <ExamPortions exams={exams} classes={classes ?? []} /> : null}
@@ -275,21 +310,38 @@ function PlanYearInner() {
 
         <div className="min-w-0">
           <div className="mb-3">
-            <CalendarLegend />
+            <CalendarLegend showSuggested={canEdit && suggestedDays.length > 0} />
           </div>
           <YearCalendar
             startDate={summary.start_date}
             endDate={summary.end_date}
             ranges={ranges}
+            suggestions={canEdit ? suggestedDays : []}
             paintable={canEdit}
             workingWeekdays={summary.working_weekdays}
             onPaint={(start, end) => create.mutate({ start, end })}
+            onSuggestion={(day) => {
+              const full = (yearSuggestions ?? []).find((s) => s.id === day.id);
+              if (full) setDecide(full);
+            }}
           />
           <div className="mt-6">
             <ExamFitPanel yearId={yearId} />
           </div>
         </div>
       </div>
+
+      {/* Tapping a suggested day opens the same sheet the sidebar queue opens —
+          one approval surface, so the date stays editable (D-79), the
+          open/closed choice stays the central act (D-58) and the cost is still
+          shown before it is committed (S-143). */}
+      <ApproveDateSheet
+        suggestion={decide}
+        yearId={yearId}
+        periodsPerDay={periodConfig?.periods_per_day ?? 8}
+        onClose={() => setDecide(null)}
+      />
+      <EventsBrowser open={browsing} onOpenChange={setBrowsing} />
     </div>
   );
 }

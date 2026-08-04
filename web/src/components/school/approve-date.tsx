@@ -299,10 +299,18 @@ export function ApproveDateSheet({
   );
 }
 
+/** How many undecided dates the sidebar shows before it stops being a queue.
+ *
+ *  V1-19 landed a real corpus and this list went from four rows to twenty-three
+ *  — it ran the full height of the page and buried everything under it. A queue
+ *  is the next few things to do; the whole catalogue is what **Show events** is
+ *  for, and the calendar itself carries the rest. */
+const QUEUE_LIMIT = 6;
+
 /** The feed of undecided dates, on Plan → Year beside the calendar it writes. */
 export function SuggestionList({
-  yearId, periodsPerDay,
-}: { yearId: string; periodsPerDay: number }) {
+  yearId, periodsPerDay, onSeeAll,
+}: { yearId: string; periodsPerDay: number; onSeeAll?: () => void }) {
   const [open, setOpen] = useState<Suggestion | null>(null);
   const { data } = useQuery({
     queryKey: ["suggestions"],
@@ -310,6 +318,8 @@ export function SuggestionList({
   });
 
   if (!data?.length) return null;
+  const shown = data.slice(0, QUEUE_LIMIT);
+  const rest = data.length - shown.length;
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <h2 className="mb-1 text-sm font-semibold">Dates to decide</h2>
@@ -317,7 +327,7 @@ export function SuggestionList({
         Nothing here is on your calendar yet. Approving is what puts it there.
       </p>
       <div className="space-y-1">
-        {data.map((s) => (
+        {shown.map((s) => (
           <button
             key={s.id}
             type="button"
@@ -336,6 +346,15 @@ export function SuggestionList({
           </button>
         ))}
       </div>
+      {rest > 0 ? (
+        <button
+          type="button"
+          onClick={onSeeAll}
+          className="mt-2 w-full rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+        >
+          {rest} more in the next 90 days — they are on the calendar too
+        </button>
+      ) : null}
       <ApproveDateSheet suggestion={open} yearId={yearId} periodsPerDay={periodsPerDay}
                         onClose={() => setOpen(null)} />
     </div>

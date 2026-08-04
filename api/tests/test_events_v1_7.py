@@ -460,8 +460,18 @@ def test_catalogue_is_platform_owned_and_scoped_by_what_setup_already_asks(clien
 
     keys = {s["key"] for s in client.get("/api/v1/events/suggestions", headers=h).json()}
     assert ours["key"] in keys          # our state
-    assert everyone["key"] in keys      # everybody
     assert theirs["key"] not in keys    # another state's list
+    # V1-19/V1-20 — `S-125`, and it only bit once a real corpus existed: the
+    # catalogue now holds the whole UN list, so an unfiltered queue returns
+    # ~250 rows a year and paints a third of the calendar as "decide me". The
+    # feed is major-tier by default. A minor date is still there, still
+    # searchable in Show events, and still reachable on demand — it just never
+    # queues itself.
+    assert everyone["key"] not in keys
+    with_minor = {s["key"] for s in client.get(
+        "/api/v1/events/suggestions?include_minor=true", headers=h).json()}
+    assert everyone["key"] in with_minor
+    assert theirs["key"] not in with_minor   # tier is not a way around state
 
     # `S-150` — provenance is required, not decorative.
     bad = client.post("/api/v1/platform/observances", headers=sh, json={

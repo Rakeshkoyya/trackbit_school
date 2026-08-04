@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.core.dependencies import require_academic, require_admin
 from app.schemas.events import (
     ApproveIn,
+    CatalogueBrowse,
     CostIn,
     DecisionOut,
     DismissIn,
@@ -43,9 +44,11 @@ def whats_on(on_date: date | None = None, horizon: int = DEFAULT_HORIZON,
 
 
 @router.get("/suggestions", response_model=list[SuggestionOut])
-def suggestions(horizon: int = 90, m: CurrentMember = Depends(require_admin),
+def suggestions(horizon: int = 90, include_minor: bool = False,
+                m: CurrentMember = Depends(require_admin),
                 db: Session = Depends(get_db)):
-    return WhatsOnService(db).suggestions(m, min(max(horizon, 1), 365))
+    return WhatsOnService(db).suggestions(
+        m, min(max(horizon, 1), 400), include_minor=include_minor)
 
 
 @router.post("/suggestions/{observance_id}/approve", response_model=DecisionOut)
@@ -67,3 +70,26 @@ def cost(body: CostIn, m: CurrentMember = Depends(require_admin),
          db: Session = Depends(get_db)):
     """`S-143` — what this lock removes, said before it is committed."""
     return WhatsOnService(db).lock_cost(m, body)
+
+
+@router.get("/catalogue", response_model=CatalogueBrowse)
+def catalogue(
+    state: str | None = None,
+    year: int | None = None,
+    q: str | None = None,
+    include_minor: bool = True,
+    m: CurrentMember = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """The **Show events** table behind the year calendar (V1-20).
+
+    Admin-only, like everything that leads to a decision (`D-57`). Unlike
+    `/suggestions` this is NOT fenced to the school's own state — the school's
+    state is the preselected filter, and the admin can look at any state's
+    dates. The two answer different questions: the feed is *what should I act
+    on*, this is *what is in the calendar you shipped*, and a browse that
+    silently hid other states would leave an admin unable to tell a missing
+    date from an out-of-scope one.
+    """
+    return WhatsOnService(db).browse(
+        m, state=state, year=year, q=q, include_minor=include_minor)

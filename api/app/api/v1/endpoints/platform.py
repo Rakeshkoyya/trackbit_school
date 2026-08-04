@@ -6,7 +6,7 @@ school handed over, and only then gives the school admin their credentials.
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,6 +16,9 @@ from app.schemas.auth import SessionResponse
 from app.schemas.events import (
     ObservanceBulkIn,
     ObservanceBulkOut,
+    ObservanceImportCommitIn,
+    ObservanceImportCommitOut,
+    ObservanceImportPreview,
     ObservanceIn,
     ObservanceOut,
 )
@@ -25,6 +28,8 @@ from app.schemas.platform import (
     PlatformOrgOut,
     ReadinessOut,
 )
+from app.services import observance_import
+from app.services.observance_import import ObservanceImportService
 from app.services.observances import ObservanceService
 from app.services.platform import PlatformService
 from app.services.readiness import ReadinessService
@@ -133,3 +138,48 @@ def bulk_observances(
 ) -> ObservanceBulkOut:
     """A year's import from one source, upserted on (key, date)."""
     return ObservanceService(db).bulk(body, member.user.id)
+
+
+# ── the annual xlsx import (V1-20) ───────────────────────────────────────────
+# `S-151`'s "a small importer per source plus one annual human review", made
+# real. This is how 2028 gets into the catalogue without a deploy.
+@router.post("/observances/import/analyze", response_model=ObservanceImportPreview)
+async def observance_import_analyze(
+    file: UploadFile = File(...),
+    source: str = "",
+    year_hint: int | None = None,
+    _=Depends(require_super_admin),
+) -> ObservanceImportPreview:
+    """Read the sheet, propose a column mapping, and resolve every row.
+
+    The model is asked only about columns the keyword heuristic could not place,
+    and it never sees or decides a date (`ingest.py`'s division of labour, and
+    `S-123`: asking a model when Diwali is would be the rejected row). Rows that
+    cannot be read come back WITH their problems rather than being dropped.
+    """
+    data = await file.read()
+    analysis = observance_import.analyze(data)
+    rows = observance_import.preview(
+        mapping=analysis["mapping"], rows=analysis["rows"],
+        default_source=source.strip() or "Imported spreadsheet", year_hint=year_hint)
+    return ObservanceImportPreview(
+        columns=analysis["columns"], mapping=analysis["mapping"],
+        unmapped_columns=analysis["unmapped_columns"],
+        missing_required=analysis["missing_required"],
+        low_confidence=analysis["low_confidence"], source=analysis["source"],
+        rows=rows,
+        ready=sum(1 for r in rows if r.importable),
+        blocked=sum(1 for r in rows if not r.importable))
+
+
+@router.post("/observances/import/commit", response_model=ObservanceImportCommitOut)
+def observance_import_commit(
+    body: ObservanceImportCommitIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> ObservanceImportCommitOut:
+    """Write what the operator confirmed. Upserts on (key, date), so re-running
+    a corrected file FIXES every school rather than double-suggesting."""
+    return ObservanceImportService(db).commit(
+        mapping=body.mapping, rows=body.rows, default_source=body.source,
+        year_hint=body.year_hint, user_id=member.user.id)

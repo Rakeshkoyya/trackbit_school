@@ -37,8 +37,15 @@ import { PageLoading } from "@/components/ui/page-loading";
 import { Sheet } from "@/components/ui/sheet";
 import { showApiError } from "@/lib/errors";
 import { eventsApi, type Observance, type ObservancePayload } from "@/lib/events-api";
-import { INDIAN_STATES, INDIAN_UNION_TERRITORIES } from "@/lib/indian-states";
+import { ALL_INDIAN_STATES, INDIAN_STATES, INDIAN_UNION_TERRITORIES } from "@/lib/indian-states";
+import { ObservanceImportModal } from "@/components/school/observance-import";
 import { cn } from "@/lib/utils";
+
+/** The years the operator can filter to: this one and the four ahead. The
+ *  catalogue is always curated forwards, so past years are reachable by search
+ *  and never clutter the common case. */
+const THIS_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = [THIS_YEAR - 1, THIS_YEAR, THIS_YEAR + 1, THIS_YEAR + 2, THIS_YEAR + 3];
 
 const KINDS = ["holiday", "festival", "observance"] as const;
 const TIERS = ["major", "minor"] as const;
@@ -235,10 +242,20 @@ export function CatalogueScreen() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [importing, setImporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // Editing "any of the saved dates" is the operator's stated job here, and a
+  // flat search over two years of 300-row corpora cannot get them there. Year
+  // and state narrow it the two ways the data is actually shaped.
+  const [year, setYear] = useState<string>("");
+  const [stateFilter, setStateFilter] = useState<string>("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["observances", q],
-    queryFn: () => eventsApi.catalogue({ q: q.trim() || undefined }),
+    queryKey: ["observances", q, year, stateFilter],
+    queryFn: () => eventsApi.catalogue({
+      q: q.trim() || undefined,
+      year: year ? Number(year) : undefined,
+      state: stateFilter || undefined,
+    }),
   });
 
   const done = () => {
@@ -281,20 +298,42 @@ export function CatalogueScreen() {
           title="Catalogue"
           subtitle="Dates every school is offered. Nothing here reaches a school's calendar until their admin approves it."
         />
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => setUploading(true)}>
             <Upload className="h-4 w-4" /> Import a year
+          </Button>
+          {/* The paste box stays: it is how you fix six rows without opening
+              Excel, and it is the only path that works with no file at all. */}
+          <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
+            Paste rows
           </Button>
           <Button size="sm" onClick={startNew}><Plus className="h-4 w-4" /> Add a date</Button>
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-2">
-        <div className="relative max-w-sm flex-1">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[12rem] max-w-sm flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input className="pl-9" placeholder="Search by name" value={q}
                  onChange={(e) => setQ(e.target.value)} />
         </div>
+        <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm">
+          <option value="">All years</option>
+          {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}
+                aria-label="State"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm">
+          <option value="">All states</option>
+          {ALL_INDIAN_STATES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        {year || stateFilter || q ? (
+          <Button size="sm" variant="ghost"
+                  onClick={() => { setYear(""); setStateFilter(""); setQ(""); }}>
+            Clear
+          </Button>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -336,6 +375,7 @@ export function CatalogueScreen() {
       )}
 
       <ImportSheet open={importing} onClose={() => setImporting(false)} />
+      <ObservanceImportModal open={uploading} onClose={() => setUploading(false)} />
 
       <Sheet open={open} onOpenChange={(v) => { if (!v) { setOpen(false); setEditing(null); } }}
              title={editing ? `Edit · ${editing.name}` : "Add a date"}>
