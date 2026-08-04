@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.indian_states import normalise
 from app.models import (
     AcademicYear,
     CalendarEvent,
@@ -46,6 +47,8 @@ from app.models import (
 )
 from app.schemas.events import (
     ApproveIn,
+    CatalogueBrowse,
+    CatalogueRow,
     CostIn,
     CostMove,
     DecisionOut,
@@ -70,6 +73,12 @@ from app.services.school_clock import today_in
 DEFAULT_HORIZON = 21
 BIRTHDAY_HORIZON = 7
 MAX_FEED = 40
+
+# The browse filter's "every state" value. An explicit sentinel rather than an
+# empty string because the browser's query-string helper drops empty params —
+# which would have made "All states" silently mean "my state", the one bug this
+# filter cannot afford.
+ALL_STATES_TOKEN = "all"
 
 # The three lock levels (`D-58`) as (affects_teaching, keeps blocks_periods).
 _LOCK = {
@@ -265,7 +274,8 @@ class WhatsOnService:
 
     # ── the catalogue, scoped to this school (`D-61`) ────────────────────────
     def suggestions(self, m: CurrentMember, horizon: int = 90,
-                    on_date: date | None = None) -> list[SuggestionOut]:
+                    on_date: date | None = None, *,
+                    include_minor: bool = False) -> list[SuggestionOut]:
         """Catalogue entries this school has not decided on yet.
 
         Scoped by **address → state** and **board** (`D-61`) — both facts setup
@@ -279,13 +289,32 @@ class WhatsOnService:
         """
         today = on_date or today_in(m.org.timezone)
         end = today + timedelta(days=horizon)
-        rows = list(self.db.scalars(
-            select(Observance)
-            .where(Observance.is_active.is_(True),
-                   Observance.date >= today, Observance.date <= end,
-                   or_(Observance.state.is_(None), Observance.state == (m.org.state or "")),
-                   or_(Observance.board.is_(None), Observance.board == (m.org.board or "")))
-            .order_by(Observance.date)))
+        # V1-19 — `states` is a set, and the school's own value is free text
+        # normalised to a canonical token. A school whose state we cannot place
+        # sees the all-India rows and no regional ones: thin, but never wrong.
+        # The old `Observance.state == (m.org.state or "")` compared against
+        # `""` for an unset school, which matched nothing and read identically
+        # to an empty catalogue — the failure had no symptom.
+        token = normalise(m.org.state)
+        state_clause = (
+            Observance.states.is_(None) if token is None
+            else or_(Observance.states.is_(None), Observance.states.any(token)))
+        stmt = (select(Observance)
+                .where(Observance.is_active.is_(True),
+                       Observance.date >= today, Observance.date <= end,
+                       state_clause,
+                       or_(Observance.board.is_(None),
+                           Observance.board == (m.org.board or ""))))
+        # `S-125`, and it only became visible once a real corpus existed: the
+        # catalogue holds the whole UN list, so an unfiltered queue over a year
+        # returns ~250 rows — "World Steelpan Day" beside Independence Day — and
+        # on the calendar it paints a third of the year as "decide me". A card
+        # with something on it every single day stops being read inside a week.
+        # Minor dates stay in the catalogue and stay searchable in Show events;
+        # they just never queue themselves.
+        if not include_minor:
+            stmt = stmt.where(Observance.tier == "major")
+        rows = list(self.db.scalars(stmt.order_by(Observance.date)))
         if not rows:
             return []
 
@@ -315,6 +344,86 @@ class WhatsOnService:
                 kind=r.kind, tier=r.tier, prep_days=r.prep_days, tradition=r.tradition,
                 source=r.source, note=r.note, days_away=(r.date - today).days,
                 approved_count=approved.get(r.id, 0)))
+        return out
+
+    # ── the catalogue, browsable (V1-20, "Show events") ──────────────────────
+    def browse(self, m: CurrentMember, *, state: str | None = None,
+               year: int | None = None, q: str | None = None,
+               include_minor: bool = True, limit: int = 500) -> CatalogueBrowse:
+        """The whole researched corpus, filterable by state — the table behind
+        the year calendar's **Show events** button.
+
+        Deliberately NOT scoped to the school's own state by default the way
+        `suggestions()` is. The two answer different questions: the feed asks
+        *"what should I act on"* (and must stay narrow, or nobody reads it),
+        this asks *"what is in the calendar you shipped"* (and must be complete,
+        or the admin cannot tell a missing date from an unscoped one). The
+        school's own state is the **preselected** filter, not a fence.
+
+        `applies_here` rides on every row so the table can say which of them
+        would actually reach this school — the one thing a bare list of national
+        holidays cannot tell a principal in Kerala.
+        """
+        token = normalise(m.org.state)
+        # Three cases, and collapsing any two of them makes the screen lie:
+        #   state is None  → the caller has not chosen; default to this school's
+        #                    own state, which is what the dropdown shows first.
+        #   state == ""    → the caller explicitly asked for every state.
+        #   otherwise      → that state.
+        # Treating None and "" alike would render "Kerala" in the picker over a
+        # table containing every state in the country.
+        if state is None:
+            want = token
+        elif state.strip().lower() in ("", ALL_STATES_TOKEN):
+            want = None
+        else:
+            want = normalise(state)
+
+        stmt = select(Observance).where(Observance.is_active.is_(True))
+        if want:
+            stmt = stmt.where(or_(Observance.states.is_(None),
+                                  Observance.states.any(want)))
+        if year:
+            stmt = stmt.where(func.extract("year", Observance.date) == year)
+        if q:
+            stmt = stmt.where(Observance.name.ilike(f"%{q.strip()}%"))
+        if not include_minor:
+            stmt = stmt.where(Observance.tier == "major")
+        rows = list(self.db.scalars(stmt.order_by(Observance.date, Observance.name)
+                                    .limit(limit)))
+
+        # What THIS school decided — one query, keyed on the stable `key` so a
+        # dismissal made against last year's row still reads as decided.
+        decisions: dict[str, set[str]] = defaultdict(set)
+        if rows:
+            for key, action in self.db.execute(
+                    select(EventDecision.observance_key, EventDecision.action)
+                    .where(EventDecision.org_id == m.org_id,
+                           EventDecision.observance_key.in_([r.key for r in rows]))).all():
+                decisions[key].add(action)
+
+        # The dropdown's options and the year tabs come from the corpus itself,
+        # so the filter can never offer a value that returns nothing.
+        all_states: set[str] = set()
+        years: set[int] = set()
+        for st, yr in self.db.execute(
+                select(Observance.states, func.extract("year", Observance.date))
+                .where(Observance.is_active.is_(True))).all():
+            all_states.update(st or ())
+            if yr:
+                years.add(int(yr))
+
+        out = CatalogueBrowse(
+            org_state=token, filter_state=want,
+            years=sorted(years), states=sorted(all_states), total=len(rows))
+        for r in rows:
+            actions = decisions.get(r.key, set())
+            out.rows.append(CatalogueRow(
+                id=r.id, key=r.key, name=r.name, date=r.date, end_date=r.end_date,
+                kind=r.kind, tier=r.tier, states=r.states, tradition=r.tradition,
+                source=r.source, note=r.note,
+                applies_here=(not r.states) or (token is not None and token in r.states),
+                decided=bool(actions), approved="approved" in actions))
         return out
 
     # ── the decision (`D-57` — approval is the commit) ───────────────────────

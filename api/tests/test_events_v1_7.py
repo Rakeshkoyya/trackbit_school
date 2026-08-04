@@ -447,17 +447,31 @@ def test_catalogue_is_platform_owned_and_scoped_by_what_setup_already_asks(clien
 
     _make_super(sup["user"]["id"])
     soon = date.today() + timedelta(days=10)
-    ours = _catalogue(client, sh, cleanup, name="Bathukamma", on=soon, state="Telangana",
+    # V1-19: `states` is a set, not a single state — one row per (key, date),
+    # so a festival observed in five states has to name five.
+    ours = _catalogue(client, sh, cleanup, name="Bathukamma", on=soon,
+                      states=["Telangana"],
                       source="Telangana state holiday list 2026")
-    theirs = _catalogue(client, sh, cleanup, name="Pongal Kerala", on=soon, state="Kerala",
+    theirs = _catalogue(client, sh, cleanup, name="Pongal Kerala", on=soon,
+                        states=["Kerala", "Puducherry"],
                         source="Kerala state list 2026")
     everyone = _catalogue(client, sh, cleanup, name="World Book Day", on=soon, tier="minor",
                           source="UN observances")
 
     keys = {s["key"] for s in client.get("/api/v1/events/suggestions", headers=h).json()}
     assert ours["key"] in keys          # our state
-    assert everyone["key"] in keys      # everybody
     assert theirs["key"] not in keys    # another state's list
+    # V1-19/V1-20 — `S-125`, and it only bit once a real corpus existed: the
+    # catalogue now holds the whole UN list, so an unfiltered queue returns
+    # ~250 rows a year and paints a third of the calendar as "decide me". The
+    # feed is major-tier by default. A minor date is still there, still
+    # searchable in Show events, and still reachable on demand — it just never
+    # queues itself.
+    assert everyone["key"] not in keys
+    with_minor = {s["key"] for s in client.get(
+        "/api/v1/events/suggestions?include_minor=true", headers=h).json()}
+    assert everyone["key"] in with_minor
+    assert theirs["key"] not in with_minor   # tier is not a way around state
 
     # `S-150` — provenance is required, not decorative.
     bad = client.post("/api/v1/platform/observances", headers=sh, json={
@@ -483,11 +497,13 @@ def test_bulk_import_corrects_rather_than_double_suggests(client, cleanup):
         {"key": key, "name": "Diwali", "date": d.isoformat(), "kind": "holiday",
          "source": "Telangana state holiday list 2026", "prep_days": 21}]}
     first = client.post("/api/v1/platform/observances/bulk", headers=sh, json=payload).json()
-    assert first == {"created": 1, "updated": 0}
+    assert (first["created"], first["updated"]) == (1, 0)
+    # V1-19 — an unplaceable state is reported, never silently dropped.
+    assert first["unresolved_states"] == []
 
     payload["entries"][0]["name"] = "Deepavali"
     second = client.post("/api/v1/platform/observances/bulk", headers=sh, json=payload).json()
-    assert second == {"created": 0, "updated": 1}
+    assert (second["created"], second["updated"]) == (0, 1)
 
     rows = [o for o in client.get("/api/v1/platform/observances", headers=sh).json()
             if o["key"] == key]

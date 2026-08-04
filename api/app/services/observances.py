@@ -20,10 +20,11 @@ which is correct; a catalogue filled by asking a model when Diwali is would be
 import re
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
+from app.core.indian_states import normalise, normalise_all, unresolved
 from app.models import EventDecision, Observance
 from app.schemas.events import (
     ObservanceBulkIn,
@@ -63,7 +64,15 @@ class ObservanceService:
         if year:
             stmt = stmt.where(func.extract("year", Observance.date) == year)
         if state:
-            stmt = stmt.where(Observance.state == state)
+            # The operator filters by one state and wants what that state
+            # observes — which includes the all-India rows, or the filter
+            # answers "what is regional here" when the question asked was
+            # "what does a school here see". Unresolvable text matches nothing
+            # rather than everything.
+            token = normalise(state)
+            stmt = stmt.where(
+                Observance.states.is_(None) if token is None
+                else or_(Observance.states.is_(None), Observance.states.any(token)))
         if q:
             stmt = stmt.where(Observance.name.ilike(f"%{q}%"))
         if not include_inactive:
@@ -81,7 +90,8 @@ class ObservanceService:
         row = Observance(
             key=body.key or slugify(body.name), name=body.name, date=body.date,
             end_date=body.end_date, kind=body.kind, tier=body.tier,
-            prep_days=body.prep_days, state=body.state, board=body.board,
+            prep_days=body.prep_days, states=normalise_all(body.states) or None,
+            board=body.board,
             tradition=body.tradition, source=body.source, note=body.note,
             is_active=body.is_active, created_by_user_id=user_id)
         self.db.add(row)
@@ -103,7 +113,7 @@ class ObservanceService:
         row.kind = body.kind
         row.tier = body.tier
         row.prep_days = body.prep_days
-        row.state = body.state
+        row.states = normalise_all(body.states) or None
         row.board = body.board
         row.tradition = body.tradition
         row.source = body.source
@@ -151,7 +161,10 @@ class ObservanceService:
             row.kind = e.kind
             row.tier = e.tier
             row.prep_days = e.prep_days
-            row.state = e.state
+            row.states = normalise_all(e.states) or None
+            for bad in unresolved(e.states):
+                if bad not in out.unresolved_states:
+                    out.unresolved_states.append(bad)
             row.board = e.board
             row.tradition = e.tradition
             row.source = e.source or body.source

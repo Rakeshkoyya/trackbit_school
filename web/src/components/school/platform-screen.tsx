@@ -17,6 +17,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Sheet } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api-client";
+import { INDIAN_STATES, INDIAN_UNION_TERRITORIES } from "@/lib/indian-states";
 import { platformApi, type CreateSchoolResult, type PlatformOrg } from "@/lib/platform-api";
 
 function fmtDate(iso: string | null): string {
@@ -286,8 +287,23 @@ export function PlatformScreen() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="sch_state">State</Label>
-                <Input id="sch_state" value={form.state} placeholder="e.g. Telangana"
-                  onChange={(e) => setForm({ ...form, state: e.target.value })} />
+                {/* V1-19 — a picker, because this value is what scopes the
+                    observance catalogue. Typed free text ("TN") matches no
+                    corpus row, and the school then sees an empty suggestions
+                    queue with nothing explaining it. */}
+                <select id="sch_state" value={form.state}
+                  onChange={(e) => setForm({ ...form, state: e.target.value })}
+                  className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm">
+                  <option value="">Select a state</option>
+                  <optgroup label="States">
+                    {INDIAN_STATES.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </optgroup>
+                  <optgroup label="Union territories">
+                    {INDIAN_UNION_TERRITORIES.map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </optgroup>
+                </select>
               </div>
               <div>
                 <Label htmlFor="sch_board">Board</Label>

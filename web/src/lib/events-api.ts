@@ -104,7 +104,8 @@ export interface Observance {
   kind: "holiday" | "festival" | "observance";
   tier: "major" | "minor";
   prep_days: number;
-  state: string | null;
+  /** V1-19 — the set of states that observe this. null/empty = all India. */
+  states: string[] | null;
   board: string | null;
   tradition: string | null;
   source: string;
@@ -117,11 +118,86 @@ export type ObservancePayload = Omit<Observance, "id" | "decided_count"> & {
   key?: string;
 };
 
+/** The school-side view of a catalogue row (V1-20 — the Show events table).
+ *  Deliberately without `decided_count`: how many OTHER schools acted on a row
+ *  is platform telemetry and none of a school's business. */
+export interface CatalogueRow {
+  id: string;
+  key: string;
+  name: string;
+  date: string;
+  end_date: string | null;
+  kind: Observance["kind"];
+  tier: Observance["tier"];
+  states: string[] | null;
+  tradition: string | null;
+  source: string;
+  note: string | null;
+  applies_here: boolean;
+  decided: boolean;
+  approved: boolean;
+}
+
+export interface CatalogueBrowse {
+  org_state: string | null;
+  filter_state: string | null;
+  years: number[];
+  states: string[];
+  rows: CatalogueRow[];
+  total: number;
+}
+
+/** One spreadsheet row as the importer resolved it, with its own problems. */
+export interface ObservanceImportRow {
+  index: number;
+  name: string;
+  key: string;
+  date: string | null;
+  end_date: string | null;
+  kind: Observance["kind"];
+  tier: Observance["tier"];
+  states: string[] | null;
+  tradition: string | null;
+  prep_days: number;
+  note: string | null;
+  source: string;
+  problems: string[];
+  importable: boolean;
+}
+
+export interface ObservanceImportPreview {
+  columns: string[];
+  mapping: Record<string, string>;
+  unmapped_columns: string[];
+  missing_required: string[];
+  low_confidence: string[];
+  source: "heuristic" | "ai";
+  rows: ObservanceImportRow[];
+  ready: number;
+  blocked: number;
+}
+
+export interface ObservanceImportResult {
+  created: number;
+  updated: number;
+  skipped: string[];
+  duplicates: string[];
+  unresolved_states: string[];
+}
+
 export const eventsApi = {
   whatsOn: (p: { onDate?: string; horizon?: number } = {}) =>
     api.get<WhatsOn>(`/events/whats-on${qs({ on_date: p.onDate, horizon: p.horizon })}`),
   suggestions: (horizon?: number) =>
     api.get<Suggestion[]>(`/events/suggestions${qs({ horizon })}`),
+  /** V1-20 — the whole researched catalogue as a SCHOOL sees it, filterable by
+   *  state. Distinct from `catalogue` below, which is the operator's platform
+   *  list: this one carries `applies_here` / `decided` and never `decided_count`. */
+  browseCatalogue: (p: { state?: string; year?: number; q?: string; includeMinor?: boolean } = {}) =>
+    api.get<CatalogueBrowse>(`/events/catalogue${qs({
+      state: p.state, year: p.year, q: p.q,
+      include_minor: p.includeMinor === false ? "false" : undefined,
+    })}`),
   approve: (id: string, body: ApprovePayload) =>
     api.post<Decision>(`/events/suggestions/${id}/approve`, body),
   dismiss: (id: string, note?: string) =>
@@ -149,4 +225,22 @@ export const eventsApi = {
   importObservances: (source: string, entries: Partial<ObservancePayload>[]) =>
     api.post<{ created: number; updated: number }>(
       "/platform/observances/bulk", { source, entries }),
+
+  /** V1-20 — next year's dates from a spreadsheet. Two steps on purpose: the
+   *  operator sees every parsed row, and every row the parser could NOT read,
+   *  before anything is written. */
+  analyzeObservanceFile: (file: File, source: string, yearHint?: number) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<ObservanceImportPreview>(
+      `/platform/observances/import/analyze${qs({
+        source: source || undefined, year_hint: yearHint,
+      })}`, form);
+  },
+  commitObservanceFile: (body: {
+    mapping: Record<string, string>;
+    rows: Record<string, unknown>[];
+    source: string;
+    year_hint?: number | null;
+  }) => api.post<ObservanceImportResult>("/platform/observances/import/commit", body),
 };

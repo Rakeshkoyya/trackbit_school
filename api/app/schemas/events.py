@@ -167,7 +167,12 @@ class ObservanceIn(BaseModel):
     kind: str = Field(default="festival", pattern="^(holiday|festival|observance)$")
     tier: str = Field(default="major", pattern="^(major|minor)$")
     prep_days: int = Field(default=7, ge=0, le=120)
-    state: str | None = Field(default=None, max_length=80)
+    # V1-19 — the set of states that observe this, canonical tokens from
+    # `core/indian_states.py`. Empty/None = all India. The service normalises
+    # on write and REPORTS what it could not place rather than dropping it
+    # silently, so a typo in a bulk import is visible instead of producing a
+    # state no school will ever match.
+    states: list[str] | None = Field(default=None, max_length=40)
     board: str | None = Field(default=None, max_length=80)
     tradition: str | None = Field(default=None, max_length=80)
     source: str = Field(min_length=1, max_length=200)
@@ -191,7 +196,7 @@ class ObservanceOut(BaseModel):
     kind: str
     tier: str
     prep_days: int
-    state: str | None = None
+    states: list[str] | None = None
     board: str | None = None
     tradition: str | None = None
     source: str
@@ -209,6 +214,103 @@ class ObservanceBulkIn(BaseModel):
     entries: list[ObservanceIn] = Field(min_length=1, max_length=1000)
 
 
+# ── the annual xlsx import (V1-20) ──────────────────────────────────────────
+class ObservanceImportRow(BaseModel):
+    """One spreadsheet row, resolved to what would be stored.
+
+    Carries its own `problems`, and broken rows are returned rather than
+    dropped: an importer that silently discards what it cannot read reports
+    "142 imported" over a file of 150 and nobody ever finds the eight. For a
+    calendar each missing row is a day the school stays open for.
+    """
+    index: int
+    name: str
+    key: str
+    date: date_ | None = None
+    end_date: date_ | None = None
+    kind: str = "festival"
+    tier: str = "major"
+    states: list[str] | None = None
+    tradition: str | None = None
+    prep_days: int = 7
+    note: str | None = None
+    source: str = ""
+    problems: list[str] = []
+    importable: bool = True
+
+
+class ObservanceImportPreview(BaseModel):
+    columns: list[str] = []
+    mapping: dict[str, str] = {}
+    unmapped_columns: list[str] = []
+    missing_required: list[str] = []
+    # Fields the keyword heuristic could not place and the model proposed —
+    # always worth the operator's glance before saving (`ingest.py`).
+    low_confidence: list[str] = []
+    source: str = "heuristic"   # heuristic | ai — how the mapping was reached
+    rows: list[ObservanceImportRow] = []
+    ready: int = 0
+    blocked: int = 0
+
+
+class ObservanceImportCommitIn(BaseModel):
+    mapping: dict[str, str]
+    rows: list[dict] = Field(min_length=1, max_length=4000)
+    source: str = Field(min_length=1, max_length=200)
+    # A sheet whose title carries the year and whose rows say only "15 August".
+    year_hint: int | None = Field(default=None, ge=2000, le=2100)
+
+
+class ObservanceImportCommitOut(BaseModel):
+    created: int = 0
+    updated: int = 0
+    skipped: list[str] = []
+    duplicates: list[str] = []
+    unresolved_states: list[str] = []
+
+
+# ── the school-side read of the catalogue (V1-20) ───────────────────────────
+class CatalogueRow(BaseModel):
+    """A catalogue entry as a school sees it in the browser.
+
+    Deliberately NOT `ObservanceOut`: that carries `decided_count` (how many
+    OTHER schools acted on this row), which is platform telemetry and none of a
+    school's business. What a school gets instead is `decided`/`approved` —
+    what **it** did about this row.
+    """
+    id: uuid.UUID
+    key: str
+    name: str
+    date: date_
+    end_date: date_ | None = None
+    kind: str
+    tier: str
+    states: list[str] | None = None
+    tradition: str | None = None
+    source: str
+    note: str | None = None
+    applies_here: bool = False   # matches this school's own state
+    decided: bool = False
+    approved: bool = False
+
+
+class CatalogueBrowse(BaseModel):
+    """The "Show events" table. `states` is the dropdown's options, served with
+    the rows so the filter can never offer a state the corpus cannot answer."""
+    org_state: str | None = None
+    filter_state: str | None = None
+    years: list[int] = []
+    states: list[str] = []
+    rows: list[CatalogueRow] = []
+    total: int = 0
+
+
 class ObservanceBulkOut(BaseModel):
     created: int = 0
     updated: int = 0
+    # V1-19 — state names the import could not resolve to a canonical token,
+    # de-duplicated. Reported, never silently dropped: an unresolvable state is
+    # the one failure here with no symptom (the row imports fine and then
+    # matches no school forever), so the importer has to say it out loud. Same
+    # rule as the syllabus importer's `unresolved` (V2-P11).
+    unresolved_states: list[str] = []

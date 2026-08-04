@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.bands import starter_descriptors
 from app.core.database import SessionLocal
 from app.core.security import hash_password
+from app.data.observances import available_years, build
 from app.models import (
     AcademicYear,
     AssessmentCycle,
@@ -42,7 +43,6 @@ from app.models import (
     LeaveRequestEvent,
     LessonLog,
     Membership,
-    Observance,
     Organization,
     Plan,
     PlanApproval,
@@ -73,9 +73,11 @@ from app.models import (
     User,
 )
 from app.models import Session as SessionModel
+from app.schemas.events import ObservanceBulkIn, ObservanceIn
 from app.services.calendar import expand_blocked_dates
 from app.services.daily_report import DailyReportService
 from app.services.fee_math import proportional_installments, q, recompute_student_fee
+from app.services.observances import ObservanceService
 from app.services.planner import distribute
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -785,8 +787,13 @@ def seed() -> None:
         # the demo org needs a FIXED one — a random code would be unguessable
         # for whoever is reviewing the portal. Real schools get a random 6–8
         # characters (`S-57`, `core/school_code.py`), never a readable word.
+        # V1-19/V1-20: `state` is what scopes the observance catalogue to this
+        # school (`D-61`). Without it the demo sees only the national dates and
+        # the whole regional-calendar feature is invisible in the one org anyone
+        # actually clicks through. Telangana because the seed's other fixtures
+        # already read as a Hyderabad school.
         org = Organization(name=DEMO_ORG_NAME, timezone="Asia/Kolkata", plan="pro",
-                           school_code="DEMO123")
+                           school_code="DEMO123", state="Telangana", board="CBSE")
         db.add(org)
         db.flush()
 
@@ -963,26 +970,27 @@ def seed() -> None:
         add_task(maintenance, "Fix broken fan in 6-B", assignee=anil, due=_today_at(12, 0))
         add_task(housekeeping, "Clean science lab", assignee=ramesh, due=_today_at(17, 0))
 
-        # ── V1-7: the observance catalogue (platform data, D-60/S-149) ──────
-        # DELIBERATELY NOT real festival dates. `Q-63` — what the real sources
-        # are and what the annual curation cycle is — is an open research task,
-        # and inventing a Diwali date here would be exactly the rejected row of
-        # `S-123`'s table: an unverifiable claim, stored, that a school then
-        # decorates on. These are dated relative to today, say so in `source`,
-        # and exist only so the approval flow has something to approve.
-        _today = datetime.now(IST).date()
-        for key, name, offset, kind, tier in [
-            ("demo-founders-day", "Founder's Day", 9, "festival", "major"),
-            ("demo-sports-meet", "Annual Sports Meet", 18, "observance", "major"),
-            ("demo-reading-day", "Reading Day", 26, "observance", "minor"),
-        ]:
-            if db.scalar(select(Observance).where(
-                    Observance.key == key,
-                    Observance.date == _today + timedelta(days=offset))) is None:
-                db.add(Observance(
-                    key=key, name=name, date=_today + timedelta(days=offset),
-                    kind=kind, tier=tier, prep_days=14,
-                    source="Demo catalogue — replace with a curated source (Q-63)"))
+        # ── V1-7 / V1-19: the observance catalogue (platform data, D-60/S-149) ──
+        # V1-7 shipped this table EMPTY on purpose: `Q-63` — what the real
+        # sources are and what the annual curation cycle is — was unanswered,
+        # and inventing a Diwali date would have been `S-123`'s rejected row
+        # wearing a table for a hat. The seed carried three placeholder rows so
+        # the approval flow had something to approve.
+        #
+        # V1-19 answered it. `app/data/observances/` is a curated corpus read
+        # from named sources (state notifications, a panchang, the UN list),
+        # every row carrying its provenance, so the demo school now sees the
+        # real suggestions a real school would. The placeholders are gone.
+        #
+        # Loaded through the same `bulk()` path the operator's paste-import
+        # uses, so re-seeding corrects rows rather than duplicating them.
+        _corpus_years = available_years()
+        _entries = [ObservanceIn(**r.as_payload())
+                    for y in _corpus_years for r in build(y)]
+        _svc = ObservanceService(db)
+        for _i in range(0, len(_entries), 500):
+            _svc.bulk(ObservanceBulkIn(source="TrackBit shipped corpus",
+                                       entries=_entries[_i:_i + 500]), None)
 
         db.commit()
         print(f"Seeded '{DEMO_ORG_NAME}': org={org.id}")
@@ -993,6 +1001,7 @@ def seed() -> None:
         print(f"  school: {counts['classes']} classes, {counts['students']} students, "
               f"{counts['enrolled']} fee enrolments (year 2026-27)")
         print("  login: kc@demo.trackbit.app / demo1234")
+        print(f"  observance catalogue: {len(_entries)} rows for {_corpus_years}")
         print("  super-admin: super@trackbit.app / demo1234")
     except Exception:
         db.rollback()

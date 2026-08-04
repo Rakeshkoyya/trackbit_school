@@ -37,7 +37,15 @@ import { PageLoading } from "@/components/ui/page-loading";
 import { Sheet } from "@/components/ui/sheet";
 import { showApiError } from "@/lib/errors";
 import { eventsApi, type Observance, type ObservancePayload } from "@/lib/events-api";
+import { ALL_INDIAN_STATES, INDIAN_STATES, INDIAN_UNION_TERRITORIES } from "@/lib/indian-states";
+import { ObservanceImportModal } from "@/components/school/observance-import";
 import { cn } from "@/lib/utils";
+
+/** The years the operator can filter to: this one and the four ahead. The
+ *  catalogue is always curated forwards, so past years are reachable by search
+ *  and never clutter the common case. */
+const THIS_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = [THIS_YEAR - 1, THIS_YEAR, THIS_YEAR + 1, THIS_YEAR + 2, THIS_YEAR + 3];
 
 const KINDS = ["holiday", "festival", "observance"] as const;
 const TIERS = ["major", "minor"] as const;
@@ -47,6 +55,17 @@ const fmt = (d: string) =>
     weekday: "short", day: "numeric", month: "short", year: "numeric",
   });
 
+/** How a row's scope reads on one line.
+ *
+ *  Names up to three states and counts beyond that: a Chhath row listing four
+ *  states is information, and a Diwali row listing all thirty-six is a wall of
+ *  text that says exactly what "all India" says in two words. */
+function stateLabel(states: string[] | null | undefined): string {
+  if (!states || states.length === 0) return "all India";
+  if (states.length <= 3) return states.join(", ");
+  return `${states.slice(0, 2).join(", ")} +${states.length - 2} more`;
+}
+
 type Draft = {
   key: string;
   name: string;
@@ -55,7 +74,7 @@ type Draft = {
   kind: (typeof KINDS)[number];
   tier: (typeof TIERS)[number];
   prep_days: number;
-  state: string;
+  states: string[];
   board: string;
   tradition: string;
   source: string;
@@ -65,14 +84,14 @@ type Draft = {
 
 const EMPTY: Draft = {
   key: "", name: "", date: "", end_date: "", kind: "festival", tier: "major",
-  prep_days: 7, state: "", board: "", tradition: "", source: "", note: "",
+  prep_days: 7, states: [], board: "", tradition: "", source: "", note: "",
   is_active: true,
 };
 
 function toDraft(o: Observance): Draft {
   return {
     key: o.key, name: o.name, date: o.date, end_date: o.end_date ?? "",
-    kind: o.kind, tier: o.tier, prep_days: o.prep_days, state: o.state ?? "",
+    kind: o.kind, tier: o.tier, prep_days: o.prep_days, states: o.states ?? [],
     board: o.board ?? "", tradition: o.tradition ?? "", source: o.source,
     note: o.note ?? "", is_active: o.is_active,
   };
@@ -114,7 +133,7 @@ function parseRows(text: string): {
     const raw = line.trim();
     if (!raw) return;
     const cells = raw.split(/\t|,/).map((c) => c.trim().replace(/^"|"$/g, ""));
-    const [name, date, kind, tier, state, board, tradition] = cells;
+    const [name, date, kind, tier, states, board, tradition] = cells;
     if (!name || !date) {
       errors.push(`Line ${i + 1}: needs at least a name and a date.`);
       return;
@@ -127,15 +146,21 @@ function parseRows(text: string): {
       name, date,
       kind: (KINDS as readonly string[]).includes(kind) ? (kind as Observance["kind"]) : "festival",
       tier: (TIERS as readonly string[]).includes(tier) ? (tier as Observance["tier"]) : "major",
-      state: state || null, board: board || null, tradition: tradition || null,
+      // V1-19 — a festival is observed by a SET of states. The row is
+      // comma-delimited, so the set is pipe-separated inside its own cell.
+      // Unknown names are not rejected here: the server normalises and reports
+      // what it could not place, and one parser guessing at state names is how
+      // the two ends drift apart.
+      states: states ? states.split("|").map((x) => x.trim()).filter(Boolean) : null,
+      board: board || null, tradition: tradition || null,
     });
   });
   return { rows, errors };
 }
 
 const PLACEHOLDER = [
-  "Name, YYYY-MM-DD, kind, tier, state, board, tradition",
-  "Diwali, 2027-11-05, holiday, major, Telangana, ,",
+  "Name, YYYY-MM-DD, kind, tier, state|state, board, tradition",
+  "Onam, 2027-09-12, holiday, major, Kerala|Lakshadweep, ,",
 ].join("\n");
 
 function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -190,7 +215,7 @@ function ImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
             <p className="mb-1 text-xs font-medium">{rows.length} row(s) read</p>
             <ul className="space-y-0.5 text-xs text-muted-foreground">
               {rows.slice(0, 6).map((r, i) => (
-                <li key={i}>{r.name} · {r.date} · {r.state ?? "all states"}</li>
+                <li key={i}>{r.name} · {r.date} · {stateLabel(r.states)}</li>
               ))}
             </ul>
           </div>
@@ -217,10 +242,20 @@ export function CatalogueScreen() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [importing, setImporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // Editing "any of the saved dates" is the operator's stated job here, and a
+  // flat search over two years of 300-row corpora cannot get them there. Year
+  // and state narrow it the two ways the data is actually shaped.
+  const [year, setYear] = useState<string>("");
+  const [stateFilter, setStateFilter] = useState<string>("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["observances", q],
-    queryFn: () => eventsApi.catalogue({ q: q.trim() || undefined }),
+    queryKey: ["observances", q, year, stateFilter],
+    queryFn: () => eventsApi.catalogue({
+      q: q.trim() || undefined,
+      year: year ? Number(year) : undefined,
+      state: stateFilter || undefined,
+    }),
   });
 
   const done = () => {
@@ -233,7 +268,7 @@ export function CatalogueScreen() {
     ...draft,
     key: draft.key.trim() || undefined,
     end_date: draft.end_date || null,
-    state: draft.state.trim() || null,
+    states: draft.states.length ? draft.states : null,
     board: draft.board.trim() || null,
     tradition: draft.tradition.trim() || null,
     note: draft.note.trim() || null,
@@ -263,20 +298,42 @@ export function CatalogueScreen() {
           title="Catalogue"
           subtitle="Dates every school is offered. Nothing here reaches a school's calendar until their admin approves it."
         />
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => setUploading(true)}>
             <Upload className="h-4 w-4" /> Import a year
+          </Button>
+          {/* The paste box stays: it is how you fix six rows without opening
+              Excel, and it is the only path that works with no file at all. */}
+          <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
+            Paste rows
           </Button>
           <Button size="sm" onClick={startNew}><Plus className="h-4 w-4" /> Add a date</Button>
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-2">
-        <div className="relative max-w-sm flex-1">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[12rem] max-w-sm flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input className="pl-9" placeholder="Search by name" value={q}
                  onChange={(e) => setQ(e.target.value)} />
         </div>
+        <select value={year} onChange={(e) => setYear(e.target.value)} aria-label="Year"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm">
+          <option value="">All years</option>
+          {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}
+                aria-label="State"
+                className="h-9 rounded-md border border-border bg-card px-2 text-sm">
+          <option value="">All states</option>
+          {ALL_INDIAN_STATES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        {year || stateFilter || q ? (
+          <Button size="sm" variant="ghost"
+                  onClick={() => { setYear(""); setStateFilter(""); setQ(""); }}>
+            Clear
+          </Button>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -307,7 +364,7 @@ export function CatalogueScreen() {
               </span>
               <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                 <Globe2 className="h-3.5 w-3.5" />
-                {o.state ?? "all states"}{o.board ? ` · ${o.board}` : ""}
+                {stateLabel(o.states)}{o.board ? ` · ${o.board}` : ""}
                 {o.decided_count
                   ? <Badge tone="primary">{o.decided_count} decided</Badge>
                   : null}
@@ -318,6 +375,7 @@ export function CatalogueScreen() {
       )}
 
       <ImportSheet open={importing} onClose={() => setImporting(false)} />
+      <ObservanceImportModal open={uploading} onClose={() => setUploading(false)} />
 
       <Sheet open={open} onOpenChange={(v) => { if (!v) { setOpen(false); setEditing(null); } }}
              title={editing ? `Edit · ${editing.name}` : "Add a date"}>
@@ -375,9 +433,31 @@ export function CatalogueScreen() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="ob-state">State (blank = all)</Label>
-              <Input id="ob-state" value={draft.state}
-                     onChange={(e) => setDraft({ ...draft, state: e.target.value })} />
+              <Label htmlFor="ob-state">States (none = all India)</Label>
+              {/* V1-19 — a set, and a picker. `UNIQUE(key, date)` means there
+                  is one row per observance per year, so a single state could
+                  never express "Onam is a holiday in Kerala AND Lakshadweep" —
+                  importing the second silently overwrote the first. */}
+              <select id="ob-state" multiple size={6} value={draft.states}
+                      onChange={(e) => setDraft({
+                        ...draft,
+                        states: Array.from(e.target.selectedOptions, (o) => o.value),
+                      })}
+                      className="w-full rounded-md border border-border bg-card px-2 py-1 text-sm">
+                <optgroup label="States">
+                  {INDIAN_STATES.map((n) => <option key={n} value={n}>{n}</option>)}
+                </optgroup>
+                <optgroup label="Union territories">
+                  {INDIAN_UNION_TERRITORIES.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </optgroup>
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {draft.states.length
+                  ? `Suggested only to schools in ${draft.states.length} state${draft.states.length > 1 ? "s" : ""}.`
+                  : "Suggested to every school."}
+              </p>
             </div>
             <div>
               <Label htmlFor="ob-board">Board (blank = all)</Label>

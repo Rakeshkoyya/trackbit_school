@@ -23,7 +23,7 @@ import uuid
 from datetime import date
 
 from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Integer, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -72,10 +72,22 @@ class Observance(Base, UUIDPKMixin, CreatedAtMixin):
     # `S-126` — lead time by kind. Independence Day needs three weeks of
     # rehearsal; a birthday needs the morning of.
     prep_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default="7")
-    # `D-61` — scoping falls out of what setup already collects. NULL on both
+    # `D-61` — scoping falls out of what setup already collects. NULL/empty
     # means "everybody"; a value narrows to schools whose org matches. A school
     # is never asked to declare a region or a religion.
-    state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #
+    # V1-19: this was a single `state` column, and it could not express the
+    # corpus. `UNIQUE(key, date)` is load-bearing (it is what makes re-importing
+    # a corrected file *fix* every school rather than double-suggest), so one
+    # row per state was never available: "Onam is a holiday in Kerala" and
+    # "Onam is a holiday in Karnataka" are the same (key, date), and the second
+    # import silently OVERWROTE the first. Almost every real Indian holiday is
+    # observed by a set of states, not one — so the column is the set.
+    #
+    # Tokens are the canonical spellings in `core/indian_states.py`; nothing
+    # else may be written here, or a school will match no row and see an empty
+    # feed with no error to explain it.
+    states: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     board: Mapped[str | None] = mapped_column(Text, nullable=True)
     tradition: Mapped[str | None] = mapped_column(Text, nullable=True)
     # `S-150` — provenance, and it is NOT NULL. The admin approving a date is the
