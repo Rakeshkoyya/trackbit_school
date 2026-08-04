@@ -20,13 +20,14 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, CalendarDays, Check, Flag } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarDays, Check, Flag, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { SupportAssignments } from "@/components/school/support-assignments";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -122,6 +123,13 @@ function ChildInner() {
         ) : null}
       </header>
 
+      {/* The written summary — a READ over the facts below it, never a new
+          record. `source` says whether a model wrote it or the deterministic
+          builder did, because a reader is entitled to know which. It is
+          deliberately above the week and below the goal: it summarises, so it
+          must not be the only thing on screen. */}
+      <SummaryBlock interventionId={id} />
+
       {/* his week, already recorded — nothing here was typed twice */}
       <section className="rounded-xl border border-border bg-card p-4">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold">
@@ -145,6 +153,11 @@ function ChildInner() {
           Read from what his other teachers already recorded. You are never asked to type it again.
         </p>
       </section>
+
+      {/* Assignments — per-student homework, given and checked here. Not a
+          support-specific store: the child's homework history and this block
+          are the same rows. */}
+      <SupportAssignments studentId={data.student_id} classSubjectId={data.class_subject_id} />
 
       {/* four fields, once a week */}
       {data.status === "active" ? (
@@ -225,6 +238,48 @@ function ChildInner() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The summary and key insights (founder 2026-08-04).
+ *
+ * Nothing here is a diagnosis and nothing here reaches a parent (P4). The
+ * server refuses to write about the child's ability — see `ai/band_summary.py`
+ * — and with no AI key it is the deterministic sentences, which is the normal
+ * case in dev and in any school without a key. Never blank.
+ */
+function SummaryBlock({ interventionId }: { interventionId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["support-summary", interventionId],
+    queryFn: () => schoolApi.supportSummary(interventionId),
+  });
+  if (isLoading || !data?.summary) return null;
+  return (
+    <section className="rounded-xl border border-border bg-card p-4">
+      <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+        <Sparkles className="h-4 w-4" /> Summary
+        <span className="font-normal text-xs text-muted-foreground">
+          {data.source === "ai" ? "· written from the record below" : "· computed"}
+        </span>
+      </h2>
+      <p className="mt-2 text-sm leading-relaxed">{data.summary}</p>
+      {data.insights.length ? (
+        <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
+          {data.insights.map((i, n) => (
+            <li key={n} className="flex gap-2 text-sm">
+              <span className="text-muted-foreground">&middot;</span>
+              <span>{i}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {data.based_on.length ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          From {data.based_on.join(" · ")}.
+        </p>
+      ) : null}
+    </section>
   );
 }
 

@@ -297,3 +297,66 @@ def test_allocation_is_admin_only(client, cleanup):
     """Who owns whom is a decision about how the school runs (`D-73`)."""
     _, th, _ = _setup(client, cleanup)
     assert client.get("/api/v1/bands/allocation", headers=th).status_code == 403
+
+
+# ── the written summary ──────────────────────────────────────────────────────
+def test_summary_is_never_blank_and_never_a_diagnosis(client, cleanup):
+    """AI-off — which is dev, tests, and every school without a key — the
+    deterministic sentences render, so the owner's page always says something.
+
+    The forbidden register is asserted rather than trusted to the prompt. A band
+    is a teaching group; the moment this text calls a child weak or slow it has
+    become the label `D-67` and P4 exist to prevent, and it is the one surface
+    where a model is most tempted to."""
+    h, th, ctx = _setup(client, cleanup)
+    kabir, _ = ctx["kids_b"]
+    _file(client, h, ctx, ctx["six_b"]["id"], ctx["hindi"]["id"],
+          [{"student_id": kabir["id"], "tier": "C"}])
+    client.post("/api/v1/bands/owner", headers=h, json={
+        "student_id": kabir["id"], "subject_id": ctx["hindi"]["id"],
+        "member_id": ctx["teacher_member"], "term_id": ctx["term_id"],
+        "exit_criterion": "reads a grade-level passage at 60 wpm, twice running"})
+    plan = client.get("/api/v1/bands/support", headers=th).json()["groups"][0]["rows"][0]
+    iv = plan["intervention_id"]
+
+    r = client.get(f"/api/v1/bands/support/{iv}/summary", headers=th)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["source"] == "computed"        # no key in the suite
+    assert out["summary"].strip()             # never blank
+    assert out["insights"]
+    # It says what it was written from, so a reader can check it.
+    assert any("check-in" in b for b in out["based_on"])
+
+    blob = " ".join([out["summary"], *out["insights"]]).lower()
+    for word in ("weak", "slow", "poor", "lazy", "unmotivated", "low-ability",
+                 "learning difficulty", "disorder", "stupid", "dull"):
+        assert word not in blob, f"the summary called a child {word!r}"
+    # A week nobody recorded is a statement about the RECORD (`S-164`).
+    assert "gap in the record" in out["summary"] or "record shows" in out["summary"]
+
+
+def test_summary_is_the_owners_and_the_admins_only(client, cleanup):
+    """Never another owner's children (`S-170`), on this surface as on the rest."""
+    h, th, ctx = _setup(client, cleanup)
+    kabir, _ = ctx["kids_b"]
+    _file(client, h, ctx, ctx["six_b"]["id"], ctx["hindi"]["id"],
+          [{"student_id": kabir["id"], "tier": "C"}])
+    client.post("/api/v1/bands/owner", headers=h, json={
+        "student_id": kabir["id"], "subject_id": ctx["hindi"]["id"],
+        "member_id": ctx["teacher_member"], "term_id": ctx["term_id"]})
+    iv = client.get("/api/v1/bands/support", headers=th).json()[
+        "groups"][0]["rows"][0]["intervention_id"]
+
+    # The admin may read it; a teacher who owns nobody may not.
+    assert client.get(f"/api/v1/bands/support/{iv}/summary", headers=h).status_code == 200
+
+    other = f"o{uuid.uuid4().hex[:8]}"
+    bulk = client.post("/api/v1/org/members/bulk", headers=h, json={"members": [
+        {"username": other, "password": "supersecret1", "role": "teacher"}]}).json()
+    cleanup["users"].append(uuid.UUID(bulk["results"][0]["user_id"]))
+    oh = {"Authorization": "Bearer " + client.post("/api/v1/auth/login", json={
+        "identifier": other, "password": "supersecret1"}).json()["access_token"]}
+    blocked = client.get(f"/api/v1/bands/support/{iv}/summary", headers=oh)
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "not_your_student"

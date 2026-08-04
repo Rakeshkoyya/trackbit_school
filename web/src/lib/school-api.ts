@@ -461,6 +461,9 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").SupportList>(`/bands/support${qs({ member_id: memberId })}`),
   supportChild: (interventionId: string) =>
     api.get<import("@/lib/school-types").SupportChild>(`/bands/support/${interventionId}`),
+  supportSummary: (interventionId: string) =>
+    api.get<import("@/lib/school-types").SupportSummary>(
+      `/bands/support/${interventionId}/summary`),
   supportCheckIn: (interventionId: string, b: {
     worked_on?: string; what_changed?: string; next_step?: string; ready_to_retest: boolean;
   }) => api.post<import("@/lib/school-types").SupportChild>(

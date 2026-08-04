@@ -2542,6 +2542,16 @@ export interface OwnerSuggestion {
   current: boolean;
 }
 
+/** The written summary. `source` is "ai" only when a model actually answered;
+ * with no key it is "computed" and the deterministic sentences render, so the
+ * page is never blank and the reader can tell which they are looking at. */
+export interface SupportSummary {
+  source: string;
+  summary: string;
+  insights: string[];
+  based_on: string[];
+}
+
 export interface SupportDayRow { date: string; kind: string; text: string }
 
 export interface SupportStudentRow {
@@ -2587,6 +2597,10 @@ export interface SupportChild {
   class_label: string | null;
   subject_id: string | null;
   subject_name: string | null;
+  /** The (class, subject) an assignment given from this page is filed against.
+   *  Support work reuses per-student homework rather than growing a second
+   *  "did he do the work" store. Null when the class isn't taught this subject. */
+  class_subject_id: string | null;
   tier: BandTier | null;
   since: string | null;
   source: string | null;

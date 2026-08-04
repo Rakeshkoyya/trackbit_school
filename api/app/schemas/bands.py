@@ -365,6 +365,12 @@ class SupportChild(BaseModel):
     class_label: str | None = None
     subject_id: uuid.UUID | None = None
     subject_name: str | None = None
+    # The (class, subject) this child sits in — what an assignment given from
+    # this page has to be filed against. Per-student homework already exists
+    # (`homework_assignments.student_id`, V2-P3) and the support programme
+    # deliberately reuses it rather than growing a second "did he do the work"
+    # store, which would be `S-51` for the seventh time.
+    class_subject_id: uuid.UUID | None = None
     tier: str | None = None
     since: Date | None = None
     source: str | None = None
@@ -382,6 +388,21 @@ class SupportChild(BaseModel):
     # The evidence a "ready to re-test" claim rests on (`S-178`).
     latest_pct: float | None = None
     latest_test: str | None = None
+
+
+class SupportSummary(BaseModel):
+    """The written summary and key insights for one support child.
+
+    `source` is `ai` only when a model actually answered — with no key, a
+    timeout or bad JSON it is `computed` and the deterministic sentences are
+    what render. The page is never blank, and the reader can always tell which
+    they are looking at."""
+    source: str = "computed"
+    summary: str = ""
+    insights: list[str] = []
+    # What the summary was written from, so a reader can check it rather than
+    # trust it — and so an empty summary is explicable rather than mysterious.
+    based_on: list[str] = []
 
 
 class InterventionCloseIn(BaseModel):

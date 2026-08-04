@@ -45,6 +45,7 @@ from app.models import (
     AttendanceException,
     CheckResult,
     ClassPeriod,
+    ClassSubject,
     DailyCheck,
     HomeworkAssignment,
     HomeworkResult,
@@ -68,7 +69,9 @@ from app.schemas.bands import (
     SupportDayRow,
     SupportList,
     SupportStudentRow,
+    SupportSummary,
 )
+from app.services.ai.band_summary import band_summary
 from app.services.bands import BandService
 from app.services.school_clock import today_in
 
@@ -206,7 +209,8 @@ class SupportService:
             source=band_row.source if band_row else None,
             owner_name=owner_name, goal_text=iv.goal_text,
             exit_criterion=iv.exit_criterion, status=iv.status,
-            week_start=week)
+            week_start=week,
+            class_subject_id=self._class_subject(m, student, iv.subject_id))
 
         # `S-166`: the letter never appears without its sentence — and both the
         # band he is in and the one he is working towards are on screen.
@@ -234,6 +238,14 @@ class SupportService:
         if latest:
             out.latest_pct, out.latest_test = latest
         return out
+
+    def _class_subject(self, m: CurrentMember, student: Student,
+                       subject_id: uuid.UUID | None) -> uuid.UUID | None:
+        if student.class_id is None or subject_id is None:
+            return None
+        return self.db.scalar(select(ClassSubject.id).where(
+            ClassSubject.org_id == m.org_id, ClassSubject.class_id == student.class_id,
+            ClassSubject.subject_id == subject_id))
 
     def _week(self, m: CurrentMember, student: Student, week: date) -> list[SupportDayRow]:
         """His week as his teachers already recorded it — **nothing here was
@@ -378,6 +390,114 @@ class SupportService:
         iv.outcome_note = (outcome_note or "").strip() or None
         self.db.flush()
         return self.child(m, iv.id)
+
+    # ── the written summary (founder 2026-08-04) ─────────────────────────────
+    def summary(self, m: CurrentMember, intervention_id: uuid.UUID) -> SupportSummary:
+        """*"What has been happening with Kabir, and what do I do next?"* in
+        prose, over the facts `child()` already composes.
+
+        It **reads**, it never writes: no new capture, no stored text, no
+        opinion of its own. The model is handed the same week, check-ins and
+        tests the owner can see two inches above it, so a summary that says
+        something surprising is checkable rather than authoritative — which is
+        why `based_on` rides along.
+
+        With no AI key configured this is the deterministic sentence builder,
+        and that is the normal case in dev and in every school we have not
+        switched a key on for. It is never blank."""
+        child = self.child(m, intervention_id)
+        facts = self._facts(child)
+        source, text, insights = band_summary(facts)
+        if source != "ai" or not text:
+            text, insights = self._deterministic(child)
+            source = "computed"
+        return SupportSummary(source=source, summary=text, insights=insights,
+                              based_on=facts["based_on"])
+
+    @staticmethod
+    def _facts(child: SupportChild) -> dict:
+        week = [f"{r.date:%a %d %b}: {r.text}" for r in child.week]
+        checkins = [
+            " · ".join(p for p in (
+                f"{c.week_start:%d %b}",
+                f"worked on: {c.worked_on}" if c.worked_on else "",
+                f"changed: {c.what_changed}" if c.what_changed else "",
+                f"next: {c.next_step}" if c.next_step else "",
+                "she says he is ready to re-test" if c.ready_to_retest else "",
+            ) if p)
+            for c in child.checkpoints[:6]
+        ]
+        tests = ([f"latest test {child.latest_test}: {child.latest_pct}%"]
+                 if child.latest_pct is not None else [])
+        descriptor = next((d.text for d in child.descriptors if d.tier == child.tier), None)
+        return {
+            "name": child.full_name, "subject": child.subject_name,
+            "tier": child.tier, "descriptor": descriptor,
+            "goal": child.goal_text, "exit_criterion": child.exit_criterion,
+            "week": week, "checkins": checkins, "tests": tests,
+            "figures": [f"{len(child.checkpoints)} check-ins recorded in total"],
+            # Named counts, not the content — this is what the summary rests on.
+            "based_on": [
+                f"{len(child.week)} things his teachers recorded this week",
+                f"{len(child.checkpoints)} weekly check-in"
+                + ("" if len(child.checkpoints) == 1 else "s"),
+                *( [f"his latest test ({child.latest_test})"] if child.latest_test else [] ),
+            ],
+        }
+
+    @staticmethod
+    def _deterministic(child: SupportChild) -> tuple[str, list[str]]:
+        """The floor. Plain, short, and it never says more than it knows.
+
+        Every branch here obeys the same rule the model is given: a week with
+        nothing in it is a statement about the RECORD, never about the child
+        (`S-164`'s "no signals this week" state) — and never red."""
+        name = child.full_name.split()[0]
+        subject = child.subject_name or "this subject"
+        parts: list[str] = []
+        insights: list[str] = []
+
+        absences = sum(1 for r in child.week if r.kind == "absent")
+        misses = sum(1 for r in child.week if r.kind in ("homework", "check"))
+        good = sum(1 for r in child.week if r.kind in ("observation", "session"))
+
+        if not child.week:
+            parts.append(f"Nothing was recorded for {name} this week — "
+                         "that is a gap in the record, not a lack of progress.")
+        else:
+            bits = []
+            if absences:
+                bits.append(f"{absences} absence{'' if absences == 1 else 's'}")
+            if misses:
+                bits.append(f"{misses} homework or check flag{'' if misses == 1 else 's'}")
+            if good:
+                bits.append(f"{good} note{'' if good == 1 else 's'} from his teachers")
+            parts.append(f"This week the record shows {', '.join(bits)}.")
+
+        if child.checkpoints:
+            last = child.checkpoints[0]
+            parts.append(f"Last check-in {last.week_start:%d %b}"
+                         + (f": {last.next_step}" if last.next_step else "."))
+            if last.ready_to_retest:
+                insights.append("His owner has marked him ready to re-test — "
+                                "a test is what moves the band, not this flag.")
+        else:
+            parts.append("No check-in has been written yet.")
+            insights.append("The first weekly check-in is what turns this from a "
+                            "label into a plan.")
+
+        if child.latest_pct is not None:
+            insights.append(f"Latest test — {child.latest_test} — {child.latest_pct}%.")
+        if absences >= 3:
+            insights.append(f"{name} missed {absences} periods this week, so the "
+                            "rest of the record is thin rather than poor.")
+        if not child.exit_criterion:
+            # `S-167`: written at entry, not judged at the end of term.
+            insights.append("No exit criterion is set, so there is nothing to "
+                            "measure 'ready' against.")
+        insights.append(f"Band C in {subject} is a teaching group — the work is to "
+                        "move it, not to record it.")
+        return " ".join(parts), insights[:4]
 
     def _assert_owner(self, m: CurrentMember, iv: Intervention) -> None:
         """The owner, or an admin. Not other owners' children (`S-170`)."""

@@ -41,6 +41,7 @@ from app.schemas.bands import (
     ProgrammeBoard,
     SupportChild,
     SupportList,
+    SupportSummary,
 )
 from app.schemas.common import MessageResponse
 from app.services.bands import BandService
@@ -180,6 +181,15 @@ def support_child(intervention_id: uuid.UUID, m: CurrentMember = Depends(require
     """Opens **already written** (`S-164`): his week as five other teachers
     already recorded it, so she is never asked to type what we already know."""
     return SupportService(db).child(m, intervention_id)
+
+
+@router.get("/support/{intervention_id}/summary", response_model=SupportSummary)
+def support_summary(intervention_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                    db: Session = Depends(get_db)):
+    """The written summary and key insights, over the facts the page already
+    shows. AI-off it is the deterministic sentences — never blank, and `source`
+    says which one you are reading. Staff-only, like the rest of the module."""
+    return SupportService(db).summary(m, intervention_id)
 
 
 @router.post("/support/{intervention_id}/check-in", response_model=SupportChild)
