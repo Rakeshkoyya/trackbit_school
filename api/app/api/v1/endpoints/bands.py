@@ -24,22 +24,28 @@ from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import require_academic, require_admin
 from app.schemas.bands import (
+    AllocationBoard,
     AssignOwnerIn,
     BandClassBoard,
     BandDescriptorOut,
+    BandDistribution,
     BandFileIn,
     BandPromotePreview,
+    BandScopeOut,
     BandSubjectSetup,
     CheckpointIn,
     DescriptorUpdate,
     InterventionCloseIn,
     MonitoredIn,
+    OwnerSuggestion,
     ProgrammeBoard,
     SupportChild,
     SupportList,
+    SupportSummary,
 )
 from app.schemas.common import MessageResponse
 from app.services.bands import BandService
+from app.services.insights.bands import BandInsights
 from app.services.support import SupportService
 
 router = APIRouter()
@@ -78,11 +84,52 @@ def class_board(class_id: uuid.UUID, subject_id: uuid.UUID,
 
 
 @router.post("/class/file", response_model=MessageResponse)
-def file_bands(body: BandFileIn, m: CurrentMember = Depends(require_admin),
+def file_bands(body: BandFileIn, m: CurrentMember = Depends(require_academic),
                db: Session = Depends(get_db)):
-    """**Entry** (`S-185`). Append-only: re-filing appends, it never overwrites."""
+    """**Entry** (`S-185`). Append-only: re-filing appends, it never overwrites.
+
+    Founder 2026-08-04: `require_academic`, not `require_admin`. The subject
+    teacher is the person who knows whether this child can read the passage, and
+    V1-9's admin-only guard meant she could see a band and never set one. The
+    service still refuses a class-subject she does not teach."""
     n = BandService(db).file_bands(m, body)
     return MessageResponse(message=f"{n} band{'' if n == 1 else 's'} filed.")
+
+
+# ── scope, distribution, allocation (founder 2026-08-04) ─────────────────────
+@router.get("/scope", response_model=BandScopeOut)
+def band_scope(m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
+    """What this member may band — and therefore whether they get the nav item."""
+    return BandService(db).scope(m)
+
+
+@router.get("/distribution", response_model=BandDistribution)
+def distribution(term_id: uuid.UUID | None = None,
+                 m: CurrentMember = Depends(require_academic),
+                 db: Session = Depends(get_db)):
+    """School · by class · by subject, tallied A/B/C — **under** the movement
+    sentence, never instead of it (`S-169`). Scoped to her own class-subjects
+    for a teacher, the whole school for an admin."""
+    return BandInsights(db).distribution(m, term_id)
+
+
+@router.get("/allocation", response_model=AllocationBoard)
+def allocation(term_id: uuid.UUID | None = None, class_id: uuid.UUID | None = None,
+               subject_id: uuid.UUID | None = None,
+               m: CurrentMember = Depends(require_admin),
+               db: Session = Depends(get_db)):
+    """Every Band C placement and its owner — the table the admin allocates from.
+    Admin-only: who owns whom is a decision about how the school runs."""
+    return BandInsights(db).allocation(m, term_id, class_id, subject_id)
+
+
+@router.get("/allocation/suggestions", response_model=list[OwnerSuggestion])
+def owner_suggestions(student_id: uuid.UUID, subject_id: uuid.UUID,
+                      m: CurrentMember = Depends(require_admin),
+                      db: Session = Depends(get_db)):
+    """Suggested first, **never restricted** — the teachers already in front of
+    this child, then everyone, each with a reason and their current load."""
+    return BandInsights(db).owner_suggestions(m, student_id, subject_id)
 
 
 # ── movement: promoting a test (D-76 / S-184 / Q-81) ─────────────────────────
@@ -134,6 +181,15 @@ def support_child(intervention_id: uuid.UUID, m: CurrentMember = Depends(require
     """Opens **already written** (`S-164`): his week as five other teachers
     already recorded it, so she is never asked to type what we already know."""
     return SupportService(db).child(m, intervention_id)
+
+
+@router.get("/support/{intervention_id}/summary", response_model=SupportSummary)
+def support_summary(intervention_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                    db: Session = Depends(get_db)):
+    """The written summary and key insights, over the facts the page already
+    shows. AI-off it is the deterministic sentences — never blank, and `source`
+    says which one you are reading. Staff-only, like the rest of the module."""
+    return SupportService(db).summary(m, intervention_id)
 
 
 @router.post("/support/{intervention_id}/check-in", response_model=SupportChild)

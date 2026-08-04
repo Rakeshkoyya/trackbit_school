@@ -11,7 +11,7 @@ import { navForRole } from "./nav-items";
 export function Sidebar() {
   const pathname = usePathname();
   const { me } = useAuth();
-  const items = navForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher);
+  const items = navForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher, me?.has_band_scope);
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-card lg:flex">

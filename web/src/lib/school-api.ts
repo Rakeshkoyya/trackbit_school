@@ -443,10 +443,27 @@ export const schoolApi = {
     student_id: string; subject_id: string; member_id?: string | null;
     term_id?: string | null; goal_text?: string; exit_criterion?: string;
   }) => api.post<{ message: string }>("/bands/owner", b),
+  // ── ABC bands v2 (founder 2026-08-04) ──────────────────────────────────────
+  // `bandScope` decides whether the nav item exists at all; `bandDistribution`
+  // is the ONE read behind the dashboard block and the Overview tab, so the two
+  // can never quote different figures for the same morning.
+  bandScope: () => api.get<import("@/lib/school-types").BandScope>("/bands/scope"),
+  bandDistribution: (termId?: string) =>
+    api.get<import("@/lib/school-types").BandDistribution>(
+      `/bands/distribution${qs({ term_id: termId })}`),
+  bandAllocation: (p: { termId?: string; classId?: string; subjectId?: string } = {}) =>
+    api.get<import("@/lib/school-types").AllocationBoard>(
+      `/bands/allocation${qs({ term_id: p.termId, class_id: p.classId, subject_id: p.subjectId })}`),
+  bandOwnerSuggestions: (studentId: string, subjectId: string) =>
+    api.get<import("@/lib/school-types").OwnerSuggestion[]>(
+      `/bands/allocation/suggestions${qs({ student_id: studentId, subject_id: subjectId })}`),
   supportList: (memberId?: string) =>
     api.get<import("@/lib/school-types").SupportList>(`/bands/support${qs({ member_id: memberId })}`),
   supportChild: (interventionId: string) =>
     api.get<import("@/lib/school-types").SupportChild>(`/bands/support/${interventionId}`),
+  supportSummary: (interventionId: string) =>
+    api.get<import("@/lib/school-types").SupportSummary>(
+      `/bands/support/${interventionId}/summary`),
   supportCheckIn: (interventionId: string, b: {
     worked_on?: string; what_changed?: string; next_step?: string; ready_to_retest: boolean;
   }) => api.post<import("@/lib/school-types").SupportChild>(

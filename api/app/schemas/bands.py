@@ -174,6 +174,137 @@ class AssignOwnerIn(BaseModel):
     exit_criterion: str | None = Field(default=None, max_length=300)
 
 
+# ── who may band what (founder 2026-08-04) ───────────────────────────────────
+class BandScopeClass(BaseModel):
+    class_id: uuid.UUID
+    class_label: str
+    # The monitored subjects this member takes in this class — the class × subject
+    # tab rows the manage screen is built from.
+    subjects: list[dict] = []
+
+
+class BandScopeOut(BaseModel):
+    """What this member may do in the programme, and therefore whether the ABC
+    Bands nav item exists for them at all.
+
+    A teacher who takes none of the monitored subjects gets `has_scope=False` and
+    no nav item — an area that opens on "nothing here for you" is worse than one
+    that was never offered (ux §13)."""
+    # Any subject monitored in the school at all.
+    enabled: bool = False
+    # This member has at least one monitored class-subject.
+    has_scope: bool = False
+    is_admin: bool = False
+    classes: list[BandScopeClass] = []
+    subjects: list[dict] = []
+
+
+# ── the distribution board (founder 2026-08-04) ──────────────────────────────
+# `S-169` rejected the distribution as the admin's HEADLINE, and that still
+# holds: `BandDistribution.headline` is the movement sentence, and these counts
+# render underneath it. What the founder asked for is the shape of the school —
+# which class is carrying the support load, and which subject — and that is a
+# question movement cannot answer.
+#
+# The unit is deliberate. `D-75` retired the overall letter, so a *student*
+# cannot be counted into one tier at school or class level: a child who is A in
+# Maths and C in Hindi belongs to both. The unit here is therefore the
+# **placement** (one child in one subject), and `caption` says so on every
+# surface that renders it. Per subject the unit collapses back to children,
+# because inside one subject a child holds exactly one band.
+class BandScopeRow(BaseModel):
+    """One class, or one subject, tallied A/B/C."""
+    key: str
+    label: str
+    a: int = 0
+    b: int = 0
+    c: int = 0
+    # a + b + c. The denominator every percentage on this row is taken over.
+    assessed: int = 0
+    # How many placements COULD exist here — roster × the monitored subjects
+    # actually taught. `eligible - assessed` is the gap in the record, and it is
+    # reported as its own number rather than folded into C (ux §5).
+    eligible: int = 0
+    a_pct: float = 0.0
+    b_pct: float = 0.0
+    c_pct: float = 0.0
+    not_assessed: int = 0
+    # Children, not placements — the honest count for a subject row, and useful
+    # context on a class row.
+    students: int = 0
+
+
+class BandDistribution(BaseModel):
+    term_id: uuid.UUID | None = None
+    term_name: str | None = None
+    subjects: list[str] = []
+    # `S-169`: movement leads, the distribution explains. This is the same
+    # sentence `ProgrammeBoard.headline` carries, from the same computation —
+    # the two boards can never describe the same term differently.
+    headline: str = ""
+    moved_up: int = 0
+    slipped: int = 0
+    school: BandScopeRow = Field(default_factory=lambda: BandScopeRow(key="school", label="School"))
+    # "418 placements across 3 subjects · 142 children assessed of 156"
+    caption: str = ""
+    by_class: list[BandScopeRow] = []
+    by_subject: list[BandScopeRow] = []
+
+
+# ── teacher allocation (D-71 / D-77 / S-168) ─────────────────────────────────
+class AllocationRow(BaseModel):
+    """One C-band placement and the teacher who owns moving it to B.
+
+    `S-188`: never a row about a child without the subject on it — with one
+    owner per subject (`D-77`), "Kabir Shah — owner Priya" is ambiguous until
+    you know whether that is Priya-for-Hindi or Priya-for-Maths."""
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None = None
+    class_id: uuid.UUID | None = None
+    class_label: str | None = None
+    subject_id: uuid.UUID
+    subject_name: str
+    tier: str = "C"
+    since: Date | None = None
+    owner_member_id: uuid.UUID | None = None
+    owner_name: str | None = None
+    intervention_id: uuid.UUID | None = None
+    last_checkin: Date | None = None
+    checkins: int = 0
+    status: str = "active"
+
+
+class AllocationBoard(BaseModel):
+    term_id: uuid.UUID | None = None
+    term_name: str | None = None
+    headline: str = ""
+    rows: list[AllocationRow] = []
+    assigned: int = 0
+    unassigned: int = 0
+    # The filter vocabulary, so the screen never has to guess what exists.
+    classes: list[dict] = []
+    subjects: list[dict] = []
+
+
+class OwnerSuggestion(BaseModel):
+    """A teacher who could own this child, and **why** — never a ranking.
+
+    `S-170` is a fence: teachers are not scored by children moved, so `load` is
+    here as *capacity* (how many they already carry), never as performance. The
+    list is not filtered to the suggested set — the founder's call: suggest the
+    class's own teachers first, allow anyone."""
+    member_id: uuid.UUID
+    name: str
+    # `suggested` = one of the teachers already in front of this child.
+    suggested: bool = False
+    reason: str = ""
+    # Support children this member already owns, across every subject.
+    load: int = 0
+    # True when this member already owns THIS child in THIS subject.
+    current: bool = False
+
+
 # ── the owner's screens (D-87 / S-164 / S-165) ───────────────────────────────
 class SupportDayRow(BaseModel):
     """One line of the pre-filled week — read from capture other teachers
@@ -234,6 +365,12 @@ class SupportChild(BaseModel):
     class_label: str | None = None
     subject_id: uuid.UUID | None = None
     subject_name: str | None = None
+    # The (class, subject) this child sits in — what an assignment given from
+    # this page has to be filed against. Per-student homework already exists
+    # (`homework_assignments.student_id`, V2-P3) and the support programme
+    # deliberately reuses it rather than growing a second "did he do the work"
+    # store, which would be `S-51` for the seventh time.
+    class_subject_id: uuid.UUID | None = None
     tier: str | None = None
     since: Date | None = None
     source: str | None = None
@@ -251,6 +388,21 @@ class SupportChild(BaseModel):
     # The evidence a "ready to re-test" claim rests on (`S-178`).
     latest_pct: float | None = None
     latest_test: str | None = None
+
+
+class SupportSummary(BaseModel):
+    """The written summary and key insights for one support child.
+
+    `source` is `ai` only when a model actually answered — with no key, a
+    timeout or bad JSON it is `computed` and the deterministic sentences are
+    what render. The page is never blank, and the reader can always tell which
+    they are looking at."""
+    source: str = "computed"
+    summary: str = ""
+    insights: list[str] = []
+    # What the summary was written from, so a reader can check it rather than
+    # trust it — and so an empty summary is explicable rather than mysterious.
+    based_on: list[str] = []
 
 
 class InterventionCloseIn(BaseModel):

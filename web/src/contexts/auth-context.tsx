@@ -33,6 +33,8 @@ function sessionToMe(s: Session): Me {
     // The session token doesn't carry it; /auth/me fills it in on the next
     // load, which is when the My Class nav item appears (V1-3, D-03).
     is_class_teacher: false,
+    // Same again — the ABC bands nav item appears on the next /auth/me.
+    has_band_scope: false,
     // Same as above — a session response has no DOB; /auth/me carries it.
     date_of_birth: null,
     user: s.user,

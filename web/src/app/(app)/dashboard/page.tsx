@@ -30,7 +30,8 @@ import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { StaffDayBlock } from "@/components/insights/daybook";
-import { ActionRail, CustomSection, SectionCard } from "@/components/insights/overview";
+import { BandLegend } from "@/components/insights/band-distribution";
+import { ActionRail, CustomSection, MetricCell, SectionCard } from "@/components/insights/overview";
 import { PresencePanorama } from "@/components/insights/presence";
 import { HomeworkOverviewBlock, OVERVIEW_WINDOW_DAYS } from "@/components/insights/homework";
 import { SyllabusPulseBlock } from "@/components/insights/syllabus";
@@ -54,7 +55,7 @@ import type { QuickAction } from "@/lib/insights-types";
 import { schoolApi } from "@/lib/school-api";
 import { money } from "@/lib/school-format";
 import { QuarterRings, YearFeeRing } from "@/components/school/fee-rings";
-import type { CollectionBoard, DashboardAlert } from "@/lib/school-types";
+import type { BandDistribution, CollectionBoard, DashboardAlert } from "@/lib/school-types";
 
 const longDate = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
@@ -268,6 +269,53 @@ function FeesSection({ board }: { board: CollectionBoard }) {
   );
 }
 
+/**
+ * The support programme's shape (founder 2026-08-04).
+ *
+ * `S-169` still holds: the headline is the programme's own MOVEMENT sentence,
+ * and the distribution explains it underneath. A distribution alone looks
+ * identical in a school where nobody has moved for a year, which is exactly why
+ * it was kept off the board before — but it answers a question movement cannot:
+ * where the support load actually sits, by class and by subject.
+ *
+ * Client-side off `/bands/distribution`, the same read the ABC bands tab
+ * renders in full — the `FeesSection` precedent, and for the same reason: this
+ * lives on its own screen and the two must never quote different figures.
+ */
+function BandsSection({ data }: { data: BandDistribution }) {
+  const s = data.school;
+  return (
+    <CustomSection
+      sectionKey="bands" label="ABC bands" href="/bands"
+      headline={data.headline}
+      notes={
+        <div className="space-y-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+            {data.caption}
+          </p>
+          <BandLegend />
+        </div>
+      }>
+      <div className="flex-1 px-4 py-3">
+        <MetricCell label="In Band C" value={s.assessed ? `${s.c_pct}%` : "—"}
+          sub={s.assessed ? `${s.c} of ${s.assessed} placements` : "nobody assessed yet"}
+          href="/bands" />
+      </div>
+      <div className="flex-1 px-4 py-3">
+        <MetricCell label="Moved up" value={String(data.moved_up)}
+          sub={`${data.slipped} slipped this term`} href="/bands/reports" />
+      </div>
+      <div className="flex-1 px-4 py-3">
+        {/* Not assessed is its own number and never red — a class nobody has
+            banded is a gap in the record, not a result (ux §5). */}
+        <MetricCell label="Not assessed" value={String(s.not_assessed)}
+          sub={s.not_assessed ? "placements with no band yet" : "every placement has a band"}
+          href="/bands/manage" />
+      </div>
+    </CustomSection>
+  );
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
 function DashboardInner() {
@@ -354,6 +402,13 @@ function DashboardInner() {
     }] : []),
     ...(board?.actions ?? []),
   ];
+
+  // The support programme's shape — its own read, like fees, so the block and
+  // the ABC bands tab can never disagree.
+  const { data: bandDist } = useQuery({
+    queryKey: ["band-distribution", "overview"],
+    queryFn: () => schoolApi.bandDistribution(),
+  });
 
   const sections = board?.sections ?? [];
   // Attendance and staff have graduated out of the one-card-per-module grid into
@@ -491,6 +546,9 @@ function DashboardInner() {
                 without the quarters collapsing to something unreadable. */}
             {feeBoard && feeBoard.academic_year_id ? (
               <div className="lg:col-span-2"><FeesSection board={feeBoard} /></div>
+            ) : null}
+            {bandDist && bandDist.subjects.length ? (
+              <div className="lg:col-span-2"><BandsSection data={bandDist} /></div>
             ) : null}
             {exams ? <SectionCard section={exams} /> : null}
           </div>

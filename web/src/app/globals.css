@@ -78,6 +78,34 @@
   --hw-stage-2: #6076e0;
   --hw-stage-3: #22307e;
 
+  /*
+    ABC bands (founder 2026-08-04) — A → B → C, an ORDINAL ramp for the same
+    reason the homework funnel is one: the tiers are ordered, and what deepens
+    along them is *how much support this child needs*. A categorical trio would
+    invent three identities where there is one quantity increasing.
+
+    It is deliberately NOT the status palette. Painting C red would make the
+    board a deficit ladder and turn a teaching group into a verdict on a child —
+    which is the whole thing `D-67` and P4 exist to prevent. Status stays
+    reserved for things that are actually good or bad (an overdue check-in, an
+    unassigned owner), and those render as text beside the mark.
+
+    Stepped off series slot 6 (#8a5fd4) rather than slot 1, so a band chart and
+    a homework chart on the same scroll are never two blues. Validated with
+    scripts/validate_palette.js --ordinal against the card surface (#ffffff
+    here, #21211b in dark): lightness monotone, adjacent ΔL >= 0.06, light end
+    clears 2:1 on the surface, single hue. Do not adjust by eye.
+
+    "Not assessed" is NOT a step on this ramp: nobody has looked at that child,
+    which is a hole in the record and wears the same dashed/hatched no-record
+    texture as an unmarked register cell (V1-14) and an unchecked homework set
+    (V1-17). Making it a fourth colour would let a class nobody assessed read as
+    a measured result.
+  */
+  --band-a: #b79fed;
+  --band-b: #8558d2;
+  --band-c: #472887;
+
   --radius: 0.75rem;
 }
 
@@ -136,6 +164,16 @@
   --hw-stage-1: #4a5aa8;
   --hw-stage-2: #8094f0;
   --hw-stage-3: #ccd6fb;
+
+  /*
+    The band ramp re-stepped for the dark card (#21211b), not flipped: on a dark
+    surface "more" has to read BRIGHTER, so C — the tier needing most support —
+    is the lightest step here. Validated the same way (--ordinal, surface
+    #21211b): all checks pass.
+  */
+  --band-a: #5f45a3;
+  --band-b: #9a74e2;
+  --band-c: #d8c8f8;
 }
 
 @theme inline {

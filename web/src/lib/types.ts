@@ -56,6 +56,9 @@ export interface Me {
   /** V1-3 (D-03): class teacher of at least one class — the nav shows
    *  "My Class" from this alone. */
   is_class_teacher: boolean;
+  /** Takes at least one band-monitored subject (admins always). Gates the ABC
+   * bands nav item — a teacher outside the programme never sees it. */
+  has_band_scope: boolean;
   /** V1-7 (D-56): your own date of birth, self-entered on Account. Never shown
    *  on a class list (S-133) and never sent to a parent surface (Q-57). */
   date_of_birth: string | null;
