@@ -1400,6 +1400,67 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     297 for a *school-open* approval. One V1-7 test updated to the major-tier contract, pinned in
     both directions.
 
+- **BD-2 (ABC bands — the programme gets its own area, 2026-08-04)** — **no migration.** V1-9 built
+  the support programme and left it reachable only as a tab under **Students**, which is where you
+  go to look a child *up*. Founder call: bands become a first-class area with the three things the
+  module could not do — see the shape of the school, allocate owners from one table, and let the
+  subject teacher set a band at all.
+  - 🔴 **A teacher could not file a band.** Every band write was `require_admin` (V1-9's
+    `endpoints/bands.py`), so the person who knows whether the child can read the passage could see
+    a band and never set one — the whole teacher half of the module was unreachable.
+    `POST /bands/class/file` is now `require_academic` and **`BandService.assert_can_band`** gives
+    her exactly her own monitored class-subjects, **blocked with a sentence rather than filtered to
+    an empty table** she would read as "nobody is banded here" (`S-46`). Reading a class board is
+    the same permission as writing it. `GET /bands/scope` resolves it to names and is what the two
+    tab rows and the nav item are both built from; `me.has_band_scope` rides on `/auth/me` like
+    `is_class_teacher`, so a teacher outside the programme never sees the item (ux §13).
+  - **`services/insights/bands.py` COMPOSES** — every tier comes from `BandService.placements` and
+    the headline is `programme()`'s own movement sentence, so the dashboard block, the Overview tab
+    and the programme board cannot describe one term differently (`S-51`).
+  - ⚠️ **`S-169` is kept, not reversed.** It rejected the distribution as the admin's *headline*,
+    and it still is not one: `BandDistribution.headline` is the movement sentence and the tiers
+    render underneath. What the founder asked for is the **shape** — which class carries the
+    support load, and which subject — which movement genuinely cannot answer.
+  - **The unit is the PLACEMENT, not the child** (`D-75`). There is no overall letter, so a boy who
+    is A in Maths and C in Hindi is counted in both columns; only a *subject* row collapses back to
+    children. `caption` states it on every mounting, and a test asserts the arithmetic, because the
+    obvious "fix" is to collapse him to one row and that quietly reinstates the letter the module
+    deleted. Tiers are **current standing**, not this term's rows — `student_bands` is append-only,
+    so the newest row IS the band, and scoping to the running term would empty the board for every
+    school that banded in April. Percentages divide by what was **assessed**, never the roster;
+    `eligible - assessed` is its own number beside them; a subject that is taught but not monitored
+    reaches no denominator.
+  - **The A/B/C ramp is ORDINAL and computed, not chosen** — what deepens along it is how much
+    support a child needs, so it is one hue (V1-17's homework-stage precedent), stepped off series
+    slot 6 so a band chart and a homework chart on one scroll are never two blues, and validated
+    with `validate_palette.js --ordinal` against both card surfaces (dark **re-stepped, not
+    flipped**). It is deliberately **not** the status palette: painting C red turns a teaching
+    group into a verdict on a child. `--band-a/-b/-c` in `globals.css`, `BAND_COLOR` in the chart
+    kit. **"Not assessed" is not a step on the ramp** — it wears the dashed no-record texture the
+    register (V1-14) and the homework funnel (V1-17) already use.
+  - **Allocation** (`/bands/allocation`, admin-only) — unassigned first, grouped by class or
+    subject, filtered **server-side** so the headline and the rows cannot disagree.
+    `GET /bands/allocation/suggestions` returns the teachers already in front of the child first
+    *with the reason*, then **everyone else**: suggested, never restricted (a picker that refuses is
+    one the office routes around by phone). `load` is **capacity, never a score** — `S-170`.
+  - **The written summary** (`GET /bands/support/{id}/summary`, `ai/band_summary.py`) — the
+    `ai/report.py` contract: the model voices figures it was handed, and no key / timeout / bad JSON
+    falls through to the deterministic builder, so the owner's page is never blank. Its prompt
+    forbids diagnosis and ability language **in the negative** (a band is a teaching group, not a
+    condition) and forbids reading absence as effort; the suite greps the payload for that
+    vocabulary rather than trusting the prompt.
+  - **Assignments on the support page** reuse **per-student homework** (`homework_assignments
+    .student_id`, V2-P3) and `core/homework_verdict.py` — deliberately not a support-specific
+    store, which would be a seventh definition of "did the child do the work" and would let a
+    child's support page disagree with his own homework history. `not_checked` renders as "not
+    checked yet" and never as the child's miss (HW-1's rule).
+  - Web: `/bands` area (Overview · Manage bands · **Teacher allocation** (admin) / **My students**
+    (teacher) · Reports), `components/insights/band-distribution.tsx` mounted twice (full tab +
+    compact dashboard block), `components/school/support-assignments.tsx`, `SupportListView`
+    extracted from `/support` and mounted in both places. `/support` and every `/support/[id]` link
+    still resolve. `test_bands_v2.py` (10). Full suite **586 passing**, ruff clean; web tsc +
+    eslint + `next build` clean; reviewed in a real browser at 1440px in both themes and at 390px.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
