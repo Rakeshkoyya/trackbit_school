@@ -118,6 +118,9 @@ class MeResponse(BaseModel):
     # V1-3 (D-03): this member is class teacher of at least one class — the nav
     # shows "My Class" from this alone.
     is_class_teacher: bool = False
+    # Founder 2026-08-04: this member takes at least one monitored subject (or is
+    # an admin) — the one signal the nav needs to show/hide "ABC bands".
+    has_band_scope: bool = False
     user: UserOut
     org: OrgOut
     orgs: list[OrgMembershipOut] = []

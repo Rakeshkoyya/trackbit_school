@@ -8,6 +8,7 @@ import {
   Clock,
   GraduationCap,
   HeartHandshake,
+  Layers,
   Settings2,
   Sparkles,
   Sun,
@@ -56,6 +57,12 @@ const myClass: NavItem = { label: "My Class", href: "/my-class", icon: Users };
 // the weekly check-in. The 9:02 teacher never opens it — her band-aware surface
 // is the checks section of the period card, which differentiates already.
 const support: NavItem = { label: "Support", href: "/support", icon: HeartHandshake };
+// Founder 2026-08-04. The programme's own area — bands were reachable only as a
+// tab under Students, which is where you go to look a child up, not where you go
+// to run a support programme. Shown only to members with a monitored
+// class-subject (`me.has_band_scope`): an admin always, a teacher only for the
+// subjects the school actually monitors.
+const bands: NavItem = { label: "ABC bands", href: "/bands", icon: Layers };
 
 // Role-aware primary nav — the full ordered list, used by the DESKTOP sidebar.
 // SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
@@ -66,19 +73,22 @@ export function navForRole(
   role: OrgRole | string | undefined,
   isSuperAdmin = false,
   isClassTeacher = false,
+  hasBandScope = false,
 ): NavItem[] {
   // The platform operator gets the Schools item on top of whatever role they
   // hold in the org they're currently inside.
   const extra = isSuperAdmin ? [platform] : [];
   switch (role) {
     case "admin":
-      return [...extra, dashboard, lucy, plan, students, staff, fees, tasks, setup];
+      return [...extra, dashboard, lucy, plan, students,
+        ...(hasBandScope ? [bands] : []), staff, fees, tasks, setup];
     case "teacher":
       // My Class sits right after My Day — the two screens a class teacher
       // actually lives in (D-03). Absent entirely for a subject teacher.
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
-        lucy, sessions, planForTeacher, homework, students, support, timesheet, tasks,
+        lucy, sessions, planForTeacher, homework, students,
+        ...(hasBandScope ? [bands] : []), support, timesheet, tasks,
       ];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent
@@ -111,9 +121,10 @@ export function menuNavForRole(
   role: OrgRole | string | undefined,
   isSuperAdmin = false,
   isClassTeacher = false,
+  hasBandScope = false,
 ): NavItem[] {
   const inBottom = new Set(bottomNavForRole(role).map((i) => i.href));
-  return navForRole(role, isSuperAdmin, isClassTeacher)
+  return navForRole(role, isSuperAdmin, isClassTeacher, hasBandScope)
     .filter((i) => !inBottom.has(i.href));
 }
 

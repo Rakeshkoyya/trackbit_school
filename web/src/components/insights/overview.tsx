@@ -14,7 +14,7 @@
 // from the tab it links to.
 
 import {
-  ArrowRight, BookOpen, ChevronRight, ClipboardList, GraduationCap,
+  ArrowRight, BookOpen, ChevronRight, ClipboardList, GraduationCap, Layers,
   NotebookPen, UserCheck, Users, Wallet,
 } from "lucide-react";
 import Link from "next/link";
@@ -52,6 +52,7 @@ const ICON: Record<string, ReactNode> = {
   tasks: <ClipboardList className="h-4 w-4" />,
   exams: <GraduationCap className="h-4 w-4" />,
   fees: <Wallet className="h-4 w-4" />,
+  bands: <Layers className="h-4 w-4" />,
 };
 
 // ── the rail ─────────────────────────────────────────────────────────────────

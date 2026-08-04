@@ -127,10 +127,20 @@ def me(principal=Depends(get_current_principal), db: Session = Depends(get_db)) 
     is_ct = db.scalar(select(SchoolClass.id).where(
         SchoolClass.org_id == member.org_id,
         SchoolClass.class_teacher_member_id == member.membership.id).limit(1)) is not None
+    # Founder 2026-08-04: the same signal for ABC Bands. A teacher who takes none
+    # of the monitored subjects never sees the item — an area that opens on
+    # "nothing here for you" is worse than one that was never offered (ux §13).
+    from app.models import ClassSubject, Subject  # noqa: PLC0415
+    band_q = select(ClassSubject.id).join(
+        Subject, Subject.id == ClassSubject.subject_id).where(
+        ClassSubject.org_id == member.org_id, Subject.band_monitored.is_(True))
+    if not member.is_coordinator_up:
+        band_q = band_q.where(ClassSubject.teacher_member_id == member.membership.id)
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
         is_super_admin=member.user.is_super_admin,
         is_class_teacher=is_ct,
+        has_band_scope=db.scalar(band_q.limit(1)) is not None,
         date_of_birth=member.membership.date_of_birth if member.membership else None,
         user=member.user, org=member.org,
         orgs=AuthService(db).list_user_orgs(member.user_id),

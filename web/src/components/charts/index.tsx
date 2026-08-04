@@ -11,7 +11,7 @@ import Link from "next/link";
 
 import { SERIES_COLORS, STATUS_COLOR } from "@/components/charts/palette";
 
-export { SERIES_COLORS, STATUS_COLOR, toneForPct } from "@/components/charts/palette";
+export { BAND_COLOR, SERIES_COLORS, STATUS_COLOR, toneForPct } from "@/components/charts/palette";
 export type { ChartRow, Series, Slice } from "@/components/charts/palette";
 
 function skeleton(height: number) {

@@ -2449,6 +2449,99 @@ export interface ProgrammeBoard {
   not_assessed: string[];
 }
 
+/** What this member may band — and therefore whether the ABC Bands nav item
+ * exists for them (founder 2026-08-04). */
+export interface BandScopeClass {
+  class_id: string;
+  class_label: string;
+  subjects: { id: string; label: string }[];
+}
+
+export interface BandScope {
+  /** Any subject monitored in the school at all. */
+  enabled: boolean;
+  /** This member has at least one monitored class-subject. */
+  has_scope: boolean;
+  is_admin: boolean;
+  classes: BandScopeClass[];
+  subjects: { id: string; label: string }[];
+}
+
+/** One class, or one subject, tallied A/B/C.
+ *
+ * The unit is the **placement** (one child in one subject), never the child:
+ * `D-75` retired the overall letter, so a boy who is A in Maths and C in Hindi
+ * is in both columns. Only a subject row collapses back to children. */
+export interface BandScopeRow {
+  key: string;
+  label: string;
+  a: number;
+  b: number;
+  c: number;
+  /** a + b + c — the denominator every percentage on this row is taken over. */
+  assessed: number;
+  /** How many placements could exist. `eligible - assessed` is the record's gap. */
+  eligible: number;
+  a_pct: number;
+  b_pct: number;
+  c_pct: number;
+  not_assessed: number;
+  students: number;
+}
+
+export interface BandDistribution {
+  term_id: string | null;
+  term_name: string | null;
+  subjects: string[];
+  /** `S-169`: movement leads, the distribution explains. */
+  headline: string;
+  moved_up: number;
+  slipped: number;
+  school: BandScopeRow;
+  caption: string;
+  by_class: BandScopeRow[];
+  by_subject: BandScopeRow[];
+}
+
+export interface AllocationRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  class_id: string | null;
+  class_label: string | null;
+  subject_id: string;
+  subject_name: string;
+  tier: string;
+  since: string | null;
+  owner_member_id: string | null;
+  owner_name: string | null;
+  intervention_id: string | null;
+  last_checkin: string | null;
+  checkins: number;
+  status: string;
+}
+
+export interface AllocationBoard {
+  term_id: string | null;
+  term_name: string | null;
+  headline: string;
+  rows: AllocationRow[];
+  assigned: number;
+  unassigned: number;
+  classes: { id: string; label: string }[];
+  subjects: { id: string; label: string }[];
+}
+
+/** Suggested, never restricted. `load` is capacity, never a score (`S-170`). */
+export interface OwnerSuggestion {
+  member_id: string;
+  name: string;
+  suggested: boolean;
+  reason: string;
+  load: number;
+  current: boolean;
+}
+
 export interface SupportDayRow { date: string; kind: string; text: string }
 
 export interface SupportStudentRow {

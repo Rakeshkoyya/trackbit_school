@@ -20,6 +20,19 @@ export const STATUS_COLOR = {
   neutral: "var(--color-muted-foreground)",
 } as const;
 
+/** The A/B/C ordinal ramp (founder 2026-08-04). Defined in globals.css and
+ * validated there — see the comment beside `--band-a`. Ordinal, not status: C is
+ * a teaching group, never a red verdict on a child (`D-67`, P4).
+ *
+ * `unassessed` is deliberately absent. Nobody having looked at a child is a hole
+ * in the record, and it wears the dashed no-record texture the register and the
+ * homework funnel already use — never a fourth slice. */
+export const BAND_COLOR = {
+  A: "var(--band-a)",
+  B: "var(--band-b)",
+  C: "var(--band-c)",
+} as const;
+
 export type ChartRow = Record<string, string | number | null>;
 export type Series = { key: string; label: string; color?: string };
 export type Slice = { label: string; value: number; color?: string };
