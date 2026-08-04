@@ -73,6 +73,8 @@ from app.schemas.bands import (
     BandFileIn,
     BandMoveRow,
     BandPromotePreview,
+    BandScopeClass,
+    BandScopeOut,
     BandSubjectSetup,
     ProgrammeBoard,
     ProgrammeGridCell,
@@ -196,6 +198,64 @@ class BandService:
                                   Subject.band_monitored.is_(True))
             .order_by(Subject.name)))
 
+    # ── who may band what (founder 2026-08-04) ───────────────────────────────
+    def my_scope(self, m: CurrentMember) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """The (class, subject) pairs this member may band.
+
+        An admin runs the programme, so their scope is every monitored
+        class-subject in the school. A teacher's scope is the monitored subjects
+        **she actually teaches**, which is also what decides whether the ABC
+        Bands nav item exists for her at all: a Telugu teacher in a school
+        monitoring English/Hindi/Maths has no business on this screen, and an
+        empty area is worse than an absent one (ux §13)."""
+        monitored = {s.id for s in self.monitored_subjects(m)}
+        if not monitored:
+            return []
+        q = select(ClassSubject.class_id, ClassSubject.subject_id).where(
+            ClassSubject.org_id == m.org_id, ClassSubject.subject_id.in_(monitored))
+        if not m.is_coordinator_up:
+            q = q.where(ClassSubject.teacher_member_id == m.membership.id)
+        return [(class_id, subject_id) for class_id, subject_id in self.db.execute(q).all()]
+
+    def scope(self, m: CurrentMember) -> BandScopeOut:
+        """`my_scope`, resolved to names — the payload the nav and the manage
+        screen's two tab rows are both built from."""
+        monitored = self.monitored_subjects(m)
+        out = BandScopeOut(enabled=bool(monitored), is_admin=m.is_coordinator_up)
+        pairs = self.my_scope(m)
+        out.has_scope = bool(pairs)
+        if not pairs:
+            return out
+        names = {s.id: s.name for s in monitored}
+        labels = {k.id: _label(k) for k in self.db.scalars(select(SchoolClass).where(
+            SchoolClass.org_id == m.org_id).order_by(SchoolClass.name, SchoolClass.section))}
+        grouped: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+        for class_id, subject_id in pairs:
+            grouped[class_id].add(subject_id)
+        out.classes = [BandScopeClass(
+            class_id=class_id, class_label=labels.get(class_id, "?"),
+            subjects=[{"id": str(s), "label": names.get(s, "?")}
+                      for s in sorted(subs, key=lambda s: names.get(s, ""))])
+            for class_id, subs in sorted(
+                grouped.items(), key=lambda kv: labels.get(kv[0], ""))]
+        used = {s for subs in grouped.values() for s in subs}
+        out.subjects = [{"id": str(s.id), "label": s.name}
+                        for s in monitored if s.id in used]
+        return out
+
+    def assert_can_band(self, m: CurrentMember, class_id: uuid.UUID,
+                        subject_id: uuid.UUID) -> None:
+        """Blocked, not filtered (`S-46`'s rule) — a teacher asking for a class
+        she does not teach gets a 403 with her own words back, not an empty
+        table she will read as "nobody is banded here"."""
+        if m.is_coordinator_up:
+            return
+        if (class_id, subject_id) in set(self.my_scope(m)):
+            return
+        raise ForbiddenError(
+            "You can only band the classes you teach this subject to.",
+            code="not_your_class_subject")
+
     # ── the per-subject read path (D-75 / S-173) ─────────────────────────────
     def placements(self, m: CurrentMember, student_ids: list[uuid.UUID],
                    term_id: uuid.UUID | None = None,
@@ -272,6 +332,9 @@ class BandService:
             Subject.id == subject_id, Subject.org_id == m.org_id))
         if subject is None:
             raise NotFoundError("Subject")
+        # Reading a class's bands is the same permission as setting them: a
+        # teacher gets her own class-subjects, blocked rather than emptied.
+        self.assert_can_band(m, class_id, subject_id)
 
         students = list(self.db.scalars(select(Student).where(
             Student.org_id == m.org_id, Student.class_id == class_id,
@@ -337,6 +400,10 @@ class BandService:
         row carries its source so the history explains itself (`D-70`)."""
         if body.source not in (SOURCE_TEST, SOURCE_OBSERVATION):
             raise ValidationError("Unknown assessment source.")
+        # Founder 2026-08-04: the subject teacher files her own class. V1-9 made
+        # this admin-only, which left the teacher side of the module with no way
+        # in — she could see a band and never set one.
+        self.assert_can_band(m, body.class_id, body.subject_id)
         if not self.db.scalar(select(Term.id).where(
                 Term.id == body.term_id, Term.org_id == m.org_id)):
             raise NotFoundError("Term")
@@ -451,7 +518,7 @@ class BandService:
         """**Movement is the headline** (`D-67`). A distribution donut is a
         photograph of a decision already made and looks identical in a school
         where nobody has moved for a year — it goes under More."""
-        term = self._term(m, term_id)
+        term = self.current_term(m, term_id)
         subjects = self.monitored_subjects(m)
         out = ProgrammeBoard(term_id=term.id if term else None,
                              term_name=term.name if term else None,
@@ -548,7 +615,7 @@ class BandService:
             select(Student).where(Student.id.in_(sids)))}
         classes = {k.id: _label(k) for k in self.db.scalars(select(SchoolClass).where(
             SchoolClass.org_id == m.org_id))}
-        owners = self._owner_map(m)
+        owners = self.owner_map(m)
         last_checkin = self._last_checkin_map(m)
 
         out: list[ProgrammeRow] = []
@@ -570,8 +637,8 @@ class BandService:
                                 r.full_name))
         return out
 
-    def _owner_map(self, m: CurrentMember,
-                   ) -> dict[tuple[uuid.UUID, uuid.UUID], tuple[uuid.UUID, str, uuid.UUID]]:
+    def owner_map(self, m: CurrentMember,
+                  ) -> dict[tuple[uuid.UUID, uuid.UUID], tuple[uuid.UUID, str, uuid.UUID]]:
         """(student, subject) → (member, name, intervention) for ACTIVE plans."""
         rows = self.db.execute(
             select(Intervention, User.name)
@@ -619,7 +686,7 @@ class BandService:
                                "no band recorded this term")
         return out[:12]
 
-    def _term(self, m: CurrentMember, term_id: uuid.UUID | None) -> Term | None:
+    def current_term(self, m: CurrentMember, term_id: uuid.UUID | None) -> Term | None:
         if term_id:
             return self.db.scalar(select(Term).where(
                 Term.id == term_id, Term.org_id == m.org_id))
@@ -649,7 +716,7 @@ class BandService:
         if member_id is not None and not self.db.scalar(select(Membership.id).where(
                 Membership.id == member_id, Membership.org_id == m.org_id)):
             raise NotFoundError("Member")
-        term = self._term(m, term_id)
+        term = self.current_term(m, term_id)
         if term is None:
             raise ValidationError("Set up a term first.", code="no_term")
         iv = self.db.scalar(select(Intervention).where(
