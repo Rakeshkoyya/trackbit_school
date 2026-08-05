@@ -213,17 +213,47 @@ class BandAssessmentService:
             out.headline = ("Everyone you were supporting has moved on. "
                             "Nothing open right now.")
         else:
-            done = sum(1 for r in out.rows if r.checked_in_this_week)
-            n = len(out.rows)
-            out.headline = (f"{n} child{'' if n == 1 else 'ren'} assigned to you"
-                            + (f" in {labels.get(class_id, '')}" if class_id else "")
-                            + f" · {done} checked in this week.")
-            overdue = [r for r in out.rows if (r.weeks_since_checkin or 99) >= 3]
-            if overdue:
-                worst = min(overdue, key=lambda r: r.last_checkin or date.min)
-                out.headline += (f" {worst.full_name} hasn't been checked in "
-                                 f"{worst.weeks_since_checkin} weeks.")
+            out.headline = self._headline(out.rows, labels.get(class_id) if class_id else None)
         return out
+
+    @staticmethod
+    def _headline(rows: list[MyStudentRow], class_label: str | None) -> str:
+        """**Children and placements are two counts, and the sentence carries
+        both when they differ** (`D-75`).
+
+        Found in the browser, not by a test: three children supported across
+        five subjects read as *"5 children assigned to you"* while the table
+        underneath plainly showed three names. The unit discipline the schemas
+        keep has to reach the sentence too.
+
+        And **never checked in is a state, not a duration.** The V1-9 original
+        filtered on `(weeks_since_checkin or 99) >= 3`, which sweeps in a child
+        who has NO check-in at all — and then formats his `None` into the
+        sentence, so the board said *"Asha hasn't been checked in None weeks."*
+        The two cases get two sentences, because they call for two different
+        actions: start, or catch up.
+        """
+        done = sum(1 for r in rows if r.checked_in_this_week)
+        children = len({r.student_id for r in rows})
+        where = f" in {class_label}" if class_label else ""
+        head = f"{children} child{'' if children == 1 else 'ren'} assigned to you{where}"
+        if len(rows) != children:
+            head += f", {len(rows)} across subjects"
+        head += f" · {done} checked in this week."
+
+        stale = [r for r in rows
+                 if r.weeks_since_checkin is not None and r.weeks_since_checkin >= 3]
+        if stale:
+            worst = max(stale, key=lambda r: r.weeks_since_checkin or 0)
+            return head + (f" {worst.full_name} hasn't been checked in "
+                           f"{worst.weeks_since_checkin} weeks.")
+        never = [r for r in rows if r.last_checkin is None]
+        if never:
+            n = len(never)
+            return head + (f" {never[0].full_name} has never been checked in."
+                           if n == 1
+                           else f" {n} have never been checked in.")
+        return head
 
     def _checkpoint_map(self, m: CurrentMember, iv_ids: list[uuid.UUID],
                         ) -> dict[uuid.UUID, list[SupportCheckpoint]]:

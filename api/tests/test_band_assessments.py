@@ -163,6 +163,35 @@ def test_my_students_counts_placements_and_filters_by_class(client, cleanup):
     assert len(seven_only) == 1                      # Aarav is hers
 
 
+def test_the_headline_counts_children_and_never_says_none_weeks(client, cleanup):
+    """Two defects found by looking at the built screen, not by reading it.
+
+    · **Children and placements are two counts.** Three children supported
+      across five subjects read as *"5 children assigned to you"* over a table
+      plainly showing three names. The unit discipline `D-75` keeps in the
+      schemas has to reach the sentence too.
+    · **Never checked in is a state, not a duration.** The V1-9 original
+      filtered on `(weeks_since_checkin or 99) >= 3`, which sweeps in a child
+      with NO check-in and then formats his `None` into the sentence — so the
+      board said *"Asha hasn't been checked in None weeks."*
+    """
+    h, th, _oh, ctx = _setup(client, cleanup)
+    kabir, diya, _ = ctx["kids_b"]
+    _own(client, h, ctx, kabir["id"], ctx["hindi"]["id"], ctx["teacher_member"])
+    _own(client, h, ctx, kabir["id"], ctx["maths"]["id"], ctx["teacher_member"])
+    _own(client, h, ctx, diya["id"], ctx["hindi"]["id"], ctx["teacher_member"])
+
+    head = client.get("/api/v1/bands/my-students", headers=th).json()["headline"]
+    assert "None" not in head
+    # Two children, three placements — and the sentence carries both.
+    assert head.startswith("2 children assigned to you, 3 across subjects")
+    assert "never been checked in" in head
+    assert "hasn't been checked in" not in head        # nobody is merely stale
+
+    # The V1-9 list is the same sentence from the same defect — fixed in both.
+    assert "None" not in client.get("/api/v1/bands/support", headers=th).json()["headline"]
+
+
 def test_another_teacher_never_appears_on_her_list(client, cleanup):
     """`S-170`: other owners' children are not hers to read, in either
     direction."""

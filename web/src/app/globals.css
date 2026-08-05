@@ -105,6 +105,15 @@
   --band-a: #b79fed;
   --band-b: #8558d2;
   --band-c: #472887;
+  /* Ink for a letter set ON the ramp (the band chip). The ramp is ordinal and
+     INVERTS between themes, so one fixed foreground cannot work at both ends:
+     white on light-mode A is 2.28:1 and on dark-mode C is 1.55:1 — the letter
+     effectively disappears at whichever end is pale. Chosen per tier per theme
+     against WCAG, all ≥ 4.5:1 (light A 7.92 · B 4.86 · C 10.93). Recompute
+     these if the ramp is ever re-stepped; do not adjust either by eye. */
+  --band-ink-a: #1a1030;
+  --band-ink-b: #ffffff;
+  --band-ink-c: #ffffff;
 
   --radius: 0.75rem;
 }
@@ -174,6 +183,11 @@
   --band-a: #5f45a3;
   --band-b: #9a74e2;
   --band-c: #d8c8f8;
+  /* Inverted with the ramp: here A is darkest and C lightest, so the ink flips.
+     Dark A 7.33 · B 5.14 · C 11.66. */
+  --band-ink-a: #ffffff;
+  --band-ink-b: #1a1030;
+  --band-ink-c: #1a1030;
 }
 
 @theme inline {

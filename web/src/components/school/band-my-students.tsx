@@ -30,39 +30,15 @@ import { ClipboardList, MessageSquarePlus, NotebookPen } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { BandChip } from "@/components/school/band-chip";
 import { StudentLogDialog } from "@/components/school/student-log-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageLoading } from "@/components/ui/page-loading";
 import { ColumnHead, Empty, Section } from "@/components/insights/shared";
 import { schoolApi } from "@/lib/school-api";
-import type { BandTier, MyStudentRow } from "@/lib/school-types";
+import type { MyStudentRow } from "@/lib/school-types";
 import { cn } from "@/lib/utils";
-
-/** The letter, on the ordinal band ramp — **never the status palette**. Painting
- *  C red turns a teaching group into a verdict on a child (`BAND_COLOR`). */
-function Tier({ tier, descriptor }: { tier: BandTier | null; descriptor?: string | null }) {
-  if (!tier) {
-    // Not assessed is a WORD, and wears the no-record texture the register and
-    // the homework funnel already use — never a tier, never a zero.
-    return (
-      <span className="rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-        not assessed
-      </span>
-    );
-  }
-  return (
-    <span
-      // `S-166`: the letter never travels without its sentence. On a dense row
-      // the sentence is the title; the full text sits on the child's page.
-      title={descriptor ?? undefined}
-      className="rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold text-white"
-      style={{ background: `var(--band-${tier.toLowerCase()})` }}
-    >
-      {tier}
-    </span>
-  );
-}
 
 function Row({
   r, onLog,
@@ -82,8 +58,9 @@ function Row({
         </Link>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           {r.class_label ? <span>{r.class_label}</span> : null}
-          {r.roll_no ? <span>· {r.roll_no}</span> : null}
-          <Tier tier={r.tier} descriptor={r.descriptor} />
+          {/* "6-A · 1" reads as a stray number; the roll wants its own word. */}
+          {r.roll_no ? <span>· roll {r.roll_no}</span> : null}
+          <BandChip tier={r.tier} descriptor={r.descriptor} />
           {r.subject_name ? <span>{r.subject_name}</span> : null}
         </p>
       </div>

@@ -39,6 +39,7 @@ import { MessageSquarePlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { BandChip } from "@/components/school/band-chip";
 import { StudentLogDialog } from "@/components/school/student-log-dialog";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -61,18 +62,6 @@ function serverDraft(r: AssessmentResultRow): Draft {
   };
 }
 
-function Tier({ tier }: { tier: string | null }) {
-  if (!tier) return null;
-  return (
-    <span
-      className="rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white"
-      style={{ background: `var(--band-${tier.toLowerCase()})` }}
-    >
-      {tier}
-    </span>
-  );
-}
-
 function Row({
   row, sheet, draft, onChange, onLog,
 }: {
@@ -91,8 +80,10 @@ function Row({
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{row.full_name}</p>
         <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-          {row.roll_no ? <span>{row.roll_no}</span> : null}
-          <Tier tier={row.tier} />
+          {row.roll_no ? <span>roll {row.roll_no}</span> : null}
+          {/* Only when he HAS one — an unbanded child on a support sheet is not
+              the place to say "not assessed" a second time. */}
+          {row.tier ? <BandChip tier={row.tier} /> : null}
           {!row.evaluated ? <span>not evaluated</span> : null}
         </p>
       </div>

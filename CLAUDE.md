@@ -1656,7 +1656,27 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     assigned work and the log) and **`/bands/assessments`** added (paginated, grouped by class,
     status filter, create dialog, evaluation sheet whose input follows the metric: number · slider ·
     word). `S-170` holds throughout — no completion percentage for her check-ins, no comparison
-    against another owner, no streak. `test_band_assessments.py` (15).
+    against another owner, no streak. `test_band_assessments.py` (16).
+  - ⚠️ **Three defects found by running the built screen, not by reading it** — the reason to keep
+    doing that:
+    · 🔴 **"Asha hasn't been checked in None weeks."** The V1-9 headline filtered on
+      `(weeks_since_checkin or 99) >= 3`, which sweeps in a child with **no check-in at all** and
+      then formats his `None` straight into the sentence. **Never checked in is a state, not a
+      duration** — the two now get two sentences, because they call for two different actions
+      (start, or catch up). Fixed in `SupportService.my_students` too, where it originated.
+    · 🔴 **The headline said "5 children" over a table showing three names.** Placements and
+      children are two counts (`D-75`), and the unit discipline the schemas keep has to reach the
+      sentence: *"3 children assigned to you, 5 across subjects"*.
+    · 🔴 **The band chip was white text on all three tiers, and the ramp INVERTS between themes** —
+      so white on light-mode A is **2.28:1** and on dark-mode C is **1.55:1**, a letter nobody can
+      read at whichever end is currently pale. `--band-ink-a/b/c` is now chosen per tier per theme
+      (all ≥ 4.5:1) and **`components/school/band-chip.tsx` is the one component** — it had been
+      written three times in this packet alone. Recompute the inks if the ramp is re-stepped; never
+      adjust either by eye.
+  - Reviewed in a real browser (Chrome, teacher login, light + dark via the `.dark` class — **not
+    `prefers-color-scheme`, which this app does not use** — 1440px + 390px), including the whole
+    create → evaluate → record flow: zero sideways scroll on every screen, and a child left blank
+    stays *not evaluated* rather than scoring zero.
 
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,

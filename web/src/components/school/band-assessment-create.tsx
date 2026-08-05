@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { BandChip } from "@/components/school/band-chip";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
@@ -302,14 +303,7 @@ export function BandAssessmentCreate({
                     }
                   />
                   <span className="min-w-0 flex-1">{s.full_name}</span>
-                  {s.tier ? (
-                    <span
-                      className="rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold text-white"
-                      style={{ background: `var(--band-${s.tier.toLowerCase()})` }}
-                    >
-                      {s.tier}
-                    </span>
-                  ) : null}
+                  {s.tier ? <BandChip tier={s.tier} /> : null}
                 </label>
               ))
             ) : (
