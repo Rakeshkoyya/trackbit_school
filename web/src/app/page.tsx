@@ -9,8 +9,10 @@ import { DirectorDashboard } from "@/components/marketing/director-dashboard";
 import { GenerativeBuild } from "@/components/marketing/generative-build";
 import { GrowthTracker } from "@/components/marketing/growth-tracker";
 import { LucyPeek } from "@/components/marketing/lucy-peek";
+import { ModuleGrid } from "@/components/marketing/module-grid";
 import { ParentPortal } from "@/components/marketing/parent-portal";
 import { PeriodCard } from "@/components/marketing/period-card";
+import { Pillars } from "@/components/marketing/pillars";
 import { PricingCalculator } from "@/components/marketing/pricing-calculator";
 import { ReportWriter } from "@/components/marketing/report-writer";
 
@@ -25,9 +27,9 @@ const display = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "TrackBit School — see every classroom, every day",
+  title: "TrackBit School — the AI operating system for your school",
   description:
-    "You run a school of hundreds of students and dozens of teachers — and can't see what actually happened in class today. TrackBit puts every period on the record in one tap, tracks each student's growth subject by subject, writes the daily report itself, and lets parents log in to their child's day. ₹100 per student per month.",
+    "Ten modules over one spine — students, teachers, syllabus — plus fees and tasks. Attendance, syllabus pace, teacher load, student growth, exams, ABC support bands, fee collection, events and a parent portal, all computed from one record. Teachers close a period in one tap; the AI layer writes the daily report and answers questions in plain English. ₹100 per student per month.",
 };
 
 const facts = [
@@ -121,6 +123,9 @@ export default function LandingPage() {
             <a className="mk-navlink" href="#product" data-optional="true">
               Product
             </a>
+            <a className="mk-navlink" href="#modules" data-optional="true">
+              Modules
+            </a>
             <a className="mk-navlink" href="#pricing" data-optional="true">
               Pricing
             </a>
@@ -138,7 +143,7 @@ export default function LandingPage() {
       <section className="mk-hero">
         <div className="mk-shell mk-hero-grid">
           <div>
-            <p className="mk-eyebrow">The school&apos;s daily operating system</p>
+            <p className="mk-eyebrow">The AI operating system for your school</p>
             <p className="mk-hero-kicker">
               You have 40 teachers and 800 students. Right now, no one can tell you what actually
               happened in class today.
@@ -147,9 +152,11 @@ export default function LandingPage() {
               Every period of every day, <em>on the record.</em>
             </h1>
             <p className="mk-lead">
-              TrackBit plans your year down to the period, captures each class in one tap, and turns
-              it into per-student growth subject by subject. Then it writes the day&apos;s report
-              itself — and asks your teachers for no data entry, so it&apos;s still running in March.
+              Ten modules over one spine — students, teachers, syllabus — plus fees and tasks.
+              TrackBit plans your year to the period, captures each class in a single tap, and joins
+              it into per-student truth. Then an AI layer reads the day, writes the report, and
+              answers your questions in plain English. Your teachers enter nothing extra, which is
+              why it is still running in March.
             </p>
             <div className="mk-cta-row">
               <a className="mk-btn mk-btn-primary" href="#demo">
@@ -205,6 +212,39 @@ export default function LandingPage() {
             </article>
           ))}
         </div>
+      </section>
+
+      {/* ── The three pillars ───────────────────────────────────────────── */}
+      <section className="mk-section mk-shell">
+        <div className="mk-section-head">
+          <p className="mk-eyebrow">The spine</p>
+          <h2 className="mk-h2 mk-display">
+            A school is three things. We track all three.
+          </h2>
+          <p className="mk-sub">
+            Students, teachers, syllabus. Everything below hangs off these. Each one works the same
+            way: your staff tap in what they were doing anyway, and the analysis, the reports and
+            the answers are written back — by the system, not by a person on a Sunday.
+          </p>
+        </div>
+
+        <Pillars />
+      </section>
+
+      {/* ── The ten modules ─────────────────────────────────────────────── */}
+      <section className="mk-section mk-shell" id="modules">
+        <div className="mk-section-head">
+          <p className="mk-eyebrow">Everything in the box</p>
+          <h2 className="mk-h2 mk-display">Ten modules. One system. No add-ons.</h2>
+          <p className="mk-sub">
+            Not ten products you integrate — ten views of one record. The attendance a teacher taps
+            at 9 AM is the same row the syllabus pace, the parent&apos;s screen, the exam report and
+            tonight&apos;s daily report are all computed from. Nothing is entered twice, and no two
+            screens can disagree.
+          </p>
+        </div>
+
+        <ModuleGrid />
       </section>
 
       {/* ── Director's dashboards ───────────────────────────────────────── */}
@@ -273,15 +313,19 @@ export default function LandingPage() {
       </section>
 
       {/* ── AI layer ────────────────────────────────────────────────────── */}
-      <section className="mk-section mk-shell">
+      <section className="mk-section mk-shell" id="ai">
         <div className="mk-section-head">
           <p className="mk-eyebrow">The AI layer</p>
-          <h2 className="mk-h2 mk-display">A platform that evolves with your school.</h2>
+          <h2 className="mk-h2 mk-display">
+            An operating system that adapts to <em>your</em> school.
+          </h2>
           <p className="mk-sub">
-            AI here is plumbing, not a gimmick — it reads your timetable photo, splits a chapter into
-            topics, drafts the daily report, and answers questions in plain language. A person
-            confirms anything that changes data. And it is heading somewhere: a school system that
-            reshapes itself to how you actually work.
+            No two schools run alike, so the software should not be a fixed set of forms. Here the AI
+            is structural: it reads your timetable off a photograph, splits a chapter into teachable
+            topics, drafts the day&apos;s report overnight, and answers a question in plain English
+            with a chart built from live data. Every figure comes from the server&apos;s own numbers
+            — the model chooses how to show it, never what it says — and a person confirms anything
+            that changes a record. That is what makes generative UI safe in a school.
           </p>
         </div>
 

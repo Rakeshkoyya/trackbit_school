@@ -41,7 +41,20 @@
   (the day board, a long mono row) refuses to shrink and pushes the whole page
   past the viewport. Every grid on this page wants tracks that can shrink.
 */
-.mk :is(.mk-hero-grid, .mk-modules, .mk-loop, .mk-ai, .mk-price, .mk-demo-grid, .mk-facts-grid)
+.mk
+  :is(
+    .mk-hero-grid,
+    .mk-modules,
+    .mk-loop,
+    .mk-ai,
+    .mk-price,
+    .mk-demo-grid,
+    .mk-facts-grid,
+    .mk-pillars,
+    .mk-pillar,
+    .mk-pillar-ledger,
+    .mk-module
+  )
   > * {
   min-width: 0;
 }
@@ -526,6 +539,157 @@
   text-wrap: pretty;
 }
 
+/* ── Pillars ──────────────────────────────────────────────────────────────
+   The spine: students, teachers, syllabus. Each block is a ledger — what the
+   school taps in on the left, what the system writes back on the right — so
+   the product's central claim is expressed by the layout rather than asserted
+   in a sentence. The vertical rule between the two columns is the fold of the
+   page; on narrow screens it becomes a horizontal one.
+   ------------------------------------------------------------------------ */
+.mk-pillars {
+  display: grid;
+  gap: 14px;
+  margin-top: 44px;
+}
+
+.mk-pillar {
+  background: var(--mk-slate);
+  border: 1px solid var(--mk-rule);
+  border-left: 2px solid var(--mk-rule-2);
+  border-radius: 8px;
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  transition: border-left-color 0.18s ease;
+}
+
+.mk-pillar:hover {
+  border-left-color: var(--mk-live);
+}
+
+@media (min-width: 860px) {
+  .mk-pillar {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+}
+
+.mk-pillar-head {
+  padding: 26px 26px 22px;
+}
+
+@media (min-width: 860px) {
+  .mk-pillar-head {
+    border-right: 1px solid var(--mk-rule);
+    padding: 30px 30px 30px 28px;
+  }
+}
+
+.mk-pillar-n {
+  color: var(--mk-dim);
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+}
+
+.mk-pillar-name {
+  font-size: clamp(1.6rem, 4.6vw, 2.05rem);
+  margin: 8px 0 0;
+}
+
+.mk-pillar-line {
+  color: var(--mk-chalk-2);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  margin: 12px 0 0;
+  max-width: 34em;
+  text-wrap: pretty;
+}
+
+/* The ledger. Two facing columns; the right one is the payoff, so it carries
+   the live tint on its markers and the left stays quiet chalk. */
+.mk-pillar-ledger {
+  border-top: 1px solid var(--mk-rule);
+  display: grid;
+  gap: 0;
+}
+
+@media (min-width: 560px) {
+  .mk-pillar-ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 860px) {
+  .mk-pillar-ledger {
+    border-top: none;
+  }
+}
+
+.mk-pillar-col {
+  padding: 20px 22px 22px;
+}
+
+.mk-pillar-col + .mk-pillar-col {
+  border-top: 1px solid var(--mk-rule);
+}
+
+@media (min-width: 560px) {
+  .mk-pillar-col + .mk-pillar-col {
+    border-left: 1px solid var(--mk-rule);
+    border-top: none;
+  }
+}
+
+.mk-pillar-col-h {
+  color: var(--mk-dim);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.mk-pillar-col ul {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.mk-pillar-col li {
+  color: var(--mk-chalk-2);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  padding-left: 18px;
+  position: relative;
+}
+
+.mk-pillar-col li + li {
+  margin-top: 9px;
+}
+
+.mk-pillar-col li::before {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  left: 0;
+  position: absolute;
+}
+
+/* Left column = a tap the teacher makes. Right column = a line the system
+   writes. Two different marks, so the halves never read as one list. */
+.mk-pillar-col[data-kind="captured"] li::before {
+  color: var(--mk-dim);
+  content: "·";
+}
+
+/* The arrow is a far wider glyph than the dot, so the computed column needs a
+   deeper indent or the mark touches its own line. */
+.mk-pillar-col[data-kind="computed"] li {
+  padding-left: 24px;
+}
+
+.mk-pillar-col[data-kind="computed"] li::before {
+  color: var(--mk-live);
+  content: "→";
+  font-size: 0.78rem;
+}
+
 /* ── Modules: a ruled grid of cells, like the timetable it came from ─────── */
 .mk-modules {
   border: 1px solid var(--mk-rule);
@@ -605,6 +769,45 @@
   font-family: var(--font-geist-mono), monospace;
   left: 0;
   position: absolute;
+}
+
+/* Cells in a row are different heights; pushing the rule down to a common
+   baseline is what stops the grid reading as ragged. */
+.mk-module {
+  display: flex;
+  flex-direction: column;
+}
+
+.mk-module-top {
+  flex: 1 1 auto;
+}
+
+/*
+  Ten cells over three columns leaves one orphan on the last row. Rather than
+  pad the grid with a filler cell, the tenth — the parent portal, the only
+  module that faces outside the school — spans the row and closes the grid,
+  laid out side-on so a full-width cell does not become a full-width paragraph.
+*/
+@media (min-width: 1000px) {
+  .mk-module[data-wide="true"] {
+    align-items: start;
+    column-gap: 34px;
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  }
+
+  .mk-module[data-wide="true"] ul {
+    border-top: none;
+    columns: 2;
+    column-gap: 28px;
+    margin-top: 4px;
+    padding-top: 0;
+  }
+
+  .mk-module[data-wide="true"] li {
+    break-inside: avoid;
+  }
 }
 
 /* ── The loop: a real sequence, so it is numbered ────────────────────────── */
