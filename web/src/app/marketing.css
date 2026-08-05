@@ -174,19 +174,9 @@
   color: var(--mk-chalk);
 }
 
-/* The phone-width stand-in for the two named login links; see the nav in
-   page.tsx for why the bar collapses to one door below 640px. */
-.mk-navlink[data-compact="true"] {
-  display: none;
-}
-
 @media (max-width: 640px) {
   .mk-navlink[data-optional="true"] {
     display: none;
-  }
-
-  .mk-navlink[data-compact="true"] {
-    display: inline-flex;
   }
 }
 

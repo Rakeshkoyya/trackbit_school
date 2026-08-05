@@ -113,9 +113,12 @@ export default function ParentLoginPage() {
       router.replace("/parent");
     } catch (err) {
       if (err instanceof ApiError && err.code === "dob_not_on_record") {
-        // The school's gap, not the parent's mistake — and never a dead end.
+        // Still the school's gap and not the parent's mistake, but with the
+        // mobile door removed there is no second credential to hand them. So
+        // the message has to carry the fix instead of a link: the office adds
+        // the date of birth and this screen then works.
         toast.error(err.message, {
-          action: { label: "Use my mobile", onClick: () => router.push("/parent/login/otp") },
+          description: "Ask the school office to add your child's date of birth to their record.",
         });
       } else {
         toast.error(err instanceof ApiError ? err.message : "Could not sign in.");
@@ -154,16 +157,11 @@ export default function ParentLoginPage() {
       audience="parent"
       title="Parent sign in"
       subtitle={subtitle}
-      footer={
-        <span className="space-x-3">
-          <a href="/parent/login/otp" className="font-medium text-primary">
-            Sign in with mobile instead
-          </a>
-          <a href="/auth/login" className="text-muted-foreground">
-            Staff sign in
-          </a>
-        </span>
-      }
+      // The school code is the only way in (founder call). With the mobile-OTP
+      // door gone, the one thing a parent can be missing is the code itself —
+      // and the answer to that is the office, not another credential. Staff are
+      // not linked here either: the switcher above this card carries that door.
+      footer={<span>Don&apos;t have your school code? Ask the school office.</span>}
     >
       {step !== "code" && (
         <button

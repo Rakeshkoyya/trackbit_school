@@ -131,25 +131,16 @@ export default function LandingPage() {
                 Pricing
               </a>
               {/*
-                Parents are the largest group who will ever sign in here and,
-                until now, the only one with no door on the page.
+                One door on the page, at every width (founder call). Naming
+                both audiences here made the visitor classify themselves before
+                they had any reason to, and it cost the bar its only spare
+                width on a phone.
 
-                Both doors are named in full where there is room for them. At
-                phone width the bar has none — wordmark, two logins and the
-                demo button do not fit in 350px — so it collapses to one
-                "Sign in" that lands on the staff form, which now carries the
-                Staff/Parent switcher as its first element. The choice is one
-                tap away rather than absent, and nobody is dropped: hiding the
-                staff link on mobile would have stranded every teacher, who
-                works on a phone all day.
+                The sign-in screen carries the Staff/Parent switcher as its
+                first element, so the choice is made where it is actually
+                needed — one tap in, with both doors visible at once.
               */}
-              <Link className="mk-navlink" href="/parent/login" data-optional="true">
-                Parent login
-              </Link>
-              <Link className="mk-navlink" href="/auth/login" data-optional="true">
-                Staff sign in
-              </Link>
-              <Link className="mk-navlink" href="/auth/login" data-compact="true">
+              <Link className="mk-navlink" href="/auth/login">
                 Sign in
               </Link>
               <a className="mk-btn mk-btn-primary mk-btn-sm" href="#demo">
@@ -435,8 +426,7 @@ export default function LandingPage() {
         <div className="mk-shell mk-footer-in">
           <p>{`© ${new Date().getFullYear()} TrackBit School · The school's daily operating system`}</p>
           <p>
-            <Link href="/parent/login">Parent login</Link> ·{" "}
-            <Link href="/auth/login">Staff sign in</Link> · <a href="#demo">Book a demo</a>
+            <Link href="/auth/login">Sign in</Link> · <a href="#demo">Book a demo</a>
           </p>
         </div>
       </footer>
