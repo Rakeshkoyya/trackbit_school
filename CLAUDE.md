@@ -1916,12 +1916,21 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: **head is `a4b5c6d7e8f9`** (ST-2, the student's two halves, 2026-08-05).
-Local dev and the test DB are on it; **DO prod is still at `c1d2e3f4a5b6`** and needs
-`c2d3e4f5a6b7` (AT-1, `student_notes`) → `d3e4f5a6b7c8` (BA-1) → `e4f5a6b7c8d9` (SY-1) →
-`a4b5c6d7e8f9` (ST-2) before the next deploy. All four are purely additive — new tables, nullable
-columns, one default-backfilled column, two widened/added CHECKs, one constraint relaxed — so prod
-code that predates them is unaffected.
+Current state: **head is `a4b5c6d7e8f9`** (ST-2, the student's two halves, 2026-08-05), and
+**local dev, the test DB and DO prod are ALL on it** — prod was migrated 2026-08-05 at the
+founder's request so the local codebase (which points at the prod DB) could run the new screens.
+
+⚠️ **The "prod owes N migrations" note in this file had been stale for three packets.** It claimed
+prod was at `c1d2e3f4a5b6` and owed four; `alembic current` against prod said `e4f5a6b7c8d9` — AT-1,
+BA-1 and SY-1 had already been applied and nobody updated the line. **Run `uv run alembic current`
+before believing a written claim about prod's revision**; the database is the record and this
+paragraph is a cache of it, with exactly the drift a cache gets.
+
+Prod schema is now AHEAD of the deployed prod code until the next Dokploy deploy, which is the
+normal migrate-then-deploy order and safe here because `a4b5c6d7e8f9` is purely additive: one
+nullable column (`assessment_scores.remark`), one NOT NULL column with a server default that
+backfilled 312 existing rows (`lesson_observations.entry_kind`), one CHECK and one partial index.
+Code that predates it never writes `entry_kind`, so the default carries it.
 ⚠️ `a4b5c6d7e8f9` was NOT the obvious next id: `f5a6b7c8d9e0` is already taken by
 `f5a6b7c8d9e0_class_periods.py`, and reusing it makes Alembic report a **revision cycle** across
 the whole graph rather than a duplicate. Grep `alembic/versions/` for a candidate id before
