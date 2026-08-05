@@ -23,6 +23,7 @@ import {
   AttendanceBySubject, GrowthProfiles, GrowthTiles, ScoreHistory, StrengthsAndGrowth,
 } from "@/components/students/growth-analytics";
 import { StudentHomeworkHistory } from "@/components/school/student-homework-history";
+import { StudentLog } from "@/components/school/student-log";
 import { AnalysisBlock, ReportCardBlock } from "@/components/students/report-card";
 import { SupportBlock } from "@/components/students/support-block";
 import { TimelineBlock } from "@/components/students/timeline-block";
@@ -260,6 +261,11 @@ function GrowthInner() {
       <div className="rounded-xl border border-border bg-card p-4 text-sm">
         <TimelineBlock studentId={data.student_id} />
       </div>
+
+      {/* The class teacher's own log (founder, 2026-08-05). Last, deliberately:
+          everything above it is a byproduct of doing the work (P5), and this is
+          the one thing somebody has to sit down and write. */}
+      <StudentLog studentId={data.student_id} />
 
       {data.band_history.length > 1 ? (
         <p className="text-xs text-muted-foreground">

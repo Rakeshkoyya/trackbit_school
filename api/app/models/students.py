@@ -93,3 +93,55 @@ class Guardian(Base, UUIDPKMixin, CreatedAtMixin):
     notify_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     student: Mapped["Student"] = relationship("Student", back_populates="guardians")
+
+
+# ── the class teacher's own log about a child (founder, 2026-08-05) ──────────
+# The note categories. Free-ish, but a fixed short list because the whole value
+# of the log is being able to read a year of it in one scroll — forty spellings
+# of "spoke to parent" is a diary, not a record.
+STUDENT_NOTE_KINDS: tuple[str, ...] = (
+    "general", "behaviour", "wellbeing", "achievement", "parent_contact", "concern",
+)
+
+
+class StudentNote(Base, UUIDPKMixin, CreatedAtMixin):
+    """The class teacher's log about one child — **append-only** (law 3).
+
+    Every other thing the school knows about a child is a byproduct of doing the
+    work (P5): attendance is a tap, coverage is a lesson log, a band is a test.
+    This is the one deliberate exception, and it is the class teacher's own: the
+    thing she noticed that no capture surface has a field for.
+
+    It is **staff-only** and never reaches a parent surface. `services/
+    parent_portal.py` is an allowlist projection built field by field, so this
+    table stays out of it by construction rather than by remembering to exclude
+    it — but the rule is written here too, because the first person to add a
+    "share with parent" flag needs to meet it.
+
+    Append-only, like `fee_notes` / `plan_approvals` / `demo_request_notes`: a
+    correction is a new row. What a teacher thought in September is part of the
+    record even when November disagrees, and a log that can be quietly rewritten
+    is not a log.
+    """
+
+    __tablename__ = "student_notes"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="general")
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    # SET NULL so the history outlives the account (the `fee_notes` rule).
+    author_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('general', 'behaviour', 'wellbeing', 'achievement', "
+            "'parent_contact', 'concern')",
+            name="ck_student_notes_kind",
+        ),
+    )

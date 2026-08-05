@@ -52,7 +52,18 @@ class MyDayPeriod(BaseModel):
     # Attendance step of the card (capture-by-exception).
     attendance_marked: bool = False
     # V1-3 (D-01/Q-02a): the org's mode may not take attendance this period.
+    #
+    # In `first_period` this is DYNAMIC (founder, 2026-08-05): true on every
+    # period of a class whose day has not been captured, false on all of them
+    # once it has — except the one holding the register, which keeps the row so
+    # its taker can still correct it. A fixed "period 1 only" rule left the
+    # afternoon asking for a roll that was taken at 9am, and left a class whose
+    # period 1 never happened with no way to record the day at all.
     marks_attendance: bool = True
+    # Once-per-day schools only (null elsewhere): has THIS class's day been
+    # captured? What lets a period card say "the register was taken this
+    # morning" instead of silently dropping the section.
+    day_attendance_taken: bool | None = None
     roster_count: int = 0
     present_count: int | None = None
     absent_count: int | None = None

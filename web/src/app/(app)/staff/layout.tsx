@@ -20,7 +20,14 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     <div>
       <SubTabs
         tabs={[
+          // `/staff` stays first because `SubTabs` treats the FIRST tab as the
+          // area root and matches it exactly — every other tab also matches its
+          // nested routes, so moving `/staff` down would light "Attendance" up
+          // on every page in the area.
           { label: "Attendance", href: "/staff" },
+          // Founder, 2026-08-05: the roster the other four tabs are ABOUT, and
+          // the one place a class teacher gets assigned.
+          { label: "People", href: "/staff/directory" },
           { label: "Leave", href: "/staff/leave" },
           { label: "Today", href: "/staff/today" },
           { label: "Month", href: "/staff/month" },

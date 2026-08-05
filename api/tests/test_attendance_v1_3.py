@@ -138,9 +138,36 @@ def test_first_period_mode_shapes_heatmap_and_my_day(client, cleanup):
     assert states[1] == "pending"
     assert states[2] == "not_expected", "scheduled but the mode doesn't mark it"
 
+    # Founder, 2026-08-05 — this supersedes V1-3's "period 1 only" rule for My
+    # Day. The register belongs to the DAY, so while it is missing EVERY period
+    # offers it: period 1 may be cancelled, or its teacher away, and the roll
+    # still has to get taken by somebody.
     my_day = client.get("/api/v1/classroom/my-day", headers=h).json()
     flags = {p["period_no"]: p["marks_attendance"] for p in my_day["periods"]}
-    assert flags == {1: True, 2: False, 3: False}
+    assert flags == {1: True, 2: True, 3: True}
+    assert all(p["day_attendance_taken"] is False for p in my_day["periods"])
+
+    # ...and once it IS taken — here in period 2, because period 1 did not
+    # happen — the ask disappears from the rest of the day, and the heatmap
+    # stops calling period 1 pending. A captured day must not read as "1 of 2".
+    client.post("/api/v1/attendance/mark", headers=h, json={
+        "class_id": ctx["class"]["id"], "period_no": 2,
+        "class_subject_id": ctx["cs"]["id"], "exceptions": []})
+
+    my_day = client.get("/api/v1/classroom/my-day", headers=h).json()
+    flags = {p["period_no"]: p["marks_attendance"] for p in my_day["periods"]}
+    assert flags == {1: False, 2: True, 3: False}, \
+        "only the period holding the register keeps the row, so its taker can fix it"
+    assert all(p["day_attendance_taken"] is True for p in my_day["periods"])
+
+    board = client.get("/api/v1/insights/attendance", headers=h).json()
+    row = next(r for r in board["capture"]["rows"]
+               if r["class_id"] == ctx["class"]["id"])
+    states = {c["period_no"]: c["state"] for c in row["cells"]}
+    assert row["expected"] == 1 and row["marked"] == 1
+    assert states[2] == "marked"
+    assert states[1] == "not_expected", \
+        "the day is captured — period 1 must not sit pending for the rest of it"
 
 
 # ── D-02/D-86: reasons and the status machine ────────────────────────────────

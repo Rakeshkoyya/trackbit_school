@@ -39,7 +39,6 @@ from app.models import (
     AssessmentCycle,
     AssessmentScore,
     CalendarEvent,
-    ClassSubject,
     ExamLockEvent,
     ExamType,
     Membership,
@@ -62,7 +61,7 @@ from app.schemas.assessments import (
 )
 from app.services import storage
 from app.services.exam_types import ExamTypeService
-from app.services.periods import assert_can_take_class
+from app.services.periods import assert_can_take_class, visible_class_ids
 
 
 def _label(k: SchoolClass) -> str:
@@ -75,12 +74,14 @@ class ExamService:
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _taught_class_ids(self, m: CurrentMember) -> set[uuid.UUID] | None:
-        """None = unrestricted (admin); else the classes this teacher teaches."""
-        if m.is_coordinator_up:
-            return None
-        return set(self.db.scalars(select(ClassSubject.class_id).where(
-            ClassSubject.org_id == m.org_id,
-            ClassSubject.teacher_member_id == m.membership.id)))
+        """None = unrestricted (admin); else the classes this teacher may read.
+
+        `visible_class_ids` is the one definition (founder, 2026-08-05): the
+        subjects she teaches PLUS the homeroom she owns. A class teacher who
+        takes none of her own class's subjects used to get an empty exam feed
+        for her own children.
+        """
+        return visible_class_ids(self.db, m)
 
     def _roster(self, m: CurrentMember, class_id: uuid.UUID,
                 student_ids: list | None) -> list[Student]:

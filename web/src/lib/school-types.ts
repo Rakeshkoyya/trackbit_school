@@ -228,8 +228,16 @@ export interface MyDayPeriod {
   closed: boolean;
   attendance_marked: boolean;
   /** V1-3 (D-01): false when the org's mode doesn't take attendance this
-   *  period — the card stays, only the attendance ask moves. */
+   *  period — the card stays, only the attendance ask moves.
+   *
+   *  DYNAMIC in a once-per-day school (founder, 2026-08-05): true on every
+   *  period until the day's register is taken, then only on the one holding it.
+   *  Read it together with `day_attendance_taken`. */
   marks_attendance: boolean;
+  /** Once-per-day schools only (null elsewhere): has this class's day been
+   *  captured? Separates "not asked because it is done" from "not asked because
+   *  this period never marks" — two different things to tell a teacher. */
+  day_attendance_taken: boolean | null;
   roster_count: number;
   present_count: number | null;
   absent_count: number | null;
@@ -426,6 +434,9 @@ export interface AttendanceRosterRow {
 }
 
 export interface AttendanceRoster {
+  /** One register a day: the sheet hides its period picker, because choosing a
+   *  period is a question with no meaning when the register is the day's. */
+  once_per_day?: boolean;
   class_id: string;
   class_label: string;
   period_no: number;
@@ -1444,8 +1455,10 @@ export interface PeriodCard {
   closed: boolean;
   attendance_marked: boolean;
   /** V1-3 (D-01/Q-02a): the mode may not mark this period; topic/homework/
-   *  checks are unaffected. */
+   *  checks are unaffected. Dynamic in a once-per-day school — see
+   *  `day_attendance_taken`. */
   marks_attendance: boolean;
+  day_attendance_taken: boolean | null;
   roster: AttendanceRosterRow[];
   roster_count: number;
   present_count: number | null;
@@ -1489,14 +1502,33 @@ export interface RegisterRow {
   marked_days: number;
 }
 
+/** One column's total — the figure a paper register carries in its bottom
+ *  margin. `pct`/`marked` are null/false on a day nobody marked: the one number
+ *  this grid must never invent is a day it has no record of. */
+export interface RegisterDayTally {
+  date: string;
+  marked: boolean;
+  present: number;
+  absent: number;
+  counted: number;
+  pct: number | null;
+}
+
 export interface ClassRegister {
   class_id: string;
   class_label: string;
   month: string;
   mode: "every_period" | "first_period" | "twice_daily";
+  /** A once-per-day school's register is one column per DAY, so the grid needs
+   *  no period dimension and the capture sheet shows no period picker. */
+  once_per_day: boolean;
   days: string[];
   school_days: number;
   rows: RegisterRow[];
+  day_totals: RegisterDayTally[];
+  marked_days: number;
+  pct: number | null;
+  headline: string;
 }
 
 // ── absence reasons + informed absence (V1-3, D-02/S-24) ────────────────────
@@ -2776,4 +2808,290 @@ export interface FeeFollowupDetail {
   guardian_name: string | null;
   guardian_phone: string | null;
   notes: FeeNote[];
+}
+
+// ── the staff directory (founder, 2026-08-05) ────────────────────────────────
+// Setup → Members is an ACCOUNT screen (who can log in, invite state, reset a
+// password). This is the people screen: who works here, whose homeroom is whose,
+// and what everyone carries.
+//
+// `role_key` is DERIVED, never stored. `org_role` remains `admin | teacher` —
+// the two-value column every guard in the app is built on — and the class
+// teacher lives in exactly one place, `school_classes.class_teacher_member_id`.
+// Writing "Class teacher" back is an assignment on the CLASS.
+
+export interface ClassRef {
+  class_id: string;
+  class_label: string;
+}
+
+export interface StaffSubjectRef {
+  class_subject_id: string;
+  class_id: string;
+  class_label: string;
+  subject_id: string;
+  subject_name: string;
+  periods_per_week: number;
+}
+
+export type StaffRoleKey = "admin" | "class_teacher" | "teacher";
+
+/** Staff hold one of TWO org roles. Deliberately not `OrgRole`, which also
+ *  carries "parent" — a parent is never a member of staff. */
+export type StaffOrgRole = "admin" | "teacher";
+
+export interface StaffRow {
+  member_id: string;
+  user_id: string;
+  name: string;
+  email: string | null;
+  username: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  /** What is STORED. */
+  org_role: StaffOrgRole;
+  /** What is SHOWN — org role plus the homeroom assignment. */
+  role_key: StaffRoleKey;
+  role_label: string;
+  status: string;
+  pending: boolean;
+  last_active_at: string | null;
+  class_teacher_of: ClassRef[];
+  classes: ClassRef[];
+  subjects: StaffSubjectRef[];
+  subject_count: number;
+  periods_per_week: number;
+}
+
+export interface StaffDirectory {
+  rows: StaffRow[];
+  classes: ClassRef[];
+  total: number;
+  admins: number;
+  teachers: number;
+  class_teachers: number;
+  classes_without_teacher: ClassRef[];
+}
+
+export interface StaffDetail {
+  row: StaffRow;
+  classes: ClassRef[];
+  can_edit: boolean;
+  is_last_admin: boolean;
+}
+
+export interface StaffUpdateIn {
+  name?: string;
+  email?: string;
+  username?: string;
+  phone?: string;
+  date_of_birth?: string;
+  clear_email?: boolean;
+  clear_phone?: boolean;
+  clear_date_of_birth?: boolean;
+  org_role?: StaffOrgRole;
+  /** FULL REPLACE. `[]` means "class teacher of nothing"; omit to leave alone. */
+  class_teacher_of?: string[];
+}
+
+
+// ── My Class, expanded (founder, 2026-08-05) ─────────────────────────────────
+//
+// `SchoolTone` is the server's own verdict on a row. It is decided there and
+// only there: three surfaces render these rows, and a tone each worked out for
+// itself would be three opinions about one teacher on one morning (the V1-15
+// precedent).
+export type SchoolTone = "neutral" | "green" | "amber" | "red";
+
+// The class teacher's whole desk. Every figure below is COMPUTED SERVER-SIDE by
+// the service that already owns it (coverage, homework verdicts, bands, exams),
+// so a component that re-derived one would be the drift V1-0 exists to remove.
+//
+// The rule that repeats through all of it: a denominator nobody has filled in is
+// `null`, never 0. An unopened register and an empty classroom are opposite
+// facts; an unchecked homework and a class that did nothing are opposite facts.
+
+export interface MyClassAbsentee {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  status: string;
+  streak: number;
+  reason_code: string | null;
+  reason_note: string | null;
+  explained: boolean;
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  reminded_today: boolean;
+  /** Explained absences are amber, never red (`D-86`) — somebody dealt with it. */
+  tone: SchoolTone;
+}
+
+export interface MyClassAttendance {
+  date: string;
+  is_today: boolean;
+  school_open: boolean;
+  marked: boolean;
+  /** The class's strength, populated whether or not anything is marked. */
+  roster: number;
+  present: number;
+  absent: number;
+  late: number;
+  periods_marked: number;
+  periods_scheduled: number;
+  pct: number | null;
+  month_pct: number | null;
+  month_marked_days: number;
+  month_school_days: number;
+  absentees: MyClassAbsentee[];
+  headline: string;
+  tone: SchoolTone;
+}
+
+export interface MyClassHomework {
+  from_date: string;
+  to_date: string;
+  /** Student-homeworks throughout, so `given ⊇ checked ⊇ graded` nests. */
+  given: number;
+  checked: number;
+  graded: number;
+  /** The TEACHER's gap. Never rendered as a child's miss, never in the %. */
+  not_checked: number;
+  done_weighted: number;
+  /** `null` when nothing has been checked — never 0%. */
+  completion_pct: number | null;
+  late: number;
+  carried: number;
+  waived: number;
+  missed: number;
+  assignments: number;
+  unchecked_assignments: number;
+  headline: string;
+  tone: SchoolTone;
+}
+
+export interface MyClassBandSubject {
+  subject_id: string;
+  subject_name: string;
+  a: number;
+  b: number;
+  c: number;
+  assessed: number;
+  /** Its own number in its own word — never a tier, never a step on the ramp. */
+  not_assessed: number;
+}
+
+export interface MyClassBands {
+  subjects: MyClassBandSubject[];
+  monitored: number;
+  headline: string;
+}
+
+export interface MyClassExams {
+  recent: ExamSummary[];
+  headline: string;
+}
+
+export interface MyClassOverview {
+  class_id: string;
+  class_label: string;
+  roster: number;
+  as_of: string;
+  headline: string;
+  attendance: MyClassAttendance;
+  homework: MyClassHomework;
+  bands: MyClassBands;
+  exams: MyClassExams;
+  syllabus: ClassSyllabus | null;
+}
+
+export interface MyClassStudentRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  admission_no: string | null;
+  category: string | null;
+  attendance_pct: number | null;
+  marked_days: number;
+  days_absent: number;
+  absent_today: boolean;
+  homework_pct: number | null;
+  homework_missed: number;
+  homework_graded: number;
+  /** "C · Hindi" (`S-186`) — the band with the subject that earned it. */
+  band_chips: string[];
+  latest_exam_pct: number | null;
+  latest_exam_name: string | null;
+  note_count: number;
+  guardian_name: string | null;
+  guardian_phone: string | null;
+  tone: SchoolTone;
+}
+
+export interface MyClassStudents {
+  class_id: string;
+  class_label: string;
+  from_date: string;
+  to_date: string;
+  rows: MyClassStudentRow[];
+  headline: string;
+}
+
+export type StudentNoteKind =
+  | "general" | "behaviour" | "wellbeing" | "achievement" | "parent_contact" | "concern";
+
+export interface StudentNote {
+  id: string;
+  student_id: string;
+  kind: StudentNoteKind;
+  note: string;
+  author_name: string | null;
+  created_at: string;
+}
+
+export interface StudentNotes {
+  student_id: string;
+  full_name: string;
+  /** Only the homeroom's own teacher (and an admin) may add. */
+  can_write: boolean;
+  rows: StudentNote[];
+}
+
+// ── the teacher's attendance board (founder, 2026-08-05) ─────────────────────
+// Attendance used to be reachable only from a My Day period card, so the person
+// covering for an absent class teacher had no door into it — which is exactly
+// the case the school's rule exists for.
+
+export interface MyAttendanceClass {
+  class_id: string;
+  class_label: string;
+  roster: number;
+  is_class_teacher: boolean;
+  class_subject_id: string | null;
+  subject_name: string | null;
+  marked: boolean;
+  marked_period_no: number | null;
+  marked_by_name: string | null;
+  marked_at: string | null;
+  periods_marked: number;
+  present: number;
+  absent: number;
+  late: number;
+  pct: number | null;
+  absentee_names: string[];
+  can_mark: boolean;
+  /** Would this be the day's opening register — the one that alerts guardians? */
+  first_of_day: boolean;
+  /** A suggestion for which period to open, never a restriction. */
+  suggested_period_no: number;
+  headline: string;
+  tone: SchoolTone;
+}
+
+export interface MyAttendanceBoard {
+  date: string;
+  is_today: boolean;
+  school_open: boolean;
+  classes: MyAttendanceClass[];
+  headline: string;
 }

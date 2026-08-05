@@ -83,3 +83,48 @@ export function eventTimeLabel(iso: string): string {
     " · " +
     d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
+
+// ── the calendar day, as the user's clock sees it ────────────────────────────
+//
+// 🔴 NEVER `toISOString().slice(0, 10)` for a calendar date. `toISOString()`
+// serialises through UTC, and every date this app deals with is a LOCAL
+// midnight, so in any timezone east of UTC it returns the PREVIOUS day.
+//
+// It is not a cosmetic off-by-one. Day navigation built on it is broken in a
+// way that looks like a dead button: in IST, `new Date("2026-08-05T00:00:00")`
+// is 2026-08-04T18:30Z, so stepping FORWARD a day and re-serialising gives back
+// the same string (the button appears not to work) while stepping BACK a day
+// jumps two. That was the reported defect on Staff → Attendance, and V1-14
+// fixed the identical bug in the cover sheet and the absence-reason sheet.
+//
+// One helper, so the next screen with a date picker cannot reintroduce it.
+
+/** A Date as local `YYYY-MM-DD` — the calendar day the person is living in. */
+export function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+    + `-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Today, in the browser's own timezone. */
+export function todayKey(): string {
+  return dayKey(new Date());
+}
+
+/** `YYYY-MM-DD` ± n days, staying in local time the whole way. */
+export function shiftDay(key: string, days: number): string {
+  const d = new Date(`${key}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return dayKey(d);
+}
+
+/** `YYYY-MM` ± n months, clamped to the 1st so a 31st never skips a month. */
+export function shiftMonth(month: string, months: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, (m - 1) + months, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The current month as `YYYY-MM`, in local time. */
+export function thisMonth(): string {
+  return todayKey().slice(0, 7);
+}

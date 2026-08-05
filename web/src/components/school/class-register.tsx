@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Phone } from "lucide-react";
+import { Phone } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -10,9 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
+import { RegisterBook } from "@/components/school/register-book";
 import { showApiError } from "@/lib/errors";
+import { thisMonth } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
-import type { DayCellStatus, RegisterCell, RegisterRow } from "@/lib/school-types";
+import type { RegisterRow } from "@/lib/school-types";
 import { cn } from "@/lib/utils";
 
 /** The class teacher's month grid (V1-3, D-03) — student × school day.
@@ -25,32 +27,6 @@ import { cn } from "@/lib/utils";
  *  absent with a reason on record is amber (somebody dealt with it), absent with
  *  none is red. A day the class never marked is NEUTRAL with its own legend
  *  entry — a gap in the record is never evidence about a child (ux §5). */
-const CELL: Record<DayCellStatus, { cls: string; label: string }> = {
-  present: { cls: "bg-[color:var(--success,#234a37)]/20", label: "present" },
-  partial: { cls: "bg-warning/40", label: "in for part of the day" },
-  left_after_lunch: { cls: "bg-warning/60", label: "left after lunch" },
-  absent: { cls: "bg-danger/70", label: "absent" },
-  not_marked: { cls: "bg-muted", label: "not marked" },
-  no_school: { cls: "bg-transparent border border-dashed border-border", label: "—" },
-};
-
-const MODE_LABEL: Record<string, string> = {
-  every_period: "every period",
-  first_period: "first period only",
-  twice_daily: "twice a day",
-};
-
-function shiftMonth(month: string, by: number): string {
-  const [y, m] = month.split("-").map(Number);
-  const d = new Date(y, (m - 1) + by, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(month: string): string {
-  const [y, m] = month.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-}
-
 /** D-02: the reason is recorded AFTER the fact, by whoever knows — never at
  *  capture. Recording it is what turns the row amber for everyone. */
 function ReasonSheet({
@@ -109,10 +85,7 @@ function ReasonSheet({
 }
 
 export function ClassRegister({ classId }: { classId: string }) {
-  const [month, setMonth] = useState<string>(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
+  const [month, setMonth] = useState<string>(thisMonth);
   const [reasonFor, setReasonFor] =
     useState<{ studentId: string; name: string; date: string } | null>(null);
 
@@ -123,111 +96,16 @@ export function ClassRegister({ classId }: { classId: string }) {
 
   if (isLoading || !data) return <div className="h-64 animate-pulse rounded-xl bg-muted" />;
 
-  const openReason = (row: RegisterRow, cell: RegisterCell) => {
-    if (cell.status !== "absent" && cell.status !== "left_after_lunch") return;
-    setReasonFor({ studentId: row.student_id, name: row.full_name, date: cell.date });
-  };
-
-  const unexplained = data.rows.reduce(
-    (n, r) => n + r.cells.filter((c) => c.status === "absent" && !c.has_reason).length, 0);
-
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="Previous month"
-            onClick={() => setMonth(shiftMonth(month, -1))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="text-sm font-medium">{monthLabel(data.month)}</span>
-          <Button variant="ghost" size="icon" aria-label="Next month"
-            onClick={() => setMonth(shiftMonth(month, 1))}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {data.school_days} school day{data.school_days === 1 ? "" : "s"} ·
-          attendance taken {MODE_LABEL[data.mode] ?? data.mode}
-        </p>
-      </div>
-
-      {unexplained > 0 ? (
-        <p className="mb-3 rounded-lg border border-border bg-danger/5 px-3 py-2 text-sm">
-          <span className="font-medium">{unexplained} absence{unexplained === 1 ? "" : "s"}</span>{" "}
-          with no reason on record — tap a red square to say why.
-        </p>
-      ) : null}
-
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs text-muted-foreground">
-              <th className="sticky left-0 z-10 bg-card px-3 py-2 text-left font-medium">Student</th>
-              {data.days.map((d) => (
-                <th key={d} className="w-7 px-0 py-2 text-center font-normal tabular-nums">
-                  {Number(d.slice(8, 10))}
-                </th>
-              ))}
-              <th className="px-3 py-2 text-right font-medium">Present</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((row) => (
-              <tr key={row.student_id} className="border-b border-border/60 last:border-0">
-                <td className="sticky left-0 z-10 max-w-[11rem] truncate bg-card px-3 py-1.5">
-                  <Link href={`/students/${row.student_id}`} className="hover:text-primary">
-                    {row.roll_no ? `${row.roll_no}. ` : ""}{row.full_name}
-                  </Link>
-                </td>
-                {row.cells.map((c) => {
-                  const meta = CELL[c.status];
-                  // D-86: an absence with a reason on record reads amber, not red.
-                  const amber = c.status === "absent" && c.has_reason;
-                  return (
-                    <td key={c.date} className="px-0 py-1.5 text-center">
-                      <button
-                        type="button"
-                        onClick={() => openReason(row, c)}
-                        title={`${new Date(c.date).toLocaleDateString()} — ${meta.label}${
-                          c.late ? " (late)" : ""}${c.has_reason ? " · reason recorded" : ""}`}
-                        aria-label={`${row.full_name} ${c.date} ${meta.label}`}
-                        className={cn(
-                          "mx-auto block h-5 w-5 rounded-[3px]",
-                          amber ? "bg-warning/70" : meta.cls,
-                          c.late && "ring-1 ring-inset ring-warning",
-                          (c.status === "absent" || c.status === "left_after_lunch")
-                            && "cursor-pointer hover:opacity-80",
-                        )}
-                      />
-                    </td>
-                  );
-                })}
-                <td className="whitespace-nowrap px-3 py-1.5 text-right text-xs text-muted-foreground">
-                  {row.marked_days > 0
-                    ? `${row.present_days} of ${row.marked_days}`
-                    : "not marked"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-        {(["present", "partial", "left_after_lunch", "absent", "not_marked"] as DayCellStatus[])
-          .map((s) => (
-            <span key={s} className="inline-flex items-center gap-1.5">
-              <span className={cn("h-3 w-3 rounded-[3px]", CELL[s].cls)} />
-              {CELL[s].label}
-            </span>
-          ))}
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded-[3px] bg-warning/70" /> absent · reason recorded
-        </span>
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        “Present” counts the days this class actually marked — never the days nobody took.
-      </p>
+      {/* The DRAWING is `RegisterBook`, shared with the every-teacher attendance
+          screen (founder, 2026-08-05) so the two cannot paint the same October
+          differently. What this wrapper adds is the class teacher's own power
+          over it: tapping an unexplained absence records why (`D-02`). */}
+      <RegisterBook
+        data={data} month={month} onMonth={setMonth}
+        onCell={(row, cell) => setReasonFor({
+          studentId: row.student_id, name: row.full_name, date: cell.date })} />
 
       <ReasonSheet target={reasonFor} onClose={() => setReasonFor(null)} />
     </div>

@@ -38,23 +38,23 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
 import { showApiError } from "@/lib/errors";
+import { dayKey, todayKey } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
 import type { TimesheetDay, TimesheetSlot } from "@/lib/school-types";
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 function mondayOf(d: Date): string {
   const copy = new Date(d);
   copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7));
-  return iso(copy);
+  return dayKey(copy);
 }
 
 function shiftWeek(weekStart: string, weeks: number): string {
   const d = new Date(`${weekStart}T00:00:00`);
   d.setDate(d.getDate() + weeks * 7);
-  return iso(d);
+  return dayKey(d);
 }
 
 function weekLabel(weekStart: string): string {
@@ -68,11 +68,11 @@ function weekLabel(weekStart: string): string {
 function shiftDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + days);
-  return iso(d);
+  return dayKey(d);
 }
 
 function dayLabel(dateStr: string): string {
-  if (dateStr === iso(new Date())) return "Today";
+  if (dateStr === todayKey()) return "Today";
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-IN", {
     weekday: "short", day: "numeric", month: "short" });
 }
@@ -409,8 +409,8 @@ type View = "day" | "week" | "month";
 function TimesheetInner() {
   const [view, setView] = useState<View>("week");
   const [week, setWeek] = useState(() => mondayOf(new Date()));
-  const [day, setDay] = useState(() => iso(new Date()));
-  const [month, setMonth] = useState(() => iso(new Date()).slice(0, 7));
+  const [day, setDay] = useState(() => todayKey());
+  const [month, setMonth] = useState(() => todayKey().slice(0, 7));
   const [target, setTarget] = useState<CellTarget | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -421,7 +421,7 @@ function TimesheetInner() {
 
   const days = data?.days ?? [];
   const periods = days[0]?.slots.map((s) => s.period_no) ?? [];
-  const today = iso(new Date());
+  const today = todayKey();
 
   return (
     <div className="pb-8">

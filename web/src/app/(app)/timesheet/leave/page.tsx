@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
 import { showApiError } from "@/lib/errors";
+import { todayKey } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
 import type { LeaveRequest, LeaveStatus } from "@/lib/school-types";
 
@@ -33,7 +34,6 @@ const STATUS: Record<LeaveStatus, { label: string; tone: Tone }> = {
   cancelled: { label: "Withdrawn", tone: "neutral" },
 };
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 function span(r: LeaveRequest): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
@@ -44,8 +44,8 @@ function span(r: LeaveRequest): string {
 
 function ApplySheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
-  const [from, setFrom] = useState(() => iso(new Date()));
-  const [to, setTo] = useState(() => iso(new Date()));
+  const [from, setFrom] = useState(() => todayKey());
+  const [to, setTo] = useState(() => todayKey());
   const [reason, setReason] = useState("");
   // D-04 — half a day. It is one date by definition, so choosing it collapses
   // the range; the AM/PM half is what tells the cover board which periods (S-31).

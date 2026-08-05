@@ -179,6 +179,12 @@ SCHOOL_ABSENCE_TABLES = (
     "student_absence_notes",
 )
 
+# The class teacher's own log about a child (founder, 2026-08-05) — engaged in
+# c2d3e4f5a6b7. Staff-only: it never reaches the parent portal's allowlist.
+SCHOOL_STUDENT_NOTE_TABLES = (
+    "student_notes",
+)
+
 # V1-7 the school's decision on a catalogue suggestion (S-148) — engaged in
 # d6e7f8a9b0c1. `observances` itself is PLATFORM data (D-60/S-149): no org_id,
 # no policy, super-admin on every write — the demo_requests shape. It is

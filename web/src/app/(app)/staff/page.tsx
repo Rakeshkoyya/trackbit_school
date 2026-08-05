@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { showApiError } from "@/lib/errors";
+import { dayKey, todayKey } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
 import type { StaffDayStatus, StaffRosterRow } from "@/lib/school-types";
 
@@ -53,11 +54,10 @@ const STATE: Record<StaffDayStatus, { label: string; icon: typeof Check; classNa
   late: { label: "Late", icon: Clock, className: "border-border bg-card" },
 };
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 function pretty(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00`);
-  const today = iso(new Date());
+  const today = todayKey();
   if (dateStr === today) return "Today";
   return d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
 }
@@ -65,14 +65,14 @@ function pretty(dateStr: string): string {
 function shift(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
   d.setDate(d.getDate() + days);
-  return iso(d);
+  return dayKey(d);
 }
 
 type Mark = { status: StaffDayStatus; portion: "am" | "pm" | null };
 
 function StaffAttendanceInner() {
   const qc = useQueryClient();
-  const [day, setDay] = useState(() => iso(new Date()));
+  const [day, setDay] = useState(() => todayKey());
   // null until the sheet loads, then a local working copy the admin edits.
   const [marks, setMarks] = useState<Record<string, Mark> | null>(null);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
@@ -132,7 +132,7 @@ function StaffAttendanceInner() {
   const dirty = !!sheet && !!marks
     && rows.some((r) => at(r.member_id).status !== r.status
       || (at(r.member_id).status === "half_day" && at(r.member_id).portion !== r.portion));
-  const isFuture = day > iso(new Date());
+  const isFuture = day > todayKey();
 
   // Group by role so an admin scanning for a missing teacher isn't reading past
   // the office staff — the two populations are managed differently.

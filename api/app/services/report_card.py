@@ -41,6 +41,7 @@ from app.schemas.report_card import (
 from app.services.ai.exam_analysis import subject_summary
 from app.services.exam_marks import ClassMarks, load_class_marks
 from app.services.growth import GrowthService
+from app.services.periods import visible_class_ids
 from app.services.school_clock import today_in
 
 _MAX_ANALYSIS_TOPICS = 40
@@ -206,11 +207,15 @@ class ReportCardService:
         return student
 
     def _assert_class(self, m: CurrentMember, class_id: uuid.UUID) -> None:
-        if m.is_coordinator_up:
+        """Subjects she teaches, or the homeroom she owns (`visible_class_ids`).
+
+        The homeroom half was missing, so a class teacher who takes none of her
+        own class's subjects could see its register and its syllabus and was
+        refused its report cards — the one screen a class teacher is most
+        expected to open.
+        """
+        allowed = visible_class_ids(self.db, m)
+        if allowed is None or class_id in allowed:
             return
-        teaches = self.db.scalar(select(ClassSubject.id).where(
-            ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id,
-            ClassSubject.teacher_member_id == m.membership.id).limit(1))
-        if teaches is None:
-            raise ForbiddenError("You can open report cards only for classes you teach.",
-                                 code="not_your_class")
+        raise ForbiddenError("You can open report cards only for your own classes.",
+                             code="not_your_class")

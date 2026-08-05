@@ -917,9 +917,18 @@ export interface PresenceRing {
   marked: boolean;
   present: number;
   absent: number;
+  /** The WHOLE cohort — the school's strength. Always populated, marked or not. */
   total: number;
+  /** How much of `total` sits in a group that has been marked. `pct` divides by
+   *  THIS, never by `total`: a class nobody captured is not evidence its
+   *  children are away. */
+  counted: number;
+  unmarked: number;
   pct: number | null;
   caption: string;
+  /** "4 of 12 classes not marked yet", when part of the cohort has no register
+   *  open. Null when everything is captured. */
+  note: string | null;
   tone: Tone;
   href: string;
 }
@@ -964,18 +973,26 @@ export interface PresenceGroup {
 }
 
 export interface PresenceBoard {
-  /** The last day the school actually RAN — not necessarily today. */
+  /** Today on any day the school is OPEN, captured or not. Falls back to the
+   *  last day it ran only when today is closed. */
   date: string;
   is_today: boolean;
+  school_open: boolean;
   rings: PresenceRing[];
   groups: PresenceGroup[];
   headline: string;
-  /** The roll, summed server-side over the cohorts that were actually MARKED —
-   *  `roll_caption` says which. A total that quietly swept in an unmarked
-   *  cohort would be the exact lie three denominators exist to prevent. */
+  /** `roll` is the school's whole strength and is always populated; `counted`
+   *  is the part of it that has been marked, and is what `in_building` + `away`
+   *  add up to. Summed server-side so the medallion and the ledger beside it
+   *  cannot disagree. */
   in_building: number;
   roll: number;
+  counted: number;
+  not_marked: number;
   away: number;
+  /** Has ANY cohort been marked on `date`? Never infer this from `roll`, which
+   *  is now non-zero on a morning nobody has touched. */
+  marked: boolean;
   roll_caption: string;
 }
 

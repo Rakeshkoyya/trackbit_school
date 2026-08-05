@@ -6,9 +6,15 @@ if the code drifted, and every one of them is a way a dashboard starts lying:
   * a ring nobody has marked is neutral and carries a WORD, never 0% and never
     red — an admin who marks staff at 10am must not open a red board every
     morning, and "nobody has marked it" is not "nobody came in";
-  * the student ring's denominator is the roster of classes that actually
-    marked, so a day where two of twelve classes captured attendance is a day
-    about two classes;
+  * the student ring carries TWO denominators and never confuses them:
+    `counted` (the roster of classes that actually marked) is what the
+    percentage divides by, so a day where two of twelve classes captured
+    attendance is a day about two classes — while `total` is the school's whole
+    strength, readable on a morning nobody has marked anything;
+  * on an OPEN day the board is about today, captured or not. It falls back to
+    the last day the school ran only when today is closed — showing yesterday's
+    figures under today's heading answers "has the register been taken?" with
+    last night's answer;
   * three or fewer absentees are NAMED with their actions; four collapse to one
     sentence and a link — the founder's rule, and the difference between a
     morning's work and a screen nobody reads;
@@ -24,6 +30,8 @@ if the code drifted, and every one of them is a way a dashboard starts lying:
 
 import uuid
 from datetime import date, timedelta
+
+import pytest
 
 from tests.test_insights import _recent_working_days, _setup, _slot
 
@@ -72,9 +80,18 @@ def test_unmarked_rings_are_neutral_and_wordy_never_zero(client, cleanup):
 
 
 def test_student_ring_denominates_on_classes_that_marked(client, cleanup):
-    """A second class that captured nothing must not join the denominator. If it
-    did, one class marking on a quiet morning would report the school as
-    catastrophically absent and send somebody chasing a phantom."""
+    """Two denominators, and the difference between them is the module.
+
+    A second class that captured nothing must not join the PERCENTAGE's
+    denominator — if it did, one class marking on a quiet morning would report
+    the school as catastrophically absent and send somebody chasing a phantom.
+    That denominator is `counted`.
+
+    But `total` is the school's strength and must be the whole roll whether or
+    not anyone has marked (founder, 2026-08-05): before this the ring reported
+    the marked classes AS the school, so one class of twelve taking the register
+    rendered as a complete day.
+    """
     ctx = _setup(client, cleanup)
     h = ctx["h"]
     school_day = _recent_working_days(1)[0]
@@ -90,16 +107,67 @@ def test_student_ring_denominates_on_classes_that_marked(client, cleanup):
                           "class_id": other["id"]})
 
     _mark(client, h, ctx, 1, absent_ids=[ctx["students"][0]["id"]], on=school_day)
-    ring = _ring(client.get("/api/v1/insights/presence", headers=h).json(), "students")
+    board = client.get("/api/v1/insights/presence", headers=h).json()
+    ring = _ring(board, "students")
 
-    # Only 6-A's two students count — not the five in the school.
+    # The percentage is over 6-A's two students only — 7-A captured nothing and
+    # its three children are neither present nor absent.
     assert ring["marked"] is True
-    assert ring["total"] == 2
+    assert ring["counted"] == 2
     assert ring["absent"] == 1 and ring["present"] == 1
     assert ring["pct"] == 50.0
+    # ...and the strength is the whole school, always.
+    assert ring["total"] == 5
+    assert ring["unmarked"] == 3
+    assert ring["note"] == "1 of 2 classes not marked yet"
     # The caption says what the GAP is — the figure itself is inside the ring,
     # and repeating it there wastes the only line that can add anything.
     assert ring["caption"] == "1 away · 50.0% in"
+    # The board's roll is every cohort's strength — students AND staff — so it
+    # is asserted structurally rather than as a magic number. `counted` is what
+    # in + away sum to; the difference is what nobody has marked.
+    assert board["roll"] == sum(r["total"] for r in board["rings"])
+    assert board["counted"] == sum(r["counted"] for r in board["rings"] if r["marked"])
+    assert board["not_marked"] == board["roll"] - board["counted"]
+    assert board["in_building"] + board["away"] == board["counted"]
+    # The students' three unmarked children are inside that gap.
+    assert board["not_marked"] >= 3
+
+
+def test_open_day_with_nothing_marked_shows_today_not_yesterday(client, cleanup):
+    """The founder's defect, 2026-08-05: a morning nobody had captured showed
+    YESTERDAY's figures under today's heading, because the anchor walked back a
+    fortnight looking for a day with capture. An open day is now always today,
+    and an empty register reads as an empty register — while the roll, which
+    does not depend on anyone marking anything, is still there to be read."""
+    ctx = _setup(client, cleanup)
+    h = ctx["h"]
+    # Newest first. The claim is only meaningful when today itself is a school
+    # day — on a Sunday the board is *supposed* to fall back.
+    today, yesterday = _recent_working_days(2)
+    if today != date.today():
+        pytest.skip("today is not a working day")
+    _slot(client, h, ctx, yesterday.weekday(), 1)
+
+    # Captured yesterday, nothing today.
+    _mark(client, h, ctx, 1, absent_ids=[ctx["students"][0]["id"]], on=yesterday)
+    board = client.get("/api/v1/insights/presence", headers=h).json()
+
+    if board["date"] != today.isoformat():
+        pytest.skip("today is not a working day for this org")
+    assert board["is_today"] is True
+    assert board["marked"] is False
+    # Not a figure, and never a zero: the strength is known, the register isn't.
+    assert board["roll"] == sum(r["total"] for r in board["rings"]) >= 2
+    assert board["counted"] == 0
+    assert board["in_building"] == 0 and board["away"] == 0
+    ring = _ring(board, "students")
+    assert ring["marked"] is False and ring["total"] == 2 and ring["pct"] is None
+    # And yesterday's absentee is NOT named as away today.
+    group = next(g for g in board["groups"] if g["key"] == "students")
+    assert group["count"] == 0
+    assert group["tone"] == "neutral"  # nothing captured is never good news
+    assert "register" in group["headline"].lower()
 
 
 # ── named under the threshold, counted over it ───────────────────────────────

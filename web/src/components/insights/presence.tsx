@@ -105,16 +105,30 @@ function LedgerRow({ ring }: { ring: PresenceRing }) {
           CAPTION_TONE[ring.tone])}>
           {ring.caption}
         </span>
+        {/* The gap in the record, named. A ring reading 97% over a third of the
+            school is a different morning from one reading it over all of it,
+            and this line is the only thing that says which. */}
+        {ring.note ? (
+          <span className="mt-0.5 block font-mono text-[10px] leading-snug text-muted-foreground/80">
+            {ring.note}
+          </span>
+        ) : null}
       </span>
       {ring.marked ? (
+        // The denominator is what was MARKED — never the roll, or an unmarked
+        // class would be counted as a class full of absentees.
         <span className="shrink-0 font-mono text-[13px] tabular-nums">
           {ring.present}
           <span className="px-0.5 text-muted-foreground/60">⁄</span>
-          <span className="text-muted-foreground">{ring.total}</span>
+          <span className="text-muted-foreground">{ring.counted}</span>
         </span>
       ) : (
-        <span className="shrink-0 font-mono text-[11px] uppercase tracking-wide text-muted-foreground/70">
-          &mdash;
+        // Unmarked still shows the strength: how many people the school has is
+        // a fact that does not wait for anyone to open a register.
+        <span className="shrink-0 font-mono text-[13px] tabular-nums text-muted-foreground/70">
+          <span className="text-muted-foreground/50">&mdash;</span>
+          <span className="px-0.5 text-muted-foreground/60">⁄</span>
+          {ring.total}
         </span>
       )}
     </Link>
@@ -142,8 +156,12 @@ export function RollCard({ board }: { board: PresenceBoard }) {
       </header>
 
       <div className="flex flex-col items-center px-4 pt-5">
+        {/* `board.marked`, never `board.roll` — the roll is now populated on a
+            morning nobody has touched (that is the point of it), so reading it
+            as "something was captured" would put a confident 0 in the centre of
+            an empty register. */}
         <RollMedallion arcs={arcs}>
-          {board.roll ? (
+          {board.marked ? (
             <>
               <span className="font-mono text-[30px] font-semibold leading-none tabular-nums">
                 {board.in_building}
@@ -153,23 +171,30 @@ export function RollCard({ board }: { board: PresenceBoard }) {
               </span>
             </>
           ) : (
-            <span className="max-w-[86px] text-center text-[11px] leading-tight text-muted-foreground">
-              not marked yet
-            </span>
+            <>
+              <span className="font-mono text-[26px] font-semibold leading-none tabular-nums text-muted-foreground">
+                {board.roll}
+              </span>
+              <span className="mt-1.5 max-w-[86px] text-center font-mono text-[9px] uppercase leading-tight tracking-[0.1em] text-muted-foreground">
+                on the roll
+              </span>
+            </>
           )}
         </RollMedallion>
 
         {/* The sentence the medallion is for. The count of people missing is
             what the next ten minutes are actually about. */}
         <p className="mt-3.5 text-center text-[13px] leading-snug">
-          {board.roll ? (
+          {board.marked ? (
             board.away ? (
               <>
                 <span className="font-mono font-semibold tabular-nums">{board.away}</span>
                 {board.away === 1 ? " person is" : " people are"} not here
               </>
-            ) : "Everyone is here"
-          ) : "Nobody has taken attendance yet"}
+            ) : "Everyone marked is here"
+          ) : board.school_open
+            ? "Nobody has taken attendance yet"
+            : "School is closed"}
         </p>
         <p className="mt-0.5 text-center font-mono text-[10px] tracking-wide text-muted-foreground">
           {board.roll_caption}
@@ -180,10 +205,18 @@ export function RollCard({ board }: { board: PresenceBoard }) {
         {board.rings.map((r) => <LedgerRow key={r.key} ring={r} />)}
       </div>
 
+      {/* Only ever shown on a CLOSED day now. On an open day the board is about
+          today whether or not a register has been opened — showing yesterday's
+          figures under today's heading was the defect this replaced. */}
       {!board.is_today ? (
         <p className="border-t border-border bg-muted/25 px-4 py-2 text-[11px] leading-snug text-muted-foreground">
-          The last day attendance was captured. Today&rsquo;s roll appears as soon as
-          one period is marked.
+          School is closed today — this is {when}, the last day it ran.
+        </p>
+      ) : board.not_marked ? (
+        <p className="border-t border-border bg-muted/25 px-4 py-2 text-[11px] leading-snug text-muted-foreground">
+          <span className="font-mono tabular-nums">{board.not_marked}</span> of{" "}
+          <span className="font-mono tabular-nums">{board.roll}</span> on the roll have
+          no register open yet — they are counted neither in nor out.
         </p>
       ) : null}
     </section>
@@ -231,15 +264,26 @@ export function PresenceRingRow({ rings }: { rings: PresenceRing[] }) {
                 <>
                   {r.present}
                   <span className="px-0.5 text-muted-foreground/50">⁄</span>
-                  <span className="text-muted-foreground">{r.total}</span>
+                  <span className="text-muted-foreground">{r.counted}</span>
                 </>
               ) : (
-                <span className="text-[13px] text-muted-foreground">not marked yet</span>
+                // The strength, still. "Not marked" is the state of the
+                // register, not of the roll.
+                <span className="text-muted-foreground/70">
+                  <span className="text-muted-foreground/50">&mdash;</span>
+                  <span className="px-0.5 text-muted-foreground/50">⁄</span>
+                  {r.total}
+                </span>
               )}
             </span>
             <span className={cn("mt-1.5 block text-[11px] leading-snug", CAPTION_TONE[r.tone])}>
               {r.caption}
             </span>
+            {r.note ? (
+              <span className="mt-0.5 block font-mono text-[10px] leading-snug text-muted-foreground/80">
+                {r.note}
+              </span>
+            ) : null}
           </span>
         </Link>
       ))}

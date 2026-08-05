@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { dayKey } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
 import type { DaySlot } from "@/lib/school-types";
 import { cn } from "@/lib/utils";
@@ -19,14 +20,10 @@ import { cn } from "@/lib/utils";
 
 const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-function toIso(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 function addDays(iso: string, n: number): string {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + n);
-  return toIso(d);
+  return dayKey(d);
 }
 
 const fmt = (d: string) =>
