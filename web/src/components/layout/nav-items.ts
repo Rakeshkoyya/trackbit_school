@@ -25,6 +25,14 @@ export type NavItem = {
   href: string;
   icon: LucideIcon;
   tour?: string; // data-tour anchor for the guided tour
+  // A nav item that opens into a short list rather than navigating (founder,
+  // 2026-08-05). Used by Students, whose two halves are two different KINDS of
+  // fact about a child — the administration record and the record the school
+  // makes — and which a single link cannot land you in the right one of.
+  // Deliberately one level deep and deliberately rare: a sidebar of drawers is
+  // a sidebar nobody reads. `href` stays the group's own landing page, so a
+  // press on the parent is never a dead press.
+  children?: NavItem[];
 };
 
 // Consolidated v2 IA (SPRD2 §3). Each item is one area; areas group their old
@@ -36,10 +44,38 @@ const plan: NavItem = { label: "Plan", href: "/plan", icon: CalendarRange };
 // (pick a year, pick a class, pick a subject), so a teacher lands on the list of
 // the class-subjects she actually owns instead of picking her way to each one.
 const planForTeacher: NavItem = { ...plan, href: "/plan/my-subjects" };
-const students: NavItem = { label: "Students", href: "/students", icon: GraduationCap };
-// V1-5 (D-36). Checking homework is a DESK activity, not a between-classes tap,
-// so it gets its own screen instead of a block at the top of My Day.
-const homework: NavItem = { label: "Homework", href: "/homework", icon: ClipboardCheck };
+// Founder 2026-08-05. A school holds two different kinds of fact about a child
+// and this area used to offer one door for both:
+//
+//   Directory — the ADMINISTRATION record. Name, parents, phone, date of birth,
+//               class, category. Entered once, corrected occasionally, and the
+//               thing the office opens.
+//   Academics — the record the school MAKES. The register, the class log, the
+//               homework, the exams, the report. Written every day by teachers
+//               and read as a trend.
+//
+// They answer different questions ("who is this child" vs "how is this child
+// doing"), are edited by different people at different rhythms, and a single
+// table that tried to carry both columns could serve neither. So Students opens
+// into the two, and its own href lands on Directory.
+const studentsDirectory: NavItem = {
+  label: "Directory", href: "/students/directory", icon: ClipboardList,
+};
+const studentsAcademics: NavItem = {
+  label: "Academics", href: "/students/academics", icon: ClipboardCheck,
+};
+const students: NavItem = {
+  label: "Students", href: "/students/directory", icon: GraduationCap,
+  children: [studentsDirectory, studentsAcademics],
+};
+// A teacher gets the Academics half ONLY, and gets it flat — no drawer. She
+// does not maintain the roster (every write on Directory is admin-only), so a
+// group whose first entry is read-only would be a drawer with one useful thing
+// in it. Scoping is the service's job, not the nav's: `/students/records`
+// returns the classes she teaches ∪ the homeroom she owns.
+const studentsForTeacher: NavItem = {
+  label: "Students", href: "/students/academics", icon: GraduationCap,
+};
 const tasks: NavItem = { label: "Tasks", href: "/tasks", icon: CheckSquare, tour: "nav-boards" };
 const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
 const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
@@ -94,9 +130,13 @@ export function navForRole(
     case "teacher":
       // My Class sits right after My Day — the two screens a class teacher
       // actually lives in (D-03). Absent entirely for a subject teacher.
+      // Homework lost its own item (founder, 2026-08-05): the homework log now
+      // lives inside Students → Academics, beside the class log and the exams
+      // it belongs with. `/homework` itself is untouched and still reachable —
+      // it is the check-sheet desk (`D-36`) and Academics links to it.
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
-        attendance, lucy, sessions, planForTeacher, homework, students,
+        attendance, lucy, sessions, planForTeacher, studentsForTeacher,
         ...(hasBandScope ? [bands] : []), timesheet, tasks,
       ];
     case "parent":
@@ -113,9 +153,11 @@ export function navForRole(
 export function bottomNavForRole(role: OrgRole | string | undefined): NavItem[] {
   switch (role) {
     case "admin":
-      return [plan, tasks, students, lucy];
+      // The bar navigates — it never opens a drawer, so Students lands on
+      // Directory and the tabs inside the area carry you across.
+      return [plan, tasks, { ...students, children: undefined }, lucy];
     case "teacher":
-      return [myDay, tasks, students, lucy];
+      return [myDay, tasks, studentsForTeacher, lucy];
     case "parent":
       return [];
     default:

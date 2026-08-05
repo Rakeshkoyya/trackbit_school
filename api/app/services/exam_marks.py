@@ -60,6 +60,10 @@ class MarkRow:
     locked: bool = False
     question_marks: list | None = None
     paper_url: str | None = None
+    # The teacher's optional word about THIS paper (founder 2026-08-05). It is
+    # per (student, exam) rather than per student, because "rushed the second
+    # half" is about one afternoon and stops being true by the next test.
+    remark: str | None = None
 
     @property
     def pct(self) -> float | None:
@@ -114,24 +118,44 @@ def load_class_marks(db: Session, org_id: uuid.UUID, class_id: uuid.UUID,
     `student_ids` narrows the *scores* fetched (one student's report card) but
     never the cycles — the denominator has to know about tests this student
     missed, which is the whole point of `S-118`."""
-    out = ClassMarks()
+    return load_marks(db, org_id, [class_id], student_ids).get(class_id, ClassMarks())
+
+
+def load_marks(db: Session, org_id: uuid.UUID, class_ids: list[uuid.UUID],
+               student_ids: list[uuid.UUID] | None = None) -> dict[uuid.UUID, ClassMarks]:
+    """The same read, for any number of classes at once — four queries total.
+
+    The batched form exists for the same reason `PlannerService.forecast_org`
+    does (`PR-6`): the roster board asks this question of every class in the
+    school on one page load, and looping `load_class_marks` made that four
+    round-trips per class. Nothing about the arithmetic changes — the per-class
+    reader is now a one-line wrapper, so there is still exactly one place a mark
+    becomes a figure.
+    """
+    out: dict[uuid.UUID, ClassMarks] = {cid: ClassMarks() for cid in class_ids}
+    if not class_ids:
+        return out
     cycle_rows = db.execute(
         select(AssessmentCycle.id, AssessmentCycle.name, AssessmentCycle.date,
                AssessmentCycle.type, AssessmentCycle.scale, AssessmentCycle.subject_id,
-               AssessmentCycle.student_ids, AssessmentCycle.locked_at, ExamType.name)
+               AssessmentCycle.student_ids, AssessmentCycle.locked_at, ExamType.name,
+               AssessmentCycle.class_id)
         .outerjoin(ExamType, ExamType.id == AssessmentCycle.exam_type_id)
         .where(AssessmentCycle.org_id == org_id,
-               AssessmentCycle.class_id == class_id)).all()
+               AssessmentCycle.class_id.in_(class_ids))).all()
     if not cycle_rows:
         return out
 
     subjects = dict(db.execute(
         select(Subject.id, Subject.name).where(Subject.org_id == org_id)).all())
     meta: dict[uuid.UUID, tuple] = {}
-    for cid, name, d, sys_type, scale, subject_id, subset, locked_at, own_name in cycle_rows:
+    cycle_class: dict[uuid.UUID, uuid.UUID] = {}
+    for (cid, name, d, sys_type, scale, subject_id, subset,
+         locked_at, own_name, klass) in cycle_rows:
         norm = normalise_scale(scale, sys_type)
-        out.cycles[cid] = (subject_id, norm,
-                           {str(s) for s in subset} if subset else None)
+        cycle_class[cid] = klass
+        out[klass].cycles[cid] = (subject_id, norm,
+                                  {str(s) for s in subset} if subset else None)
         meta[cid] = (name, d, sys_type, own_name or type_label(sys_type), norm,
                      subject_id, subjects.get(subject_id), locked_at is not None)
 
@@ -155,11 +179,11 @@ def load_class_marks(db: Session, org_id: uuid.UUID, class_id: uuid.UUID,
     for sc in scores:
         name, d, sys_type, label, scale, subject_id, subject_name, locked = meta[sc.cycle_id]
         key = papers.get((sc.cycle_id, sc.student_id))
-        out.rows[sc.student_id].append(MarkRow(
+        out[cycle_class[sc.cycle_id]].rows[sc.student_id].append(MarkRow(
             cycle_id=sc.cycle_id, cycle_name=name, date=d, system_type=sys_type,
             type_label=label, scale=scale, subject_id=subject_id,
             subject_name=subject_name, score=float(sc.score),
             max_score=float(sc.max_score), locked=locked,
-            question_marks=sc.question_marks,
+            question_marks=sc.question_marks, remark=sc.remark,
             paper_url=storage.url_for(key) if key else None))
     return out

@@ -107,7 +107,7 @@ function ExamInner() {
   });
   const remove = useMutation({
     mutationFn: () => schoolApi.deleteCycle(cycleId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["exam-feed"] }); toast.success("Exam deleted"); router.push("/students/scores"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["exam-feed"] }); toast.success("Exam deleted"); router.push("/students/academics/exams"); },
     onError: (e) => showApiError(e, "Could not delete"),
   });
 
@@ -117,7 +117,7 @@ function ExamInner() {
     <div>
       <div className="mb-4 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <Link href="/students/scores" className="rounded-md border border-border bg-card p-2 hover:bg-muted/40">
+          <Link href="/students/academics/exams" className="rounded-md border border-border bg-card p-2 hover:bg-muted/40">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <PageHeader

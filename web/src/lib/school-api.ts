@@ -3,9 +3,11 @@ import type {
   AcademicYear,
   CalendarEvent,
   CalendarSummary,
+  ClassLogBook,
   ClassSubject,
   FeeStructure,
   Guardian,
+  HomeworkLogBook,
   HomeworkSheet,
   LeaveBalance,
   LeaveList,
@@ -26,6 +28,7 @@ import type {
   StudentFeeDetail,
   StudentFeeListItem,
   StudentListItem,
+  StudentRecords,
   Subject,
   Term,
   TimesheetDay,
@@ -252,8 +255,29 @@ export const schoolApi = {
     period_no?: number | null;
   }) => api.post<{ id: string }>("/classroom/lesson-logs", b),
   deleteLog: (id: string) => api.del<{ message: string }>(`/classroom/lesson-logs/${id}`),
-  addHomework: (b: { class_subject_id: string; text: string; due_date?: string | null; student_id?: string | null }) =>
-    api.post<{ id: string; notified_count: number }>("/classroom/homework", b),
+  /** Students → Academics → Class logs: the register for one class-subject. */
+  classLogBook: (p: { classSubjectId: string; since?: string; until?: string }) =>
+    api.get<ClassLogBook>(`/classroom/class-log${qs({
+      class_subject_id: p.classSubjectId, since: p.since, until: p.until })}`),
+  /** One entry. No `student_ids` = the class was taught this, which moves the
+   *  syllabus. With names on it, it is a line about those children and moves
+   *  nothing — a lesson that reached three children is not coverage. */
+  addClassLog: (b: {
+    class_subject_id: string; date?: string | null; topic_id?: string | null;
+    title?: string | null; coverage?: "full" | "partial"; note?: string | null;
+    student_ids?: string[];
+  }) => api.post<ClassLogBook>("/classroom/class-log", b),
+  deleteClassLog: (id: string) => api.del<{ message: string }>(`/classroom/class-log/${id}`),
+  homeworkBook: (p: { classSubjectId: string; since?: string; until?: string }) =>
+    api.get<HomeworkLogBook>(`/classroom/homework-log${qs({
+      class_subject_id: p.classSubjectId, since: p.since, until: p.until })}`),
+  /** `student_ids` writes one assignment PER child — never a shared row with a
+   *  list on it, because every reader keys on (assignment, student). */
+  addHomework: (b: {
+    class_subject_id: string; text: string; due_date?: string | null;
+    student_id?: string | null; student_ids?: string[];
+  }) => api.post<{ id: string; notified_count: number; created_ids: string[] }>(
+    "/classroom/homework", b),
   // HW-1: capture-by-exception. An empty `results` list means everyone did it.
   homeworkSheet: (id: string) =>
     api.get<HomeworkSheet>(`/classroom/homework/${id}/sheet`),
@@ -634,6 +658,15 @@ export const schoolApi = {
 
   students: (p: { class_id?: string; q?: string } = {}) =>
     api.get<StudentListItem[]>(`/students${qs({ class_id: p.class_id, q: p.q })}`),
+  /** Students → Academics: the roster with attendance, exams and homework.
+   *  Admin gets the school; a teacher gets her classes ∪ her homeroom, and
+   *  asking for someone else's class is a 403 with a sentence, not an empty
+   *  table (`S-46`). */
+  studentRecords: (p: { class_id?: string; q?: string; window_days?: number } = {}) =>
+    api.get<StudentRecords>(`/students/records${qs({
+      class_id: p.class_id, q: p.q,
+      window_days: p.window_days ? String(p.window_days) : undefined,
+    })}`),
   student: (id: string) => api.get<StudentDetail>(`/students/${id}`),
   createStudent: (b: Record<string, unknown>) => api.post<StudentDetail>("/students", b),
   updateStudent: (id: string, b: Record<string, unknown>) =>

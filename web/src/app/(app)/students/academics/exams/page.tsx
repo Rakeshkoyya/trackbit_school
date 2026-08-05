@@ -25,7 +25,7 @@ import type { ExamSummary } from "@/lib/school-types";
 
 function ExamPost({ exam }: { exam: ExamSummary }) {
   return (
-    <Link href={`/students/scores/exam/${exam.id}`}
+    <Link href={`/students/academics/exams/exam/${exam.id}`}
       className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -100,7 +100,7 @@ function ScoresInner() {
       {/* 1 · pick a class to record a test */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {classes.map((c) => (
-          <Link key={c.id} href={`/students/scores/${c.id}`}
+          <Link key={c.id} href={`/students/academics/exams/${c.id}`}
             className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.99]">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
               <GraduationCap className="h-5 w-5" />

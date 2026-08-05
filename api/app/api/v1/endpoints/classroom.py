@@ -14,7 +14,10 @@ from app.core.context import CurrentMember
 from app.core.database import get_db
 from app.core.dependencies import require_academic, require_coordinator_up
 from app.schemas.classroom import (
+    ClassLogBookOut,
+    ClassLogIn,
     ComplianceOut,
+    HomeworkBookOut,
     HomeworkCheckIn,
     HomeworkIn,
     HomeworkOut,
@@ -49,6 +52,40 @@ def delete_log(log_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
     """Undo a mis-tapped topic log from the period page."""
     ClassroomService(db).delete_log(m, log_id)
     return MessageResponse(message="Log removed.")
+
+
+# ── the two log books (founder, 2026-08-05) ──────────────────────────────────
+# The register-shaped read of capture that already exists. Reading is
+# `assert_can_take_class` (wider than writing on purpose — a substitute and the
+# homeroom teacher both need to see it); writing is still `_can_capture`.
+@router.get("/class-log", response_model=ClassLogBookOut)
+def class_log_book(class_subject_id: uuid.UUID, since: date | None = None,
+                   until: date | None = None,
+                   m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    return ClassroomService(db).class_log_book(m, class_subject_id, since, until)
+
+
+@router.post("/class-log", response_model=ClassLogBookOut)
+def add_class_log(body: ClassLogIn, m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    """One entry — for the whole class, or for named children only."""
+    return ClassroomService(db).add_class_log(m, body)
+
+
+@router.delete("/class-log/{entry_id}", response_model=MessageResponse)
+def delete_class_log(entry_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                     db: Session = Depends(get_db)):
+    ClassroomService(db).delete_class_log(m, entry_id)
+    return MessageResponse(message="Entry removed.")
+
+
+@router.get("/homework-log", response_model=HomeworkBookOut)
+def homework_book(class_subject_id: uuid.UUID, since: date | None = None,
+                  until: date | None = None,
+                  m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    return ClassroomService(db).homework_book(m, class_subject_id, since, until)
 
 
 @router.post("/homework", response_model=HomeworkOut)

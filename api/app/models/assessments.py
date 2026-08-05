@@ -216,6 +216,11 @@ class AssessmentScore(Base, UUIDPKMixin, CreatedAtMixin):
     # in by hand, and the screens say so as a WORD ("question-level analysis
     # needs a photo of the marked paper"), never as a zero.
     question_marks: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # The teacher's optional word about this paper (founder 2026-08-05). Written
+    # at the moment she is holding it, which is the only moment she knows why the
+    # mark is what it is. Never required: a mandatory remark is forty sentences
+    # typed to record one, which P1v2 does not permit.
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint("num_nonnulls(subject_id, skill_area_id) = 1", name="one_target"),

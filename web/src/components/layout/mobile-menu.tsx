@@ -23,7 +23,13 @@ export function MobileMenu() {
   const { me } = useAuth();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const items = menuNavForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher, me?.has_band_scope);
+  // A group is FLATTENED here rather than nested. This menu is already a
+  // popover; a drawer inside it would be a second layer of open-to-find, and
+  // the two halves are two words — they cost one row each. Flattening also
+  // means nothing can become unreachable on a phone if the bottom bar changes
+  // and swallows the group's own href.
+  const items = menuNavForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher, me?.has_band_scope)
+    .flatMap((i) => (i.children?.length ? i.children : [i]));
 
   useEffect(() => {
     if (!open) return;

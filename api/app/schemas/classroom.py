@@ -129,6 +129,11 @@ class HomeworkIn(BaseModel):
     date: Date | None = None
     # Set to target one student (a per-student addition); null = whole class (V2-P3).
     student_id: uuid.UUID | None = None
+    # The same thing for several children at once (founder, 2026-08-05) — one
+    # assignment row EACH, not a shared row with a list on it, so every existing
+    # reader (the check sheet, the parent portal, the streak) keeps working
+    # unchanged and a child's history stays one row per piece of work.
+    student_ids: list[uuid.UUID] = []
 
 
 class HomeworkOut(BaseModel):
@@ -139,6 +144,112 @@ class HomeworkOut(BaseModel):
     due_date: date | None
     student_id: uuid.UUID | None = None
     notified_count: int  # guardians notified (the teacher's payback, P3)
+    # Every assignment this call wrote. One entry for the class-wide and
+    # single-student cases; one per child when `student_ids` named several.
+    # `id` above is the first of them — the whole batch is here, so a caller
+    # never has to infer how many rows it just created.
+    created_ids: list[uuid.UUID] = []
+
+
+# ── the log books (founder, 2026-08-05) ──────────────────────────────────────
+# Two register-shaped reads over capture that already exists. Neither adds a
+# table: the class log is `lesson_logs` (+ the per-student lines that live as
+# `lesson_observations` of kind `log`), and the homework log is
+# `homework_assignments` with its check state.
+class ClassLogEntryOut(BaseModel):
+    """One line of the class log book.
+
+    `kind` is the whole reason both shapes share a list: `class` is what the
+    class was taught and is what the syllabus board counts; `student` is a line
+    a teacher wrote about ONE child and counts towards nothing. Rendering them
+    together is right — it is one register — but a screen must be able to tell
+    them apart, and so must anyone reading the coverage figure beside it.
+    """
+
+    id: uuid.UUID
+    kind: str  # class | student
+    date: date
+    topic_id: uuid.UUID | None = None
+    topic_title: str | None = None
+    unit_title: str | None = None
+    # What the teacher actually wrote when there was no syllabus topic to pick.
+    title: str | None = None
+    coverage: str | None = None  # full | partial — class entries only
+    note: str | None = None
+    teacher_name: str | None = None
+    period_no: int | None = None
+    student_id: uuid.UUID | None = None
+    student_name: str | None = None
+
+
+class ClassLogBookOut(BaseModel):
+    class_subject_id: uuid.UUID
+    class_id: uuid.UUID
+    class_label: str
+    subject_name: str
+    since: date
+    until: date
+    entries: list[ClassLogEntryOut] = []
+    can_write: bool = False
+
+
+class ClassLogIn(BaseModel):
+    """One class log entry, for the whole class or for named children.
+
+    `student_ids` empty = the class was taught this, which is a `lesson_logs`
+    row and moves the syllabus. `student_ids` set = a line about those children
+    only, which moves nothing — a lesson that reached three children is not
+    coverage, and recording it as one would inflate every pace figure in the
+    school.
+    """
+
+    class_subject_id: uuid.UUID
+    date: Date | None = None
+    topic_id: uuid.UUID | None = None
+    # Free text for a school that doesn't track the syllabus topic by topic, or
+    # a period that wasn't on the plan. Required when no topic is picked.
+    title: str | None = Field(default=None, max_length=200)
+    coverage: str = Field(default="full", pattern="^(full|partial)$")
+    note: str | None = Field(default=None, max_length=500)
+    student_ids: list[uuid.UUID] = []
+
+
+class HomeworkLogEntryOut(BaseModel):
+    """One homework, and what is known about how it went.
+
+    `checked` false means nobody has gone through it, and `completion` is then
+    None — never 0%. That is HW-1's load-bearing rule: a teacher who checks
+    nothing must never read as a class with perfect completion, and the absence
+    of a check may never render as a child's miss.
+    """
+
+    id: uuid.UUID
+    date: date
+    due_date: date | None = None
+    text: str
+    student_id: uuid.UUID | None = None
+    student_name: str | None = None
+    checked: bool = False
+    checked_at: datetime | None = None
+    checked_by: str | None = None
+    roster: int = 0
+    completion: float | None = None
+    not_done: int = 0
+    partial: int = 0
+    late: int = 0
+    carried: int = 0
+    waived: int = 0
+
+
+class HomeworkBookOut(BaseModel):
+    class_subject_id: uuid.UUID
+    class_id: uuid.UUID
+    class_label: str
+    subject_name: str
+    since: date
+    until: date
+    entries: list[HomeworkLogEntryOut] = []
+    can_write: bool = False
 
 
 class HomeworkResultIn(BaseModel):

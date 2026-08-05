@@ -233,6 +233,11 @@ class ExamRowIn(BaseModel):
     # never by the matcher on its own (§8). It is also how an unreadable page
     # gets mapped by hand: the teacher picks the student, and the page follows.
     page_id: uuid.UUID | None = None
+    # The teacher's optional word about THIS paper (founder, 2026-08-05). She is
+    # holding it while she types the mark, which is the only moment she knows
+    # why the mark is what it is. Optional, always — a required remark is forty
+    # sentences typed to record one, which P1v2 does not permit.
+    remark: str | None = Field(default=None, max_length=500)
 
 
 class ExamSaveIn(BaseModel):
@@ -304,6 +309,7 @@ class ExamRosterRow(BaseModel):
     # written on the paper. Arithmetic about the TEACHER's paper, never a claim
     # about the child. Signed difference, or None when there is nothing to check.
     sum_mismatch: float | None = None
+    remark: str | None = None
 
 
 class ExamLockRow(BaseModel):

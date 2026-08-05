@@ -287,7 +287,13 @@ class SupportService:
                        LessonObservation.student_id == student.id,
                        LessonObservation.date >= week, LessonObservation.date <= end)
                 .order_by(LessonObservation.date)).all():
-            label = "needs work" if obs.rating == "needs_work" else "excellent"
+            # Both kinds reach the owner's check-in on purpose (`S-164`: the page
+            # opens already written from what other teachers recorded, and a
+            # class-log line about this child is exactly that). But the label is
+            # read off the row rather than assumed: a row with no rating is a
+            # NOTE, and the old `else "excellent"` invented praise for it.
+            label = ({"needs_work": "needs work", "excellent": "excellent"}
+                     .get(obs.rating or "", "noted"))
             text = f"{label}, “{obs.concept or obs.section}”"
             if obs.note:
                 text += f" — {obs.note}"

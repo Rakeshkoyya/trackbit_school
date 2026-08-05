@@ -3212,3 +3212,135 @@ export interface MyAttendanceBoard {
   classes: MyAttendanceClass[];
   headline: string;
 }
+
+// ── Students → Academics (founder, 2026-08-05) ───────────────────────────────
+// The record the school MAKES about a child, as opposed to the administration
+// record Directory holds. Every figure here carries its denominator, and every
+// "nothing recorded yet" is a null the screen renders as a WORD — never a zero,
+// never red. A roster is read left to right at speed, and a 0% that actually
+// means "nobody marked anything" is the fastest way to blame a class for a gap
+// in the record.
+
+export interface RecordAttendance {
+  marked_periods: number;
+  present: number;
+  absent: number;
+  late: number;
+  /** null = the register was never taken for this child's class. */
+  pct: number | null;
+}
+
+/** One never-pooled exam figure (`S-114`/`S-118`). `minor` and `major` ride
+ *  side by side and are never added: trajectory is read from minor, standing
+ *  from major. `sentence` already carries the denominator — render it. */
+export interface RecordFigure {
+  scale: "minor" | "major";
+  pct: number | null;
+  tests_taken: number;
+  tests_held: number;
+  sentence: string;
+}
+
+export interface RecordHomework {
+  assigned: number;
+  /** A 0–1 FRACTION, like every other `completion` in the product — multiply at
+   *  the render site. null when nothing has been CHECKED, and never render that
+   *  as 0% (HW-1): it is the teacher's gap, not the children's. */
+  completion: number | null;
+  not_done: number;
+  late: number;
+  carried: number;
+  not_checked: number;
+  streak: number;
+  /** done · late · partial · not_done · carried · waived · not_checked */
+  latest_status: string | null;
+  latest_date: string | null;
+  latest_subject: string | null;
+}
+
+export interface StudentRecordRow {
+  student_id: string;
+  full_name: string;
+  admission_no: string;
+  roll_no: string | null;
+  class_id: string | null;
+  class_label: string | null;
+  status: string;
+  attendance: RecordAttendance;
+  figures: RecordFigure[];
+  homework: RecordHomework;
+  /** "C · Hindi" — staff-only, never guardian-facing (P4). */
+  band_chip: string | null;
+}
+
+export interface StudentRecords {
+  window_days: number;
+  rows: StudentRecordRow[];
+  /** true = a teacher's own classes, not the school. */
+  scoped: boolean;
+  class_count: number;
+}
+
+// ── the two log books ────────────────────────────────────────────────────────
+export interface ClassLogEntry {
+  id: string;
+  /** `class` moved the syllabus; `student` is a line about one child and moved
+   *  nothing at all. Never merge the two counts. */
+  kind: "class" | "student";
+  date: string;
+  topic_id: string | null;
+  topic_title: string | null;
+  unit_title: string | null;
+  title: string | null;
+  coverage: "full" | "partial" | null;
+  note: string | null;
+  teacher_name: string | null;
+  period_no: number | null;
+  student_id: string | null;
+  student_name: string | null;
+}
+
+export interface ClassLogBook {
+  class_subject_id: string;
+  class_id: string;
+  class_label: string;
+  subject_name: string;
+  since: string;
+  until: string;
+  entries: ClassLogEntry[];
+  /** Reading is wider than writing: a substitute and the homeroom teacher may
+   *  both open the register without being able to add to it. */
+  can_write: boolean;
+}
+
+export interface HomeworkLogEntry {
+  id: string;
+  date: string;
+  due_date: string | null;
+  text: string;
+  student_id: string | null;
+  student_name: string | null;
+  checked: boolean;
+  checked_at: string | null;
+  checked_by: string | null;
+  roster: number;
+  /** A 0–1 fraction; null while unchecked — the teacher's gap, never the
+   *  children's, and never rendered as 0%. */
+  completion: number | null;
+  not_done: number;
+  partial: number;
+  late: number;
+  carried: number;
+  waived: number;
+}
+
+export interface HomeworkLogBook {
+  class_subject_id: string;
+  class_id: string;
+  class_label: string;
+  subject_name: string;
+  since: string;
+  until: string;
+  entries: HomeworkLogEntry[];
+  can_write: boolean;
+}

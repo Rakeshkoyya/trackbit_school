@@ -399,7 +399,7 @@ function DashboardInner() {
   const actions: QuickAction[] = [
     ...(pendingCaptures.length ? [{
       key: "captures", label: "Review photo captures", tone: "amber" as const,
-      count: pendingCaptures.length, href: "/students/scores",
+      count: pendingCaptures.length, href: "/students/academics/exams",
       detail: `Test scores stay unsaved until someone confirms ${pendingCaptures.length === 1 ? "it" : "them"}`,
     }] : []),
     ...(board?.actions ?? []),

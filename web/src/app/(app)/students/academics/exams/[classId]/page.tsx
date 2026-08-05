@@ -77,7 +77,7 @@ function RecordTestInner() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/students/scores" className="rounded-md border border-border bg-card p-2 hover:bg-muted/40">
+          <Link href="/students/academics/exams" className="rounded-md border border-border bg-card p-2 hover:bg-muted/40">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <PageHeader title={label ? `Class ${label}` : "Scores"}
@@ -101,7 +101,7 @@ function RecordTestInner() {
         <ClassReportCard classId={classId} />
       ) : tab === "class" ? (
         <ExamCapture classId={classId}
-          onSaved={(exam) => router.push(`/students/scores/exam/${exam.id}`)} />
+          onSaved={(exam) => router.push(`/students/academics/exams/exam/${exam.id}`)} />
       ) : subset === null ? (
         <StudentPicker classId={classId} onNext={setSubset} />
       ) : (
@@ -111,7 +111,7 @@ function RecordTestInner() {
             <Button size="sm" variant="outline" onClick={() => setSubset(null)}>Change selection</Button>
           </div>
           <ExamCapture classId={classId} studentIds={subset}
-            onSaved={(exam) => router.push(`/students/scores/exam/${exam.id}`)} />
+            onSaved={(exam) => router.push(`/students/academics/exams/exam/${exam.id}`)} />
         </div>
       )}
     </div>

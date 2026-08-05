@@ -239,7 +239,8 @@ class ExamService:
                 question_marks=qm,
                 paper_url=papers.get(st.id),
                 sum_mismatch=sum_mismatch(sc.question_marks if sc else None,
-                                          float(sc.score) if sc else None)))
+                                          float(sc.score) if sc else None),
+                remark=sc.remark if sc else None))
 
         page_rows = list(self.db.execute(
             select(ScoreCapturePage).join(
@@ -370,6 +371,7 @@ class ExamService:
                 max_score=r.max_score if r.max_score is not None else body.total_marks,
                 question_marks=[q.model_dump() for q in r.question_marks]
                                if r.question_marks else None,
+                remark=(r.remark or "").strip() or None,
                 entered_by=m.user_id))
         self.db.flush()
 

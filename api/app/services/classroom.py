@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core import homework_verdict as verdicts
 from app.core.context import CurrentMember
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
     ClassPeriod,
@@ -37,10 +37,15 @@ from app.models import (
     User,
 )
 from app.schemas.classroom import (
+    ClassLogBookOut,
+    ClassLogEntryOut,
+    ClassLogIn,
     ComplianceOut,
     ComplianceRow,
+    HomeworkBookOut,
     HomeworkCheckIn,
     HomeworkIn,
+    HomeworkLogEntryOut,
     HomeworkOut,
     HomeworkPending,
     HomeworkSheetOut,
@@ -549,6 +554,221 @@ class ClassroomService:
         self.db.delete(log)
         self.db.flush()
 
+    # ── the class log book (founder, 2026-08-05) ─────────────────────────────
+    def _may_write(self, m: CurrentMember, cs: ClassSubject) -> bool:
+        try:
+            self._can_capture(m, cs)
+        except ForbiddenError:
+            return False
+        return True
+
+    def _book_scope(self, m: CurrentMember, class_subject_id: uuid.UUID,
+                    since: date | None, until: date | None):
+        """Resolve one class-subject's book: the row, its labels, and the window.
+
+        Reading is `assert_can_take_class`, which is deliberately wider than
+        writing: a teacher who covered this class last Tuesday, and the class
+        teacher who owns the homeroom, both need to see the register even when
+        they may not add to it. A class that isn't theirs is refused with a
+        sentence rather than returned empty (`S-46`) — an empty book reads as
+        "nothing was ever taught here".
+        """
+        cs = self._cs(m.org_id, class_subject_id)
+        assert_can_take_class(self.db, m, cs.class_id, cs.id)
+        until = until or self._today(m)
+        since = since or (until - timedelta(days=89))
+        klass = self.db.get(SchoolClass, cs.class_id)
+        subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
+        return cs, klass, subject or "—", since, until
+
+    def class_log_book(self, m: CurrentMember, class_subject_id: uuid.UUID,
+                       since: date | None = None,
+                       until: date | None = None) -> ClassLogBookOut:
+        """Every log line for one class-subject over a window, newest first.
+
+        Two row shapes in one register, and the `kind` field is what keeps them
+        honest: `class` rows are `lesson_logs` and are what the syllabus board
+        counts; `student` rows are `lesson_observations` of kind `log` — a line
+        about one child — and count towards nothing at all.
+        """
+        cs, klass, subject, since, until = self._book_scope(m, class_subject_id, since, until)
+        entries: list[ClassLogEntryOut] = []
+
+        for log, topic_title, unit_title, teacher, period_no in self.db.execute(
+                select(LessonLog, SyllabusTopic.title, SyllabusUnit.title,
+                       User.name, ClassPeriod.period_no)
+                .outerjoin(SyllabusTopic, SyllabusTopic.id == LessonLog.topic_id)
+                .outerjoin(SyllabusUnit, SyllabusUnit.id == SyllabusTopic.unit_id)
+                .outerjoin(Membership, Membership.id == LessonLog.member_id)
+                .outerjoin(User, User.id == Membership.user_id)
+                .outerjoin(ClassPeriod, ClassPeriod.id == LessonLog.period_id)
+                .where(LessonLog.org_id == m.org_id,
+                       LessonLog.class_subject_id == cs.id,
+                       LessonLog.date >= since, LessonLog.date <= until)).all():
+            # `note` carries the free text when no topic was picked — that text
+            # IS the entry, so it renders as the title and not twice.
+            free_text = log.topic_id is None
+            entries.append(ClassLogEntryOut(
+                id=log.id, kind="class", date=log.date, topic_id=log.topic_id,
+                topic_title=topic_title, unit_title=unit_title,
+                title=log.note if free_text else None,
+                coverage=log.coverage, note=None if free_text else log.note,
+                teacher_name=teacher, period_no=period_no))
+
+        for obs, student_name, teacher in self.db.execute(
+                select(LessonObservation, Student.full_name, User.name)
+                .outerjoin(Student, Student.id == LessonObservation.student_id)
+                .outerjoin(Membership, Membership.id == LessonObservation.member_id)
+                .outerjoin(User, User.id == Membership.user_id)
+                .where(LessonObservation.org_id == m.org_id,
+                       LessonObservation.class_subject_id == cs.id,
+                       LessonObservation.entry_kind == "log",
+                       LessonObservation.student_id.is_not(None),
+                       LessonObservation.date >= since,
+                       LessonObservation.date <= until)).all():
+            entries.append(ClassLogEntryOut(
+                id=obs.id, kind="student", date=obs.date, title=obs.section,
+                note=obs.note, teacher_name=teacher,
+                student_id=obs.student_id, student_name=student_name))
+
+        entries.sort(key=lambda e: (e.date, e.period_no or 0), reverse=True)
+        return ClassLogBookOut(
+            class_subject_id=cs.id, class_id=cs.class_id, class_label=_label(klass),
+            subject_name=subject, since=since, until=until, entries=entries,
+            can_write=self._may_write(m, cs))
+
+    def add_class_log(self, m: CurrentMember, body: ClassLogIn) -> ClassLogBookOut:
+        """One entry, for the class or for named children.
+
+        With no `student_ids` this is the existing `log()` path — a `lesson_logs`
+        row, which moves the syllabus. With names on it, it writes
+        `lesson_observations` of kind `log` instead and **no lesson log at all**:
+        a lesson that reached three children is not coverage, and recording it
+        as coverage would inflate every pace figure the school reads.
+        """
+        cs = self._cs(m.org_id, body.class_subject_id)
+        self._can_capture(m, cs)
+        d = body.date or self._today(m)
+        title = (body.title or "").strip()
+        if body.topic_id is None and not title:
+            raise ValidationError("Pick a topic or write what the class did.")
+
+        if not body.student_ids:
+            if body.topic_id is not None:
+                # Same dedupe as the period card: a topic logged twice in a day
+                # updates its coverage rather than doubling it (`better_coverage`).
+                self.log(m, LessonLogIn(
+                    class_subject_id=cs.id, topic_id=body.topic_id,
+                    coverage=body.coverage, date=d, note=body.note))
+            else:
+                # Free text is appended, never deduped: two things a teacher
+                # wrote about one afternoon are two entries, and collapsing them
+                # would silently overwrite the first.
+                self.db.add(LessonLog(
+                    org_id=m.org_id, class_subject_id=cs.id, date=d,
+                    member_id=m.membership.id, coverage=body.coverage, note=title))
+                self.db.flush()
+            return self.class_log_book(m, cs.id)
+
+        ids = list(dict.fromkeys(body.student_ids))
+        in_class = set(self.db.scalars(select(Student.id).where(
+            Student.id.in_(ids), Student.org_id == m.org_id,
+            Student.class_id == cs.class_id)))
+        if in_class != set(ids):
+            raise NotFoundError("Student")
+        section = title or self.db.scalar(
+            select(SyllabusTopic.title).where(SyllabusTopic.id == body.topic_id)) or "Note"
+        for sid in ids:
+            self.db.add(LessonObservation(
+                org_id=m.org_id, class_subject_id=cs.id, date=d,
+                member_id=m.membership.id, section=section, student_id=sid,
+                note=body.note, entry_kind="log"))
+        self.db.flush()
+        return self.class_log_book(m, cs.id)
+
+    def delete_class_log(self, m: CurrentMember, entry_id: uuid.UUID) -> None:
+        """Remove one entry of either shape. Same permission as writing it."""
+        log = self.db.scalar(select(LessonLog).where(
+            LessonLog.id == entry_id, LessonLog.org_id == m.org_id))
+        if log is not None:
+            self._can_capture(m, self._cs(m.org_id, log.class_subject_id))
+            self.db.delete(log)
+            self.db.flush()
+            return
+        obs = self.db.scalar(select(LessonObservation).where(
+            LessonObservation.id == entry_id, LessonObservation.org_id == m.org_id,
+            LessonObservation.entry_kind == "log"))
+        if obs is None:
+            raise NotFoundError("Log entry")
+        self._can_capture(m, self._cs(m.org_id, obs.class_subject_id))
+        self.db.delete(obs)
+        self.db.flush()
+
+    def homework_book(self, m: CurrentMember, class_subject_id: uuid.UUID,
+                      since: date | None = None,
+                      until: date | None = None) -> HomeworkBookOut:
+        """Every homework set for one class-subject over a window, newest first.
+
+        Completion comes from `core/homework_verdict`, so `late` is worth here
+        exactly what it is worth on the check sheet and the report card. An
+        unchecked homework returns `completion=None` — never 0%, on any surface
+        (HW-1): nobody has looked at it, which is the teacher's gap and not a
+        statement about forty children.
+        """
+        cs, klass, subject, since, until = self._book_scope(m, class_subject_id, since, until)
+        rows = self.db.execute(
+            select(HomeworkAssignment, Student.full_name)
+            .outerjoin(Student, Student.id == HomeworkAssignment.student_id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   HomeworkAssignment.class_subject_id == cs.id,
+                   HomeworkAssignment.date >= since,
+                   HomeworkAssignment.date <= until)
+            .order_by(HomeworkAssignment.date.desc())).all()
+        ids = [hw.id for hw, _ in rows]
+        checks = {
+            c.assignment_id: c for c in self.db.scalars(
+                select(HomeworkCheck).where(HomeworkCheck.assignment_id.in_(ids)))
+        } if ids else {}
+        checker_names = dict(self.db.execute(
+            select(Membership.id, User.name).join(User, User.id == Membership.user_id)
+            .where(Membership.id.in_([c.checked_by_member_id for c in checks.values()
+                                      if c.checked_by_member_id]))).all()) if checks else {}
+        results: dict[uuid.UUID, list[str]] = defaultdict(list)
+        if ids:
+            for r in self.db.scalars(select(HomeworkResult).where(
+                    HomeworkResult.assignment_id.in_(ids))):
+                results[r.assignment_id].append(r.status)
+        class_size = self.db.scalar(select(func.count(Student.id)).where(
+            Student.org_id == m.org_id, Student.class_id == cs.class_id,
+            Student.status == "active")) or 0
+
+        entries: list[HomeworkLogEntryOut] = []
+        for hw, student_name in rows:
+            check = checks.get(hw.id)
+            roster = 1 if hw.student_id else class_size
+            exceptions = results.get(hw.id, [])
+            entry = HomeworkLogEntryOut(
+                id=hw.id, date=hw.date, due_date=hw.due_date, text=hw.text,
+                student_id=hw.student_id, student_name=student_name,
+                checked=check is not None,
+                checked_at=check.checked_at if check else None,
+                checked_by=checker_names.get(check.checked_by_member_id) if check else None,
+                roster=roster)
+            if check is not None:
+                # Everyone with no exception row did it — capture-by-exception,
+                # so the done set is the roster minus these (P1v2).
+                counts = verdicts.tally(
+                    exceptions + [verdicts.DONE] * max(0, roster - len(exceptions)))
+                entry.completion = verdicts.completion(counts)
+                entry.not_done, entry.partial = counts["not_done"], counts["partial"]
+                entry.late, entry.carried = counts["late"], counts["carried"]
+                entry.waived = counts["waived"]
+            entries.append(entry)
+        return HomeworkBookOut(
+            class_subject_id=cs.id, class_id=cs.class_id, class_label=_label(klass),
+            subject_name=subject, since=since, until=until, entries=entries,
+            can_write=self._may_write(m, cs))
+
     # ── the period card (V2-P6) ──────────────────────────────────────────────
     def period_card(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
                     on_date: date | None = None) -> PeriodCardOut:
@@ -686,10 +906,14 @@ class ClassroomService:
             if in_class != student_ids:
                 raise NotFoundError("Student")
 
+        # `entry_kind` scopes the full-replace: a class-log line a teacher wrote
+        # about one child is not part of this section's observation set, and
+        # re-saving "Vocabulary" from the period card must not delete it.
         for row in self.db.scalars(select(LessonObservation).where(
                 LessonObservation.org_id == m.org_id,
                 LessonObservation.class_subject_id == cs.id,
                 LessonObservation.date == d,
+                LessonObservation.entry_kind == "observation",
                 LessonObservation.period_id.is_(None) if period_id is None
                 else LessonObservation.period_id == period_id,
                 LessonObservation.section == body.section)):
@@ -698,7 +922,7 @@ class ClassroomService:
 
         common = {"org_id": m.org_id, "class_subject_id": cs.id, "date": d,
                   "period_id": period_id, "member_id": m.membership.id,
-                  "section": body.section}
+                  "section": body.section, "entry_kind": "observation"}
         if not body.concepts:
             self.db.add(LessonObservation(**common))
         for c in body.concepts:
@@ -722,6 +946,7 @@ class ClassroomService:
         cond = [LessonObservation.org_id == m.org_id,
                 LessonObservation.class_subject_id == cs.id,
                 LessonObservation.date == d,
+                LessonObservation.entry_kind == "observation",
                 LessonObservation.section == section]
         if period_id is not None:
             cond.append(LessonObservation.period_id == period_id)
@@ -739,7 +964,8 @@ class ClassroomService:
         d = on_date or self._today(m)
         cond = [LessonObservation.org_id == m.org_id,
                 LessonObservation.class_subject_id == cs.id,
-                LessonObservation.date == d]
+                LessonObservation.date == d,
+                LessonObservation.entry_kind == "observation"]
         if period_id is not None:
             cond.append(LessonObservation.period_id == period_id)
         rows = list(self.db.execute(
@@ -769,48 +995,71 @@ class ClassroomService:
 
     # ── homework (CL-2) + guardian notify (P3) ───────────────────────────────
     def add_homework(self, m: CurrentMember, body: HomeworkIn) -> HomeworkOut:
+        """Set homework for the class, for one child, or for several.
+
+        `student_ids` writes **one assignment row per child**, never one row with
+        a list on it. Every existing reader — the check sheet, the streak, the
+        parent portal, the report card — keys on (assignment, student), so a
+        shared row would have needed all of them taught a second shape, and a
+        child's history would stop being one row per piece of work.
+        """
         cs = self._cs(m.org_id, body.class_subject_id)
         self._can_capture(m, cs)
         d = body.date or self._today(m)
         # A per-student addition must be a student of this class (V2-P3 §5.5).
-        if body.student_id is not None:
-            in_class = self.db.scalar(
+        targets: list[uuid.UUID | None] = (
+            list(dict.fromkeys(body.student_ids)) if body.student_ids
+            else [body.student_id])
+        named = [t for t in targets if t is not None]
+        if named:
+            in_class = set(self.db.scalars(
                 select(Student.id).where(
-                    Student.id == body.student_id, Student.org_id == m.org_id,
-                    Student.class_id == cs.class_id))
-            if in_class is None:
+                    Student.id.in_(named), Student.org_id == m.org_id,
+                    Student.class_id == cs.class_id)))
+            if in_class != set(named):
                 raise NotFoundError("Student")
-        hw = HomeworkAssignment(org_id=m.org_id, class_subject_id=cs.id, date=d,
-                                text=body.text, due_date=body.due_date, student_id=body.student_id)
-        self.db.add(hw)
-        self.db.flush()
 
         klass = self.db.get(SchoolClass, cs.class_id)
         subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
-        # Notify the one student's guardians for a per-student note, else the class.
-        guardian_q = (
-            select(Student.id, Guardian)
-            .join(Guardian, Guardian.student_id == Student.id)
-            .where(Student.org_id == m.org_id))
-        guardian_q = (guardian_q.where(Student.id == body.student_id) if body.student_id
-                      else guardian_q.where(Student.class_id == cs.class_id))
         due = f" (due {body.due_date})" if body.due_date else ""
         message = f"Homework for {_label(klass)} {subject}: {body.text}{due}"
-        # Grouped by child: with siblings on one login, a homework note that
-        # doesn't say whose it is is unreadable.
-        by_student: dict[uuid.UUID, list[Guardian]] = {}
-        for sid, guardian in self.db.execute(guardian_q).all():
-            by_student.setdefault(sid, []).append(guardian)
+
+        created: list[HomeworkAssignment] = []
         count = 0
-        for sid, guardians in by_student.items():
-            count += notify_guardians(
-                self.db, org_id=m.org_id, student_id=sid, guardians=guardians,
-                kind="homework_set", title=f"Homework · {subject}", body=message,
-                dedupe_key=f"homework_set:{hw.id}:{sid}").notified
-        hw.notified_at = datetime.now(UTC)
+        for target in targets:
+            hw = HomeworkAssignment(
+                org_id=m.org_id, class_subject_id=cs.id, date=d, text=body.text,
+                due_date=body.due_date, student_id=target)
+            self.db.add(hw)
+            self.db.flush()
+            created.append(hw)
+
+            # Notify the one student's guardians for a per-student note, else
+            # the class (P3 — the teacher's payback for logging it).
+            guardian_q = (
+                select(Student.id, Guardian)
+                .join(Guardian, Guardian.student_id == Student.id)
+                .where(Student.org_id == m.org_id))
+            guardian_q = (guardian_q.where(Student.id == target) if target
+                          else guardian_q.where(Student.class_id == cs.class_id))
+            # Grouped by child: with siblings on one login, a homework note that
+            # doesn't say whose it is is unreadable.
+            by_student: dict[uuid.UUID, list[Guardian]] = {}
+            for sid, guardian in self.db.execute(guardian_q).all():
+                by_student.setdefault(sid, []).append(guardian)
+            for sid, guardians in by_student.items():
+                count += notify_guardians(
+                    self.db, org_id=m.org_id, student_id=sid, guardians=guardians,
+                    kind="homework_set", title=f"Homework · {subject}", body=message,
+                    dedupe_key=f"homework_set:{hw.id}:{sid}").notified
+            hw.notified_at = datetime.now(UTC)
         self.db.flush()
-        return HomeworkOut(id=hw.id, class_subject_id=cs.id, date=d, text=hw.text,
-                           due_date=hw.due_date, student_id=hw.student_id, notified_count=count)
+
+        first = created[0]
+        return HomeworkOut(id=first.id, class_subject_id=cs.id, date=d, text=first.text,
+                           due_date=first.due_date, student_id=first.student_id,
+                           notified_count=count,
+                           created_ids=[h.id for h in created])
 
     # ── homework checking (HW-1) — capture-by-exception, like attendance ─────
     def _homework(self, m: CurrentMember, assignment_id: uuid.UUID) -> HomeworkAssignment:

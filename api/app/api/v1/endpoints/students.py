@@ -18,6 +18,7 @@ from app.core.dependencies import get_current_member, require_coordinator_up
 from app.schemas.common import MessageResponse
 from app.schemas.growth import StudentGrowthOut
 from app.schemas.report_card import ReportCard, StudentAnalysis
+from app.schemas.student_records import StudentRecordsOut
 from app.schemas.students import (
     CategoryCreate,
     CategoryOut,
@@ -37,10 +38,29 @@ from app.services import roster_import, templates
 from app.services.growth import GrowthService
 from app.services.report_card import ReportCardService
 from app.services.roster_import import RosterImporter
+from app.services.student_records import StudentRecordsService
 from app.services.students import StudentService
 from app.services.timeline import StudentTimelineService
 
 router = APIRouter()
+
+
+# Declared before `/{student_id}` on purpose — FastAPI matches in order, and a
+# path param would otherwise swallow "records" and 422 on the UUID parse.
+@router.get("/records", response_model=StudentRecordsOut)
+def student_records(class_id: uuid.UUID | None = None,
+                    q: str | None = Query(default=None, max_length=80),
+                    window_days: int = Query(default=30, ge=1, le=365),
+                    m: CurrentMember = Depends(get_current_member),
+                    db: Session = Depends(get_db)):
+    """The Academics roster — every child with attendance, exams and homework.
+
+    Admin sees the school; a teacher sees the classes she teaches ∪ the homeroom
+    she owns (`periods.visible_class_ids`), and asking for someone else's class
+    is refused with a sentence rather than filtered to an empty table (`S-46`).
+    """
+    return StudentRecordsService(db).roster(m, class_id=class_id, query=q,
+                                            window_days=window_days)
 
 
 @router.get("/{student_id}/timeline", response_model=StudentTimelineOut)

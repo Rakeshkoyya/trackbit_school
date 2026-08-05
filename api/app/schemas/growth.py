@@ -74,6 +74,10 @@ class GrowthScore(BaseModel):
     # `S-119`: this student's own marked script, kept forever as evidence and —
     # until V1-8 — unreachable from the screen a parent meeting happens over.
     paper_url: str | None = None
+    # What the teacher wrote while she was holding that paper. Staff-only, like
+    # everything else on this report; the parent projection is an allowlist and
+    # this field is not on it.
+    remark: str | None = None
 
 
 class GrowthScaleFigure(BaseModel):

@@ -1747,6 +1747,59 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     placer above) · and the ribbon's scale was read live mid-drag, so a bar dragged past the axis
     edge accelerated away from the pointer.
 
+- **ST-2 (the student's two halves — Directory and Academics, 2026-08-05)** — migration
+  **`a4b5c6d7e8f9`** (head) **on dev + test; prod is at `c1d2e3f4a5b6` and now owes four**
+  (`c2d3e4f5a6b7` → `d3e4f5a6b7c8` → `e4f5a6b7c8d9` → this; all purely additive). Founder call. A
+  school holds two different KINDS of fact about a child and Students offered one door for both:
+  the **administration record** (name, parents, phone, date of birth — entered once, corrected by
+  the office) and the **record the school MAKES** (register, class log, homework, exams — written
+  every day by teachers, read as a trend). One table carrying both columns served neither.
+  - **Students becomes a nav GROUP for the admin** (`children[]` on `NavItem`, rendered by
+    `sidebar.tsx`, flattened in the mobile hamburger — a drawer inside a popover is a second layer
+    of open-to-find). **A teacher gets Academics only, flat**: every write on Directory is
+    admin-only, so a group whose first entry is read-only is a drawer with one useful thing in it.
+    Scoping is the SERVICE's job, not the nav's. **The top-level Homework item is gone** — the
+    homework log lives under Academics now; `/homework` (the check-sheet desk, `D-36`) is untouched
+    and linked from it.
+  - **`services/student_records.py` COMPOSES and decides nothing.** Attendance is the marked-periods
+    minus exceptions derivation `growth.py` already makes; exams go through
+    `exam_marks`/`ScaleTally`; homework through `core/homework_verdict`; the chip through
+    `BandService.chip_map`. **Six queries for the whole school** — `load_class_marks` is four
+    round-trips and the roster asks it of every class on one page load, so `exam_marks.load_marks`
+    batches across classes (the `forecast_org` precedent, `PR-6`) and the per-class reader is now a
+    one-line wrapper. `GET /students/records`.
+  - 🔴 **A per-student class-log line is `lesson_observations`, NOT `lesson_logs.student_id`.**
+    Fifteen call sites read `lesson_logs` as *what a CLASS was taught* — coverage, growth, the daily
+    report, the timeline, the forecast, the capture heatmap — and every one would have had to learn
+    to exclude the per-student rows, with the first to forget inflating the syllabus board with a
+    lesson that reached one child. `entry_kind` (`observation` | `log`) separates the period card's
+    tap-a-deviating-student flag from a line a teacher deliberately wrote, and **each read is scoped
+    to the kind it means**.
+  - 🔴 **Two live defects that separation exposed**, both pinned in both directions: `growth.py`
+    renders a rating-less observation as **`needs_work`**, and `support.py` labelled one
+    **"excellent"** — so a neutral note ("forgot his book") would have become evidence about a
+    child's ability, in opposite directions on two screens. The support prefill now reads the label
+    off the row (`S-164` keeps BOTH kinds — a class-log line about her child is exactly what the
+    owner's check-in wants).
+  - **`assessment_scores.remark`** — the teacher's optional word about one paper, written at the
+    only moment she knows why the mark is what it is. Per (student, exam), never required, and
+    **not on the parent projection** (an allowlist built field by field; a test asserts it).
+  - Endpoints: `GET/POST/DELETE /classroom/class-log`, `GET /classroom/homework-log`,
+    `GET /students/records`. `HomeworkIn.student_ids` writes **one assignment row per child**, never
+    a shared row with a list on it — every reader keys on (assignment, student).
+  - Web: `/students` is a role-aware landing; `/students/directory` (+ `[id]`, the record edited one
+    fact at a time — a single-save sheet meant a half-typed name discarded a fixed phone number);
+    `/students/academics` with six tabs (Students · Class logs · Homework · Exams · Reports ·
+    Analytics). `scores` → `academics/exams` and `trends` → `academics/analytics` moved with
+    `git mv` and 307 from their old paths; `/students/bands` redirects into the `/bands` area,
+    finishing BD-2's move. `components/students/class-subject-picker.tsx` is shared by both log
+    tabs and lands a teacher on **her own** subject.
+  - `test_student_records.py` (17). ⚠️ **Found by running the built screen:** the roster's
+    `completion` is a 0–1 FRACTION (`core/coverage.completion_pct`, as everywhere else in the
+    product) and the homework log rendered it as `0.889%`; and each class group is its own
+    `<table>`, so auto layout put "Attendance" at a different x in 6-A than in 6-B and no column
+    could be scanned down — `table-fixed` + a colgroup on both halves.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
@@ -1863,11 +1916,16 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: **head is `e4f5a6b7c8d9`** (SY-1, the syllabus board, 2026-08-05).
+Current state: **head is `a4b5c6d7e8f9`** (ST-2, the student's two halves, 2026-08-05).
 Local dev and the test DB are on it; **DO prod is still at `c1d2e3f4a5b6`** and needs
-`c2d3e4f5a6b7` (AT-1, `student_notes`) → `d3e4f5a6b7c8` (BA-1) → `e4f5a6b7c8d9` (SY-1) before the
-next deploy. All three are purely additive — new tables, nullable columns, one widened CHECK, one
-constraint relaxed — so prod code that predates them is unaffected.
+`c2d3e4f5a6b7` (AT-1, `student_notes`) → `d3e4f5a6b7c8` (BA-1) → `e4f5a6b7c8d9` (SY-1) →
+`a4b5c6d7e8f9` (ST-2) before the next deploy. All four are purely additive — new tables, nullable
+columns, one default-backfilled column, two widened/added CHECKs, one constraint relaxed — so prod
+code that predates them is unaffected.
+⚠️ `a4b5c6d7e8f9` was NOT the obvious next id: `f5a6b7c8d9e0` is already taken by
+`f5a6b7c8d9e0_class_periods.py`, and reusing it makes Alembic report a **revision cycle** across
+the whole graph rather than a duplicate. Grep `alembic/versions/` for a candidate id before
+writing a migration.
 It was applied with `ALEMBIC_DATABASE_URL` pointed at each local database explicitly, because
 `api/.env` is in `ACTIVE: PRODUCTION` mode and a bare `alembic upgrade head` would have migrated
 production with no confirmation. 58 tables carry an `org_isolation` policy. **The LOCAL dev DB

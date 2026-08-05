@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
       { source: "/academics", destination: "/setup", permanent: false },
       { source: "/planner/plan", destination: "/plan/syllabus", permanent: false },
       { source: "/planner", destination: "/plan", permanent: false },
-      { source: "/assessments", destination: "/students/scores", permanent: false },
+      { source: "/assessments", destination: "/students/academics/exams", permanent: false },
       { source: "/members", destination: "/setup/members", permanent: false },
       { source: "/settings", destination: "/setup/settings", permanent: false },
       // Founder 2026-08-05: Support lost its sidebar item — the programme lives
@@ -31,6 +31,19 @@ const nextConfig: NextConfig = {
       // routes land there instead of 404ing for anyone holding a bookmark.
       { source: "/plan/classes", destination: "/plan/syllabus", permanent: false },
       { source: "/plan/classes/:id", destination: "/plan/syllabus", permanent: false },
+      // Founder 2026-08-05: Students split into Directory (the administration
+      // record) and Academics (the record the school makes). The old flat
+      // routes keep resolving — `:path*` so the exam pages under Scores, which
+      // the dashboard and My Class both link into by cycle id, follow with
+      // them. `/students` itself is NOT here: it is a real page that sends each
+      // role to its own half.
+      { source: "/students/scores/:path*", destination: "/students/academics/exams/:path*", permanent: false },
+      { source: "/students/scores", destination: "/students/academics/exams", permanent: false },
+      { source: "/students/trends", destination: "/students/academics/analytics", permanent: false },
+      // Bands left Students with V1-9/BD-2 and now has its own area; this
+      // finishes the move rather than leaving two doors to one programme.
+      { source: "/students/bands/:classId", destination: "/bands/manage", permanent: false },
+      { source: "/students/bands", destination: "/bands", permanent: false },
     ];
   },
 };

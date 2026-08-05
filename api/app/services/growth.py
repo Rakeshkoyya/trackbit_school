@@ -279,10 +279,16 @@ class GrowthService:
         for cs_id, _desc in check_rows:
             checks_flagged[cs_id] += 1
 
+        # `entry_kind == 'observation'` only: this block is the ABILITY signal —
+        # `_growth_areas` counts "needs work" flags and the renderer below reads
+        # a rating-less row as `needs_work`. A class-log line ("brought the wrong
+        # book") carries no rating and is not evidence about what a child can do;
+        # it belongs in the class log, which is where it renders.
         obs_rows = list(self.db.scalars(
             select(LessonObservation)
             .where(LessonObservation.org_id == m.org_id,
                    LessonObservation.class_subject_id.in_(cs_ids),
+                   LessonObservation.entry_kind == "observation",
                    LessonObservation.student_id == student.id)
             .order_by(LessonObservation.date))) if cs_ids else []
         obs_by_cs: dict[uuid.UUID, list[GrowthObservation]] = defaultdict(list)
@@ -310,7 +316,8 @@ class GrowthService:
             scores_by_cs[cs_id].append(GrowthScore(
                 cycle_id=r.cycle_id, cycle_name=r.cycle_name, date=r.date,
                 type=r.system_type, type_label=r.type_label, scale=r.scale,
-                score=r.score, max_score=r.max_score, paper_url=r.paper_url))
+                score=r.score, max_score=r.max_score, paper_url=r.paper_url,
+                remark=r.remark))
         held = {subject_ids[sid]: counts for sid, counts in held_by_subject.items()
                 if sid in subject_ids}
 

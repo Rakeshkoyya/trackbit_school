@@ -247,7 +247,7 @@ function ExamsBlock({ board }: { board: MyClassOverview }) {
         <ul className="border-t border-border">
           {e.recent.slice(0, 4).map((x) => (
             <li key={x.id} className="border-t border-border/60 first:border-t-0">
-              <Link href={`/students/scores/exam/${x.id}`}
+              <Link href={`/students/academics/exams/exam/${x.id}`}
                 className="flex items-baseline gap-2 px-4 py-2 hover:bg-muted/40">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px]">{x.name}</span>

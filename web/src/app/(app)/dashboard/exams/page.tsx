@@ -194,7 +194,7 @@ function ExamsInner() {
                   {data.recent.map((e) => (
                     <tr key={e.cycle_id} className="border-b border-border/60">
                       <td className="py-2 pr-3">
-                        <a href={`/students/scores/exam/${e.cycle_id}`} className="hover:underline">{e.name}</a>
+                        <a href={`/students/academics/exams/exam/${e.cycle_id}`} className="hover:underline">{e.name}</a>
                       </td>
                       <td className="py-2 pr-3 text-muted-foreground">
                         {e.type_label || label(e.type)}

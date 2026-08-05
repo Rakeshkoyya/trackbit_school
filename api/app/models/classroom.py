@@ -137,12 +137,23 @@ class LessonObservation(Base, UUIDPKMixin, CreatedAtMixin):
     )
     rating: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Which act wrote this row (founder 2026-08-05).
+    #   observation — the teacher tapped a deviating student on the period card.
+    #                 An exception to a norm; growth reads it as a signal.
+    #   log         — she deliberately wrote a class-log line about ONE child on
+    #                 the class-log screen. A note, not a deviation.
+    # Same shape, two different acts, and conflating them would have the growth
+    # report treat "brought the wrong book" as evidence about ability.
+    entry_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="observation")
 
     __table_args__ = (
         CheckConstraint("rating IN ('excellent', 'needs_work')", name="rating_valid"),
         # A rating only means something about a particular student.
         CheckConstraint("rating IS NULL OR student_id IS NOT NULL", name="rating_needs_student"),
+        CheckConstraint("entry_kind IN ('observation', 'log')", name="entry_kind_valid"),
         Index("ix_lesson_observations_cs_date", "class_subject_id", "date"),
+        Index("ix_lesson_observations_student_date", "student_id", "date",
+              postgresql_where=text("student_id IS NOT NULL")),
     )
 
 
