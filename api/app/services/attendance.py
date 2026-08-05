@@ -14,21 +14,28 @@ Alerts carry plain "absent today" text only; never band/tier info (P4).
 """
 
 import uuid
+from calendar import monthrange
 from datetime import UTC, date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models import (
     AcademicYear,
     AttendanceException,
+    CalendarEvent,
     ClassPeriod,
+    ClassSubject,
     Guardian,
+    Membership,
     SchoolClass,
     Student,
     StudentAbsenceNote,
+    Subject,
+    TimetableSlot,
+    User,
 )
 from app.schemas.attendance import (
     AbsenceNoteIn,
@@ -39,15 +46,25 @@ from app.schemas.attendance import (
     AttendanceMarkOut,
     AttendanceRosterOut,
     AttendanceRosterRow,
+    MyAttendanceClass,
+    MyAttendanceOut,
 )
+from app.schemas.my_class import (
+    DayTally,
+    RegisterCell,
+    RegisterOut,
+    RegisterRow,
+)
+from app.services.calendar import event_rows, expand_blocked_dates, org_working_days
 from app.services.notify_guardian import notify_guardians
 from app.services.periods import (
     assert_can_take_class,
     find_period,
     get_or_create_period,
     today_for,
+    visible_class_ids,
 )
-from app.services.school_clock import marking_period_nos
+from app.services.school_clock import marking_period_nos, today_in
 
 # ── THE day-status rule (V1-0d, ux §9) ───────────────────────────────────────
 # "Was this child absent today?" is rendered on six surfaces (admin board,
@@ -190,6 +207,10 @@ def _label(klass: SchoolClass) -> str:
     return klass.name + (f"-{klass.section}" if klass.section else "")
 
 
+# Day statuses that mean "the child was in school at some point".
+PRESENT_STATUSES = ("present", "partial", "left_after_lunch")
+
+
 class AttendanceService:
     def __init__(self, db: Session):
         self.db = db
@@ -217,6 +238,16 @@ class AttendanceService:
         d = on_date or self._today(m)
         assert_can_take_class(self.db, m, class_id, None, d, period_no)
         roster = self._roster(m.org_id, class_id)
+        # In a once-per-day school the sheet must OPEN on the day's register
+        # wherever it was taken, so a teacher arriving at period 5 sees this
+        # morning's marks and edits them, rather than a blank "everyone present"
+        # she would then save as a second register. `mark` redirects the write
+        # the same way — the read and the write have to agree about which period
+        # holds the day, or the sheet shows one thing and saves another.
+        held = (self.day_register_period(m.org_id, class_id, d)
+                if self.once_per_day(m) else None)
+        if held is not None:
+            period_no = held.period_no
         period = self.db.scalar(
             select(ClassPeriod).where(
                 ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == class_id,
@@ -236,8 +267,35 @@ class AttendanceService:
             class_id=class_id, class_label=_label(klass), period_no=period_no, date=d,
             period_id=period.id if period else None,
             marked=period is not None and period.attendance_marked_at is not None,
-            roster=rows,
+            once_per_day=self.once_per_day(m), roster=rows,
             present_count=len(rows) - absent, absent_count=absent, late_count=late)
+
+    # ── the day's register, in a once-per-day school ─────────────────────────
+    def day_register_period(self, org_id: uuid.UUID, class_id: uuid.UUID,
+                            d: date) -> ClassPeriod | None:
+        """The period that HOLDS this class's register for the day, if any.
+
+        In `first_period` / `twice_daily` the register is the DAY's, not the
+        period's, so there is at most one of these per class per day and every
+        surface that shows or edits attendance has to find it rather than assume
+        period 1 — the whole point of the founder's 2026-08-05 rule is that when
+        period 1 does not happen, some later period takes it instead.
+        """
+        return self.db.scalar(
+            select(ClassPeriod).where(
+                ClassPeriod.org_id == org_id, ClassPeriod.class_id == class_id,
+                ClassPeriod.date == d,
+                ClassPeriod.attendance_marked_at.is_not(None))
+            .order_by(ClassPeriod.period_no).limit(1))
+
+    def once_per_day(self, m: CurrentMember) -> bool:
+        """Does this school take ONE register a day? (`first_period` mode.)
+
+        `twice_daily` deliberately does not count: it keeps two registers on
+        purpose — the morning one and the after-lunch one whose difference is
+        the whole reason a school picks it (`Q-03`/`S-05`).
+        """
+        return m.org.attendance_mode == "first_period"
 
     # ── mark (the one-tap capture) ───────────────────────────────────────────
     def mark(self, m: CurrentMember, body: AttendanceMarkIn) -> AttendanceMarkOut:
@@ -246,6 +304,27 @@ class AttendanceService:
         assert_can_take_class(self.db, m, body.class_id, body.class_subject_id,
                               d, body.period_no)
         roster_ids = {s.id for s in self._roster(m.org_id, body.class_id)}
+
+        # **One register a day means one register a day** (founder, 2026-08-05).
+        # A school on `first_period` that had period 1 cancelled takes the roll
+        # in period 3 — and a teacher opening period 5 later to fix a mis-tap
+        # must edit THAT register, not open a second one. So the mark lands on
+        # the day's existing register wherever it was taken, and the requested
+        # period is only where it goes when there is not one yet.
+        #
+        # Without this the day would carry two `attendance_marked_at` periods
+        # and `classify_marked_day` would score a child absent-in-1-of-2 as
+        # `partial` — a child who was simply away all day reading as "came late"
+        # because two people touched the register.
+        held = (self.day_register_period(m.org_id, body.class_id, d)
+                if self.once_per_day(m) else None)
+        if held is not None and held.period_no != body.period_no:
+            # `class_subject_id` is cleared with it: the register moves, the
+            # PERIOD does not. Carrying the caller's subject across would
+            # relabel period 1 as Science because the Science teacher fixed a
+            # typo in period 3.
+            body = body.model_copy(
+                update={"period_no": held.period_no, "class_subject_id": None})
 
         existing = find_period(self.db, m.org_id, body.class_id, d, body.period_no)
         # First *attendance-marked* period of the day for this class? Decide before
@@ -520,3 +599,315 @@ class AttendanceService:
                 "absent_count": absent if marked else None,
                 "late_count": late if marked else None}
         return out
+
+    def class_register(self, m: CurrentMember, class_id: uuid.UUID,
+                       month: str | None = None) -> RegisterOut:
+        """The month register for any class this teacher may open.
+
+        Same drawing as My Class's grid (`build_register`) behind a wider door:
+        the class teacher owns her homeroom's, but every teacher of a class can
+        READ the register she may be asked to take. Reading is deliberately not
+        narrower than writing — a teacher who can mark the roll and cannot see
+        last week's is being asked to work blind.
+        """
+        klass = self._class(m.org_id, class_id)
+        allowed = visible_class_ids(self.db, m)
+        if allowed is not None and class_id not in allowed:
+            raise ForbiddenError("You don't teach this class.", code="not_your_class")
+        return build_register(self.db, m, klass, month)
+
+    # ── the teacher's own attendance board (founder, 2026-08-05) ─────────────
+    def my_board(self, m: CurrentMember, on_date: date | None = None) -> MyAttendanceOut:
+        """Every class this teacher may take the register for, on any date.
+
+        The school's rule, made reachable: **the class teacher takes it at period
+        one, and if she is away any teacher of the class can.** Until now
+        attendance could only be opened from a My Day period card, so a teacher
+        who was not standing in front of that class at that moment had no door
+        into it at all — which is precisely the situation the rule exists for.
+
+        Nothing here widens permission. `assert_can_take_class` has allowed this
+        exact set since V2-P2 (a subject teacher of the class, a substitute
+        covering it today, an admin); what was missing was the screen. An
+        already-marked class is still editable by the same set — correcting a
+        mis-tap is not a privilege — and the day's FIRST marked period keeps
+        being the one that fires guardian alerts, so a later correction never
+        messages a family twice.
+
+        Six queries for the whole board, whatever the class count.
+        """
+        d = on_date or self._today(m)
+        open_day = bool(org_working_days(self.db, m.org_id, d, d))
+
+        # Which classes she may open. Admin: every class in the active year.
+        allowed = visible_class_ids(self.db, m)
+        year = self.db.scalar(select(AcademicYear).where(
+            AcademicYear.org_id == m.org_id, AcademicYear.is_active.is_(True)))
+        q = select(SchoolClass).where(SchoolClass.org_id == m.org_id)
+        if year is not None:
+            q = q.where(SchoolClass.academic_year_id == year.id)
+        if allowed is not None:
+            if not allowed:
+                return MyAttendanceOut(
+                    date=d, is_today=d == self._today(m), school_open=open_day,
+                    headline="You are not assigned to any class yet.")
+            q = q.where(SchoolClass.id.in_(allowed))
+        classes = list(self.db.scalars(q.order_by(SchoolClass.name, SchoolClass.section)))
+        if not classes:
+            return MyAttendanceOut(
+                date=d, is_today=d == self._today(m), school_open=open_day,
+                headline="No classes are set up for this year yet.")
+        class_ids = [c.id for c in classes]
+
+        rosters = self.roster_sizes(m.org_id, class_ids)
+        marked, exc = day_matrix(self.db, m.org_id, class_ids, d, d)
+
+        # Her subject in each class — what the mark gets filed against.
+        mine: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
+        for cs_id, cls_id, sub_name in self.db.execute(
+            select(ClassSubject.id, ClassSubject.class_id, Subject.name)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .where(ClassSubject.org_id == m.org_id,
+                   ClassSubject.class_id.in_(class_ids),
+                   *([] if m.is_coordinator_up
+                     else [ClassSubject.teacher_member_id == m.membership.id]))
+            .order_by(Subject.name)).all():
+            mine.setdefault(cls_id, (cs_id, sub_name))
+
+        # Who actually opened each register, and when. One query for the board.
+        openers: dict[uuid.UUID, tuple[int, str | None, datetime]] = {}
+        for cls_id, period_no, marked_at, name in self.db.execute(
+            select(ClassPeriod.class_id, ClassPeriod.period_no,
+                   ClassPeriod.attendance_marked_at, User.name)
+            .outerjoin(Membership, Membership.id == ClassPeriod.marked_by_member_id)
+            .outerjoin(User, User.id == Membership.user_id)
+            .where(ClassPeriod.org_id == m.org_id,
+                   ClassPeriod.class_id.in_(class_ids), ClassPeriod.date == d,
+                   ClassPeriod.attendance_marked_at.is_not(None))
+            .order_by(ClassPeriod.period_no)).all():
+            openers.setdefault(cls_id, (int(period_no), name, marked_at))
+
+        # Which period the "Take the register" button should open.
+        #
+        # Once-per-day: the day's register wherever it already is, else the
+        # mode's marking slot (period 1). NOT her own first slot — in a
+        # once-per-day school the register is the day's, so a Science teacher
+        # opening it in period 4 must land on the same sheet the class teacher
+        # would have, or the two of them write two registers.
+        #
+        # Every-period: her own first period with the class, because there the
+        # register genuinely belongs to the period she is standing in.
+        first_slot: dict[uuid.UUID, int] = {}
+        for cls_id, period_no in self.db.execute(
+            select(ClassSubject.class_id, func.min(TimetableSlot.period_no))
+            .join(ClassSubject, ClassSubject.id == TimetableSlot.class_subject_id)
+            .where(TimetableSlot.org_id == m.org_id,
+                   ClassSubject.class_id.in_(class_ids),
+                   TimetableSlot.weekday == d.weekday(),
+                   TimetableSlot.effective_from <= d,
+                   (TimetableSlot.effective_to.is_(None))
+                   | (TimetableSlot.effective_to >= d))
+            .group_by(ClassSubject.class_id)).all():
+            first_slot[cls_id] = int(period_no)
+
+        names = {
+            sid: name for sid, name in self.db.execute(
+                select(Student.id, Student.full_name)
+                .where(Student.org_id == m.org_id,
+                       Student.class_id.in_(class_ids),
+                       Student.status == "active")).all()
+        }
+        marking = marking_period_nos(
+            year.period_times if year else None, m.org.attendance_mode)
+        once = self.once_per_day(m)
+
+        rows: list[MyAttendanceClass] = []
+        for klass in classes:
+            cs = mine.get(klass.id)
+            periods = marked.get((klass.id, d), [])
+            if once:
+                suggested = (openers[klass.id][0] if klass.id in openers
+                             else (marking[0] if marking else 1))
+            else:
+                suggested = first_slot.get(klass.id, 1)
+            row = MyAttendanceClass(
+                class_id=klass.id, class_label=_label(klass),
+                roster=rosters.get(klass.id, 0),
+                is_class_teacher=klass.class_teacher_member_id == m.membership.id,
+                class_subject_id=cs[0] if cs else None,
+                subject_name=cs[1] if cs else None,
+                marked=bool(periods), periods_marked=len(periods),
+                first_of_day=not periods,
+                suggested_period_no=suggested)
+            if klass.id in openers:
+                pno, by, at = openers[klass.id]
+                row.marked_period_no, row.marked_by_name, row.marked_at = pno, by, at
+
+            if periods:
+                absentees: list[str] = []
+                for sid, full_name in names.items():
+                    per = exc.get((sid, d), {})
+                    if not per:
+                        continue
+                    status, was_late = classify_marked_day(
+                        periods, {p: st for p, (st, _r) in per.items()}, marking)
+                    if was_late:
+                        row.late += 1
+                    if status == "absent":
+                        absentees.append(full_name)
+                row.absent = len(absentees)
+                row.present = max(0, row.roster - row.absent)
+                row.pct = round(row.present / row.roster * 100, 1) if row.roster else None
+                row.absentee_names = sorted(absentees)
+                row.headline = (
+                    f"Taken by {row.marked_by_name or 'a colleague'}"
+                    + (f" · {row.absent} away" if row.absent else " · everyone in"))
+                row.tone = "green" if not row.absent else "amber"
+            elif not open_day:
+                row.headline = "School is closed."
+            else:
+                # Never a zero and never red — an unopened register is a state
+                # of the record, not news about the children (ux §5).
+                row.headline = f"Not taken yet · {row.roster} on the roll"
+                row.tone = "neutral"
+            rows.append(row)
+
+        pending = [r for r in rows if not r.marked]
+        if not open_day:
+            headline = f"School is closed on {d:%a %d %b}."
+        elif not pending:
+            headline = (f"Every one of your {len(rows)} "
+                        f"{'class' if len(rows) == 1 else 'classes'} has been marked.")
+        else:
+            headline = (f"{len(pending)} of your {len(rows)} "
+                        f"{'class' if len(rows) == 1 else 'classes'} still needs "
+                        "the register taken.")
+        return MyAttendanceOut(
+            date=d, is_today=d == self._today(m), school_open=open_day,
+            mode=m.org.attendance_mode, once_per_day=once,
+            classes=rows, headline=headline)
+
+
+# ── THE month register (extracted 2026-08-05) ────────────────────────────────
+
+def build_register(db: Session, m: CurrentMember, klass: SchoolClass,
+                   month: str | None = None) -> RegisterOut:
+    """Student × school day, one status per cell — the ruled register book.
+
+    Lifted out of `MyClassService.register` so the class teacher's grid and the
+    every-teacher attendance screen are ONE computation with two doors. They
+    differ only in **who may open which class**; a second implementation would
+    eventually paint the same October two different ways, which is the `S-51`
+    defect this codebase keeps closing.
+
+    Two rules the drawing itself enforces, and neither is cosmetic:
+
+      * cells stop at **today** — the future is blank, not a state;
+      * a day the class marked nothing is `not_marked`, **never** "present".
+        That distinction is the entire reason this is a grid rather than a
+        percentage: a percentage cannot show a hole in the record.
+
+    Guarding is deliberately the CALLER's job. `MyClassService` admits only the
+    homeroom's own teacher; the attendance screen admits anyone who teaches the
+    class. Neither rule belongs inside a drawing.
+    """
+    class_id = klass.id
+    today = today_in(m.org.timezone)
+    if month:
+        try:
+            y, mo = int(month[:4]), int(month[5:7])
+            first = date(y, mo, 1)
+        except (ValueError, IndexError):
+            first = today.replace(day=1)
+    else:
+        first = today.replace(day=1)
+    last = min(date(first.year, first.month,
+                    monthrange(first.year, first.month)[1]), today)
+
+    year = db.get(AcademicYear, klass.academic_year_id)
+    working = set(year.working_weekdays or [0, 1, 2, 3, 4, 5]) if year \
+        else {0, 1, 2, 3, 4, 5}
+    blocked = expand_blocked_dates(event_rows(db.scalars(
+        select(CalendarEvent).where(
+            CalendarEvent.org_id == m.org_id,
+            CalendarEvent.academic_year_id == klass.academic_year_id,
+            CalendarEvent.end_date >= first, CalendarEvent.start_date <= last))))
+    marking = marking_period_nos(
+        year.period_times if year else None, m.org.attendance_mode)
+    days = [d for d in (date.fromordinal(o)
+                        for o in range(first.toordinal(), last.toordinal() + 1))
+            if d.weekday() in working and d not in blocked] if last >= first else []
+
+    roster = list(db.scalars(
+        select(Student).where(
+            Student.org_id == m.org_id, Student.class_id == class_id,
+            Student.status == "active").order_by(Student.full_name)))
+    marked, exc = day_matrix(db, m.org_id, [class_id], first, last)
+
+    # Covering informed-absence notes for the window (S-24): explained days.
+    noted: dict[uuid.UUID, list[tuple[date, date]]] = {}
+    for n in db.scalars(select(StudentAbsenceNote).where(
+            StudentAbsenceNote.org_id == m.org_id,
+            StudentAbsenceNote.student_id.in_([s.id for s in roster]),
+            StudentAbsenceNote.from_date <= last,
+            StudentAbsenceNote.to_date >= first)):
+        noted.setdefault(n.student_id, []).append((n.from_date, n.to_date))
+
+    rows: list[RegisterRow] = []
+    for s in roster:
+        cells: list[RegisterCell] = []
+        present_days = marked_days = 0
+        since = s.enrolled_on  # S-02: a joiner's denominator starts here
+        for d in days:
+            if since and d < since:
+                cells.append(RegisterCell(date=d, status="no_school"))
+                continue
+            periods = marked.get((class_id, d))
+            if not periods:
+                cells.append(RegisterCell(date=d, status="not_marked"))
+                continue
+            per = exc.get((s.id, d), {})
+            status, late = classify_marked_day(
+                periods, {p: st for p, (st, _r) in per.items()}, marking)
+            has_reason = any(r for _st, r in per.values()) or any(
+                a <= d <= b for a, b in noted.get(s.id, []))
+            marked_days += 1
+            if status in PRESENT_STATUSES:
+                present_days += 1
+            cells.append(RegisterCell(
+                date=d, status=status, late=late, has_reason=has_reason))
+        rows.append(RegisterRow(
+            student_id=s.id, full_name=s.full_name, roll_no=s.roll_no,
+            cells=cells, present_days=present_days, marked_days=marked_days))
+
+    # The column totals the paper register carries in its bottom margin: how
+    # many were in on each day, out of how many it could account for. `None` on
+    # a day nobody marked — the one figure this grid must never invent.
+    day_totals: list[DayTally] = []
+    for i, d in enumerate(days):
+        counted = [r.cells[i] for r in rows if r.cells[i].status != "no_school"]
+        rated = [c for c in counted if c.status != "not_marked"]
+        present = sum(1 for c in rated if c.status in PRESENT_STATUSES)
+        day_totals.append(DayTally(
+            date=d, marked=bool(rated), present=present,
+            absent=len(rated) - present, counted=len(rated),
+            pct=round(present / len(rated) * 100, 1) if rated else None))
+
+    marked_days_total = sum(1 for t in day_totals if t.marked)
+    rated_cells = sum(t.counted for t in day_totals)
+    present_cells = sum(t.present for t in day_totals)
+    return RegisterOut(
+        class_id=class_id, class_label=_label(klass),
+        month=f"{first.year:04d}-{first.month:02d}",
+        mode=m.org.attendance_mode,
+        once_per_day=m.org.attendance_mode == "first_period",
+        days=days, rows=rows, school_days=len(days),
+        day_totals=day_totals, marked_days=marked_days_total,
+        pct=round(present_cells / rated_cells * 100, 1) if rated_cells else None,
+        headline=(
+            f"{round(present_cells / rated_cells * 100, 1)}% present across the "
+            f"{marked_days_total} of {len(days)} school "
+            f"{'day' if len(days) == 1 else 'days'} this class marked"
+            if rated_cells else
+            f"Nothing marked yet this month — {len(days)} school "
+            f"{'day' if len(days) == 1 else 'days'} so far"))

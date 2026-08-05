@@ -21,7 +21,9 @@ from app.schemas.attendance import (
     AttendanceMarkIn,
     AttendanceMarkOut,
     AttendanceRosterOut,
+    MyAttendanceOut,
 )
+from app.schemas.my_class import RegisterOut
 from app.services.attendance import AttendanceService
 
 router = APIRouter()
@@ -31,6 +33,34 @@ router = APIRouter()
 def roster(class_id: uuid.UUID, period_no: int, on_date: date | None = None,
            m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
     return AttendanceService(db).roster(m, class_id, period_no, on_date)
+
+
+@router.get("/my-classes", response_model=MyAttendanceOut)
+def my_classes(on_date: date | None = None,
+               m: CurrentMember = Depends(require_academic),
+               db: Session = Depends(get_db)):
+    """Every class this teacher may take the register for, on any date.
+
+    Founder, 2026-08-05. The school's rule is that the class teacher takes it at
+    period one and **any teacher of the class can if she is away** — but until
+    now attendance was reachable only from a My Day period card, so the person
+    covering had no door into it. This widens no permission (the service uses
+    the same `assert_can_take_class` set); it adds the screen that rule needs.
+    """
+    return AttendanceService(db).my_board(m, on_date)
+
+
+@router.get("/register", response_model=RegisterOut)
+def class_register(class_id: uuid.UUID, month: str | None = None,
+                   m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """The month register book for a class this teacher takes — student × day.
+
+    The same drawing My Class shows its class teacher (`build_register`), behind
+    a wider door: a teacher who may be asked to take the roll must be able to
+    read it. View only; writing goes through `/attendance/mark`.
+    """
+    return AttendanceService(db).class_register(m, class_id, month)
 
 
 @router.post("/mark", response_model=AttendanceMarkOut)

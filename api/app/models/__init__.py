@@ -91,7 +91,7 @@ from app.models.staff import (
     StaffAttendanceDay,
     TimesheetEntry,
 )
-from app.models.students import Guardian, Student, StudentCategory
+from app.models.students import Guardian, Student, StudentCategory, StudentNote
 from app.models.task import EVENT_TYPES, Attachment, TaskEvent, TaskInstance, TaskTemplate
 from app.models.timetable import TimetableSlot
 from app.models.user import User
@@ -178,6 +178,7 @@ __all__ = [
     "StudentAbsenceNote",
     "StudentBand",
     "StudentCategory",
+    "StudentNote",
     "StudentFee",
     "Subject",
     "SyllabusTopic",

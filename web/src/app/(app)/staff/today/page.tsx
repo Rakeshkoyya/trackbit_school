@@ -18,11 +18,11 @@ import { useState } from "react";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
+import { todayKey } from "@/lib/format";
 import { insightsApi } from "@/lib/insights-api";
 import { schoolApi } from "@/lib/school-api";
 import type { TimesheetSlot } from "@/lib/school-types";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 /** Cell styling carries the meaning: taught periods read solid, cover reads
  *  accent (they're in a colleague's class — S-72), recorded work reads quiet,
@@ -44,7 +44,7 @@ function cellText(slot: TimesheetSlot): string {
 }
 
 function StaffTodayInner() {
-  const [day] = useState(() => iso(new Date()));
+  const [day] = useState(() => todayKey());
   const { data = [], isLoading } = useQuery({
     queryKey: ["staff-today", day],
     queryFn: () => schoolApi.orgTimesheetToday(day),

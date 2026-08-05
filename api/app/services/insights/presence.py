@@ -113,13 +113,13 @@ class PresenceService:
 
     # ── the rings + the three blocks ─────────────────────────────────────────
     def board(self, m: CurrentMember, year_id: uuid.UUID | None = None) -> PresenceBoard:
-        """The rings anchor on the last day the school actually ran.
+        """On a school day the board is about TODAY, captured or not.
 
-        Not on the raw calendar today: on a Sunday, a holiday or during a
-        vacation every list below comes back empty, and an empty board reads as
-        *"nobody was absent"* rather than *"the school was shut"* — the same
-        defect V1-4 fixed on the call board, and the reason `date`/`is_today`
-        ride on the payload so the screen can say which day it is describing.
+        It falls back to the last day the school ran only when today is closed —
+        on a Sunday or in a vacation every list comes back empty, and an empty
+        board would read as *"nobody was absent"* rather than *"the school was
+        shut"* (the V1-4 call-board fix). `date`/`is_today`/`school_open` ride on
+        the payload so the screen can say which day it is describing and why.
         """
         att = AttendanceInsights(self.db)
         today = self._today(m)
@@ -155,56 +155,69 @@ class PresenceService:
                               by_role.get("admins", [])),
         ]
 
-        # The roll — the medallion's centre figure. Only marked cohorts count
-        # toward it: adding an unmarked staff roster to a marked student roll
-        # would report people present that nobody has claimed to have seen.
-        counted = [r for r in rings if r.marked]
-        in_building = sum(r.present for r in counted)
-        roll = sum(r.total for r in counted)
+        # The roll. `roll` is the school's whole strength and is populated
+        # whether or not anything is marked — the admin asked to be able to read
+        # it on any morning. `counted` is the part of it that sits in a marked
+        # group, and it is what `in_building` and `away` add up to: adding an
+        # unmarked cohort to those would report people present that nobody has
+        # claimed to have seen.
+        seen = [r for r in rings if r.marked]
+        in_building = sum(r.present for r in seen)
+        counted = sum(r.counted for r in seen)
+        roll = sum(r.total for r in rings)
+        not_marked = max(0, roll - counted)
         # NOT `away` — that name is the absent-member map above, and shadowing it
         # here would work today only because the groups are built first.
-        away_total = sum(r.absent for r in counted)
-        if not counted:
-            roll_caption = "nothing marked yet"
-        elif len(counted) == len(rings):
+        away_total = sum(r.absent for r in seen)
+        if not seen:
+            roll_caption = f"nothing marked yet · {roll} on the roll"
+        elif not not_marked:
             roll_caption = (f"of {roll} on the roll" if away_total
                             else f"the whole roll of {roll}")
         else:
-            names = " and ".join(r.label.lower() for r in counted)
-            roll_caption = f"of {roll} — {names} only"
+            roll_caption = (f"of {counted} marked · {not_marked} of {roll} "
+                            "not marked yet")
 
         parts = []
         for ring in rings:
             parts.append(f"{ring.label.lower()} {ring.caption}" if not ring.marked
-                         else f"{ring.present} of {ring.total} {ring.label.lower()} in")
+                         else f"{ring.present} of {ring.counted} {ring.label.lower()} in")
         headline = "; ".join(parts) + "."
+        open_today = bool(org_working_days(self.db, m.org_id, today, today))
         if on != today:
-            # Two different facts, and the admin cares which: the school was
-            # shut, or it was open and nobody has captured anything yet. Saying
-            # "closed" for the second would excuse the gap it is meant to show.
-            open_today = bool(org_working_days(self.db, m.org_id, today, today))
-            headline = ((f"Nothing marked yet today — showing {on:%a %d %b}. "
-                         if open_today else
-                         f"School is closed today — showing {on:%a %d %b}. ")
-                        + headline)
-        return PresenceBoard(date=on, is_today=on == today, rings=rings,
-                             groups=groups, headline=headline,
-                             in_building=in_building, roll=roll, away=away_total,
-                             roll_caption=roll_caption)
+            headline = f"School is closed today — showing {on:%a %d %b}. " + headline
+        elif not seen:
+            # The whole point of the 2026-08-05 fix: an open morning nobody has
+            # captured says so, in the present tense, with today's date on it.
+            headline = ("Nothing has been marked yet today. "
+                        f"{roll} people are on the roll. ")
+        elif not_marked:
+            headline = (f"{not_marked} of {roll} on the roll have no register "
+                        "open yet. ") + headline
+        return PresenceBoard(date=on, is_today=on == today, school_open=open_today,
+                             rings=rings, groups=groups, headline=headline,
+                             in_building=in_building, roll=roll, counted=counted,
+                             not_marked=not_marked, away=away_total,
+                             marked=bool(seen), roll_caption=roll_caption)
 
     def _anchor(self, m: CurrentMember, att: AttendanceInsights, today: date) -> date:
-        """The day the board describes: the most recent one the school actually
-        CAPTURED, else the most recent one it was open.
+        """The day the board describes.
 
-        The calendar's last working day is not enough. A school that is open on
-        Saturday but marks nothing gave a board whose ring read *"nothing marked
-        yet"* beside a block reading *"2 students are away"* — both true, since
-        the absence runs come from the last day each class captured, and
-        together unreadable. Anchoring on capture makes the two halves describe
-        one day. A fortnight with no capture at all falls back to the calendar,
-        which is honest: an empty board dated today, not one pretending to be
-        current three weeks late.
+        **An open day is always today.** Until 2026-08-05 this walked back a
+        fortnight for the most recent day anything was captured, so a school
+        that had marked nothing by 9am read yesterday's figures under today's
+        heading — the admin's whole question ("has the register been taken?")
+        answered with last night's answer. A day the school is open and has
+        captured nothing is a real state and must be shown as one.
+
+        The fallback survives for CLOSED days only, where it was always the
+        right call: on a Sunday every list is empty and an empty board would
+        read as "nobody was absent" rather than "the school was shut". There it
+        still prefers the last day actually captured over the last day merely
+        open, so the rings and the absence runs describe one day.
         """
+        if org_working_days(self.db, m.org_id, today, today):
+            return today
         marked, _ = day_absence_maps(self.db, m.org_id, today - timedelta(days=14), today)
         days = [d for (_cid, d), n in marked.items() if n]
         return max(days) if days else att._last_school_day(m, today)
@@ -217,14 +230,20 @@ class PresenceService:
                                 tone="neutral", href="/staff")
         if not marked:
             # Not marked is a gap in the record, not a full house and not an
-            # empty school. It gets the word, never a figure.
+            # empty school. It gets the word, never a figure — but it still
+            # carries `total`, because how many staff the school HAS is a fact
+            # that does not depend on anyone having marked a register.
             return PresenceRing(key=key, label=label, marked=False, total=total,
-                                caption="not marked yet", tone="neutral", href="/staff")
+                                counted=0, unmarked=total,
+                                caption=f"not marked yet · {total} on the roll",
+                                tone="neutral", href="/staff")
+        # Staff attendance is a single org-wide day row: marked means the whole
+        # roster was marked, so `counted` is the whole cohort and `unmarked` 0.
         pct = round(present / total * 100, 1)
         away = total - present
         return PresenceRing(
             key=key, label=label, marked=True, present=present, absent=away,
-            total=total, pct=pct,
+            total=total, counted=total, unmarked=0, pct=pct,
             caption=(f"everyone in · {pct}%" if not away
                      else f"{away} away · {pct}% in"),
             tone=_tone(pct), href="/staff")
@@ -237,6 +256,19 @@ class PresenceService:
         absent through every marked period of the most recent day their class
         captured. Reusing it rather than writing a second "who is absent" query
         is what keeps this ring and the tab's red list from ever disagreeing.
+
+        Two denominators, and keeping them apart is the whole of the 2026-08-05
+        fix. `total` is the school's strength: every active child in the year,
+        always, so the admin can read the roll on a morning nobody has marked.
+        `counted` is the part of it sitting in a class that HAS marked, and it
+        is what the percentage divides by — before this the ring reported the
+        marked classes as though they were the school, so one class of twelve
+        taking the register rendered as a complete, healthy day.
+
+        The absence runs are narrowed to those same classes for the same reason:
+        `streaks` walks each class's own most recent captured day, so a class
+        that marked yesterday and not today would otherwise put yesterday's
+        absentees in a block sitting under a ring that says nothing is marked.
         """
         att = AttendanceInsights(self.db)
         if year is None:
@@ -246,26 +278,45 @@ class PresenceService:
         rows = att.streaks(m, min_days=1, year_id=year.id).rows
         marked, _absents = day_absence_maps(self.db, m.org_id, on, on)
         marked_classes = {cid for (cid, _d), n in marked.items() if n}
-        if not marked_classes:
-            return (PresenceRing(key="students", label="Students", marked=False,
-                                 caption="nothing marked yet today", tone="neutral"), rows)
 
-        roster = int(self.db.scalar(
-            select(func.count(Student.id)).where(
-                Student.org_id == m.org_id, Student.status == "active",
-                Student.class_id.in_(marked_classes))) or 0)
-        # Only the runs that include TODAY count against today's ring — a child
-        # whose class has not marked yet is neither present nor absent.
-        absent_today = sum(1 for r in rows
-                           if r.class_id in marked_classes)
-        present = max(0, roster - absent_today)
-        pct = round(present / roster * 100, 1) if roster else None
+        # The school's strength — every active child in a class of this year.
+        # One grouped query; the per-class sizes are what name the gap below.
+        per_class = {
+            cid: int(n) for cid, n in self.db.execute(
+                select(Student.class_id, func.count(Student.id))
+                .join(SchoolClass, SchoolClass.id == Student.class_id)
+                .where(Student.org_id == m.org_id, Student.status == "active",
+                       SchoolClass.academic_year_id == year.id)
+                .group_by(Student.class_id)).all()
+        }
+        roll = sum(per_class.values())
+        classes_total = len(per_class)
+        live = [cid for cid in per_class if cid in marked_classes]
+        counted = sum(per_class[cid] for cid in live)
+        blank_classes = classes_total - len(live)
+        note = (f"{blank_classes} of {classes_total} "
+                f"{_plural(classes_total, 'class', 'classes')} not marked yet"
+                if blank_classes else None)
+
+        if not live:
+            return (PresenceRing(
+                key="students", label="Students", marked=False, total=roll,
+                counted=0, unmarked=roll,
+                caption=(f"not marked yet · {roll} on the roll" if roll
+                         else "no students on the roll"),
+                note=note, tone="neutral"), [])
+
+        rows = [r for r in rows if r.class_id in marked_classes]
+        absent_today = len(rows)
+        present = max(0, counted - absent_today)
+        pct = round(present / counted * 100, 1) if counted else None
         return (PresenceRing(
             key="students", label="Students", marked=True, present=present,
-            absent=absent_today, total=roster, pct=pct,
+            absent=absent_today, total=roll, counted=counted,
+            unmarked=max(0, roll - counted), pct=pct,
             caption=(f"everyone in · {pct}%" if not absent_today
                      else f"{absent_today} away · {pct}% in"),
-            tone=_tone(pct)), rows)
+            note=note, tone=_tone(pct)), rows)
 
     # ── block 1: the students ────────────────────────────────────────────────
     def _student_group(self, m: CurrentMember, rows: list, ring: PresenceRing,
@@ -276,12 +327,27 @@ class PresenceService:
         unexplained = sum(1 for r in rows if r.student_id not in reasons)
 
         if not n:
+            if not ring.marked:
+                # Never green, and never "nobody is absent". Nothing has been
+                # captured, so there is no news either way — the only honest
+                # reading is the size of the gap (ux §5).
+                return PresenceGroup(
+                    key="students", label="Students away", count=0, tone="neutral",
+                    headline=(f"No class has taken the register yet — {ring.total} "
+                              f"{_plural(ring.total, 'student is', 'students are')} "
+                              "on the roll."),
+                    inline=True, rows=[], href="/dashboard/attendance",
+                    action_label="Take attendance", note=ring.note,
+                    note_href="/dashboard/attendance" if ring.note else None)
             return PresenceGroup(
                 key="students", label="Students away", count=0, tone="green",
-                headline=("Every student is in today." if ring.marked
-                          else "Nobody is recorded absent yet."),
+                headline=("Every student is in today."
+                          if not ring.unmarked else
+                          f"Every one of the {ring.counted} students marked so far "
+                          "is in."),
                 inline=True, rows=[], href="/dashboard/attendance",
-                action_label="Open attendance")
+                action_label="Open attendance", note=ring.note,
+                note_href="/dashboard/attendance" if ring.note else None)
 
         out: list[PresenceRow] = []
         # Named only under the threshold — but always ordered worst-first, so
@@ -320,7 +386,12 @@ class PresenceService:
             key="students", label="Students away", count=n,
             tone="red" if unexplained else "amber", headline=headline,
             inline=n <= INLINE_LIMIT, rows=out, href="/dashboard/attendance",
-            action_label="Follow up" if n > INLINE_LIMIT else "Open attendance")
+            action_label="Follow up" if n > INLINE_LIMIT else "Open attendance",
+            # The classes still to mark ride along, because "3 away" over a
+            # third of the school is a different morning from "3 away" over all
+            # of it, and the block is where that gets noticed.
+            note=ring.note,
+            note_href="/dashboard/attendance" if ring.note else None)
 
     # ── block 2: the teachers ────────────────────────────────────────────────
     def _teacher_group(self, absentees: list) -> PresenceGroup:

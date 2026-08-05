@@ -5,6 +5,7 @@ import {
   CalendarRange,
   CheckSquare,
   ClipboardCheck,
+  ClipboardList,
   Clock,
   GraduationCap,
   HeartHandshake,
@@ -63,6 +64,12 @@ const support: NavItem = { label: "Support", href: "/support", icon: HeartHandsh
 // class-subject (`me.has_band_scope`): an admin always, a teacher only for the
 // subjects the school actually monitors.
 const bands: NavItem = { label: "ABC bands", href: "/bands", icon: Layers };
+// Founder 2026-08-05. Attendance had no door of its own: it was reachable only
+// from a My Day period card, so the teacher COVERING for an absent class teacher
+// — the exact case the school's rule exists for — had nowhere to go. Every
+// teacher gets it, because the rule is "the class teacher takes it, and if she
+// is away anyone who teaches the class can".
+const attendance: NavItem = { label: "Attendance", href: "/attendance", icon: ClipboardList };
 
 // Role-aware primary nav — the full ordered list, used by the DESKTOP sidebar.
 // SPRD2 §3 + Lucy (founder decision 2026-07-12) — both roles get the agent.
@@ -87,7 +94,7 @@ export function navForRole(
       // actually lives in (D-03). Absent entirely for a subject teacher.
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
-        lucy, sessions, planForTeacher, homework, students,
+        attendance, lucy, sessions, planForTeacher, homework, students,
         ...(hasBandScope ? [bands] : []), support, timesheet, tasks,
       ];
     case "parent":

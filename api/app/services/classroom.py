@@ -105,13 +105,29 @@ class ClassroomService:
             )
         )
 
-    def _marks_attendance(self, m: CurrentMember, period_no: int) -> bool:
-        """V1-3 (D-01/Q-02a): does the org's mode take attendance this period?"""
+    def _marks_attendance(self, m: CurrentMember, period_no: int,
+                          class_id: uuid.UUID | None = None,
+                          d: date | None = None) -> tuple[bool, bool | None]:
+        """(is the ask owed here, has the day been captured) — V1-3 `D-01`.
+
+        `first_period` makes this a question about the DAY, not the period
+        (founder, 2026-08-05): the register is owed until somebody takes it, and
+        then it is owed nowhere. Passing the class and date is what lets a
+        period card in the afternoon say *"the register was taken this
+        morning"* rather than either asking again or silently dropping the
+        section — and what lets period 3 take it when period 1 never happened.
+        """
         from app.services.school_clock import marking_period_nos  # noqa: PLC0415
         year = self._active_year(m.org_id)
+        att = AttendanceService(self.db)
+        if att.once_per_day(m) and class_id is not None and d is not None:
+            held = att.day_register_period(m.org_id, class_id, d)
+            if held is None:
+                return True, False
+            return held.period_no == period_no, True
         marking = marking_period_nos(
             year.period_times if year else None, m.org.attendance_mode)
-        return not marking or period_no in marking
+        return (not marking or period_no in marking), None
 
     # ── My Day (CL-1) ────────────────────────────────────────────────────────
     def my_day(self, m: CurrentMember, on_date: date | None = None) -> MyDayOut:
@@ -245,6 +261,22 @@ class ClassroomService:
         from app.services.school_clock import marking_period_nos  # noqa: PLC0415
         marking = set(marking_period_nos(year.period_times, m.org.attendance_mode))
 
+        # Founder, 2026-08-05 — **once a day means once a day, and the ask
+        # follows the gap.** In `first_period` the register belongs to the DAY,
+        # so:
+        #   · a class whose register is already taken shows the ask on NO period
+        #     (a Science teacher in period 4 is not being asked to re-take the
+        #     morning roll — that is the noise this rule removes);
+        #   · a class whose register is NOT taken shows it on EVERY period,
+        #     because period 1 may not have happened, or its teacher may be
+        #     away, and the register still has to get taken by somebody.
+        # A static "period 1 only" rule gets the first case wrong all afternoon
+        # and the second case wrong all day.
+        once = att_service.once_per_day(m)
+        day_taken = {cid for cid in class_ids
+                     if any(s.get("marked")
+                            for (c, _p), s in att.items() if c == cid)}
+
         periods: list[MyDayPeriod] = []
         for ts in day_slots:
             state = att.get((ts.class_id, ts.period_no), {})
@@ -258,7 +290,13 @@ class ClassroomService:
                 opened=state.get("period_id") is not None,
                 closed=state.get("closed", False),
                 attendance_marked=state.get("marked", False),
-                marks_attendance=not marking or ts.period_no in marking,
+                marks_attendance=(
+                    # Once a day: ask wherever it is still owed, nowhere once it
+                    # is done. The period holding the register keeps the row so
+                    # the person who took it can still correct it.
+                    (ts.class_id not in day_taken or state.get("marked", False))
+                    if once else (not marking or ts.period_no in marking)),
+                day_attendance_taken=(ts.class_id in day_taken) if once else None,
                 roster_count=state.get("roster_count", roster_sizes.get(ts.class_id, 0)),
                 present_count=state.get("present_count"),
                 absent_count=state.get("absent_count"),
@@ -531,6 +569,7 @@ class ClassroomService:
                     or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d)))
 
         sheet = AttendanceService(self.db).roster(m, class_id, period_no, d)
+        marks_attendance, day_taken = self._marks_attendance(m, period_no, class_id, d)
         subject_name = self.db.scalar(
             select(Subject.name).join(ClassSubject, ClassSubject.subject_id == Subject.id)
             .where(ClassSubject.id == cs_id)) if cs_id else None
@@ -602,7 +641,8 @@ class ClassroomService:
             opened=period is not None,
             closed=period is not None and period.closed_at is not None,
             attendance_marked=sheet.marked,
-            marks_attendance=self._marks_attendance(m, period_no),
+            marks_attendance=marks_attendance,
+            day_attendance_taken=day_taken,
             roster=sheet.roster,
             roster_count=len(sheet.roster),
             present_count=sheet.present_count if sheet.marked else None,

@@ -1099,10 +1099,23 @@ class PresenceRing(BaseModel):
     marked: bool
     present: int = 0
     absent: int = 0
+    # `total` is the WHOLE cohort — the school's strength — and is populated
+    # whether or not a single register has been opened. Founder call 2026-08-05:
+    # an admin must always be able to read how many people the school has, and
+    # before this the students ring counted only the classes that had marked, so
+    # one class of twelve taking attendance rendered as the entire school.
     total: int = 0
+    # How many of `total` sit in a group that HAS been marked. This, never
+    # `total`, is what `pct` divides by: a class nobody has captured is not
+    # evidence that its children are away.
+    counted: int = 0
+    unmarked: int = 0             # total - counted, carried so nothing subtracts
     pct: float | None = None
     # The sentence under the ring, with its denominator — "428 of 470 in".
     caption: str = ""
+    # The second line, when part of the cohort has no register open yet —
+    # "4 of 12 classes not marked". Empty when everything is captured.
+    note: str | None = None
     tone: str = "neutral"         # neutral | green | amber | red
     href: str = "/dashboard/attendance"
 
@@ -1150,22 +1163,29 @@ class PresenceGroup(BaseModel):
 
 
 class PresenceBoard(BaseModel):
-    # The last day the school actually ran — not necessarily today. On a Sunday
-    # or a holiday every list would come back empty, and an empty board reads as
-    # "nobody was absent" rather than "the school was shut".
+    # The day the board describes. On an OPEN day this is always today, marked
+    # or not — a morning nobody has captured must read as "nothing marked yet",
+    # never as yesterday's figures wearing today's date (founder, 2026-08-05).
+    # Only when the school is CLOSED does it fall back to the last day it ran,
+    # because there an empty board would read as "nobody was absent".
     date: date_
     is_today: bool = True
+    # Was the school open on `date`? Distinguishes the two reasons a board can
+    # be empty, which need different words and different responses.
+    school_open: bool = True
     rings: list[PresenceRing] = []
     groups: list[PresenceGroup] = []
     headline: str = ""
-    # The roll: how many people are in the building, out of how many the school
-    # marked. Summed HERE and not in a component, and summed only over the
-    # cohorts that were actually marked — `roll_caption` says which, because a
-    # total that quietly includes an unmarked cohort is the exact lie the three
-    # separate denominators exist to prevent.
+    # The roll. `roll` is the school's whole strength and is always populated;
+    # `counted` is how much of it sits in a marked group, and is what
+    # `in_building` + `away` add up to. Summed HERE and not in a component, so
+    # the medallion and the ledger rows beside it cannot disagree.
     in_building: int = 0
     roll: int = 0
+    counted: int = 0
+    not_marked: int = 0           # roll - counted
     away: int = 0
+    marked: bool = False          # has ANY cohort been marked on `date`?
     roll_caption: str = ""
 
 

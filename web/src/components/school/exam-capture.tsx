@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { showApiError } from "@/lib/errors";
+import { todayKey } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
 import type {
   Capture, CaptureParsedRow, CycleType, ExamDetail, QuestionMark,
@@ -60,7 +61,9 @@ const PARSE_ERROR_TEXT: Record<string, string> = {
   unreadable_page: "None of the pages could be read — attach each one to a student below, or type the marks in.",
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Local, never UTC: an exam captured before 05:30 IST would otherwise be
+// dated yesterday (see `dayKey` in lib/format).
+const today = () => todayKey();
 
 type RosterStudent = { student_id: string; full_name: string; roll_no: string | null };
 

@@ -12,6 +12,7 @@
 import { use } from "react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { StaffProfileCard } from "@/components/staff/staff-profile";
 import { StaffRecordView } from "@/components/staff/record-view";
 
 export default function StaffMemberPage({
@@ -22,6 +23,11 @@ export default function StaffMemberPage({
   const { memberId } = use(params);
   return (
     <AuthGuard allow={["admin", "teacher"]}>
+      {/* The establishment first (who they are, what they hold), then the
+          record (where their time went). Two payloads on purpose: the file is
+          editable, the record is deliberately not — it is a record, never an
+          appraisal (`D-25`/`S-67`). */}
+      <StaffProfileCard memberId={memberId} />
       <StaffRecordView memberId={memberId} />
     </AuthGuard>
   );

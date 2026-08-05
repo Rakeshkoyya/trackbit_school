@@ -211,6 +211,16 @@ class AttendanceInsights:
         # the heatmap read a declared holiday as a school-wide capture failure.
         lock = day_lock(self.db, m.org_id, on, year.id)
 
+        # Once-per-day: class → the period that actually HOLDS the register.
+        # Read from the same `captured` map the cells are drawn from, so the
+        # denominator and the cells cannot disagree about which period it is.
+        once = m.org.attendance_mode == "first_period"
+        held: dict[uuid.UUID, int] = {}
+        if once:
+            for (cid, pno), (state, _a, _l) in sorted(captured.items()):
+                if state == "marked":
+                    held.setdefault(cid, pno)
+
         total_marked = total_expected = 0
         for cid, label in classes.items():
             cells: list[CaptureCell] = []
@@ -226,7 +236,19 @@ class AttendanceInsights:
                 # A scheduled period the mode does not mark is `not_expected` —
                 # neutral, out of the denominator. A teacher who marked it
                 # anyway still counts: the record is the record.
-                expects = (not marking or p.period_no in marking) and lock.expects(p.period_no)
+                #
+                # Founder, 2026-08-05: in a once-per-day school the register may
+                # legitimately be taken outside period 1 (period 1 was
+                # cancelled, its teacher was away). Once it is taken ANYWHERE,
+                # the day is done — so the holder is the only expected cell and
+                # the marking slot stops reading `pending`. Without this a fully
+                # captured day rendered as "1 of 2 captured", with period 1
+                # amber forever and nothing a teacher could do to clear it.
+                if once and held.get(cid):
+                    expects = p.period_no == held[cid]
+                else:
+                    expects = ((not marking or p.period_no in marking)
+                               and lock.expects(p.period_no))
                 if not expects and state == "pending":
                     cells.append(CaptureCell(
                         period_no=p.period_no, state="not_expected",

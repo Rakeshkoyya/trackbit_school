@@ -40,10 +40,34 @@ function Section({ title, icon, children, aside }: {
 
 // ── 1 · attendance — a tappable row that opens the roll-call page ────────────
 function AttendanceSection({ card }: { card: PeriodCard }) {
-  // V1-3 (D-01/Q-02a): the mode decides WHERE attendance is asked for. A period
-  // it doesn't mark says so in a neutral line and still opens if the teacher
-  // wants to record something anyway — everything else on the card is unchanged.
+  // Founder, 2026-08-05 — once a day means once a day. In a school on
+  // `first_period` the register belongs to the DAY, so a period that is not
+  // asking is not asking for one of two very different reasons, and the teacher
+  // cares which:
+  //
+  //   · `day_attendance_taken` — somebody already took it this morning. Say so,
+  //     and get out of the way. This is the noise the founder asked to remove:
+  //     six teachers being asked about a roll that was called at 9am.
+  //   · otherwise — this period simply is not a marking slot for the school's
+  //     mode. Still openable, in case she needs to record something anyway.
   if (!card.marks_attendance && !card.attendance_marked) {
+    if (card.day_attendance_taken) {
+      // Not a link. There is nothing to do here, and a tappable row would put
+      // the register one mis-tap away from being re-opened by the wrong person.
+      return (
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-card/60 p-4">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]">
+            <UserCheck className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Attendance already taken today</p>
+            <p className="truncate text-xs text-muted-foreground">
+              Your school takes one register a day, and today&rsquo;s is done.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
       <Link href={`/my-day/period/${card.class_id}/${card.period_no}/attendance`}
         className="flex items-center gap-3 rounded-xl border border-dashed border-border bg-card/60 p-4 text-muted-foreground transition-colors hover:bg-muted/30">

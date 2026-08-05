@@ -1461,6 +1461,114 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     still resolve. `test_bands_v2.py` (10). Full suite **586 passing**, ruff clean; web tsc +
     eslint + `next build` clean; reviewed in a real browser at 1440px in both themes and at 390px.
 
+- **AT-1 (attendance end-to-end: the staff directory, the class teacher's desk, the register's own
+  door, 2026-08-05)** — migration **`c2d3e4f5a6b7`** (head) **on dev + test; prod is at
+  `c1d2e3f4a5b6` and still needs it.** Founder walkthrough of the attendance loop. One new table
+  (`student_notes`); everything else is a screen for capture that already existed, or a defect.
+  - 🔴 **The admin board showed YESTERDAY under today's heading.** `PresenceService._anchor` walked
+    back a fortnight for the most recent day anything was captured, so a school that had marked
+    nothing by 9am read last night's figures — the admin's actual question ("has the register been
+    taken?") answered about a different day. **An open day is now always today**; the fallback
+    survives for CLOSED days only, where it was always right (on a Sunday an empty board would read
+    as "nobody was absent"). `school_open` rides on the payload so the two are never confused.
+  - 🔴 **One class marking read as the whole school.** `_students_today` denominated the ring on the
+    marked classes, so 1 of 12 classes taking the register rendered a complete, healthy day.
+    `PresenceRing` now carries **two denominators and never confuses them**: `total` = the cohort's
+    whole strength, populated whether or not anything is marked (the founder's ask — the roll is
+    readable every morning), and `counted` = the part of it in a marked group, which is what `pct`
+    divides by. `unmarked`/`not_marked` are their own numbers, `PresenceBoard.marked` is the "has
+    anything been captured" flag the medallion branches on (`roll` is now non-zero on an untouched
+    morning, so reading it as capture would put a confident 0 in the centre of an empty register),
+    and the students-away block is narrowed to classes that marked ON the anchor day — `streaks`
+    walks each class's own last captured day, so yesterday's absentees were being named under a ring
+    saying nothing was marked.
+  - **Staff → People** (`services/staff_directory.py`, `/staff/directory`) — the join across
+    `memberships` × `school_classes` × `class_subjects` nobody had written. Setup → Members is the
+    ACCOUNT screen (invite state, reset a password); this is the people screen: who works here,
+    whose homeroom is whose, what each person carries. Filter/group by role or class, inline role
+    edit, row → the person's file (`/staff/member/[id]`, which now leads with an editable
+    `StaffProfileCard` above the V1-16 record — establishment above time, and the record stays
+    deliberately un-editable: it is a record, never an appraisal, `D-25`/`S-67`).
+  - **`D-89`: "class teacher" is a DERIVED role, never a third `org_role`.** Founder call. `org_role`
+    stays the two-value CHECK column every guard is built on (SPRD2 §2); the directory's Role
+    dropdown offers Admin · Teacher · **Class teacher**, and picking the third opens a class picker
+    and writes `school_classes.class_teacher_member_id` — the one place the fact has ever lived. A
+    `class_teacher` value in the role column would be the same fact in two stores, and they would
+    disagree on the first reassignment. `role_key`/`role_label` are the rendering of the pair.
+    `class_teacher_of` is a **full replace** (so un-assigning is expressible), and handing a class to
+    a second teacher REPLACES the first — a homeroom has one owner, and a silent refusal would leave
+    the admin unable to hand it over. Role changes route through `MemberService.change_role` so the
+    last-admin guard and the `token_version` bump cannot be skipped by a second door.
+  - 🔴 **`services/periods.py::visible_class_ids` is now THE class-read rule** — the subjects she
+    teaches **∪ the homeroom she owns**. The homeroom half was missing everywhere, so a class teacher
+    who takes none of her own class's subjects (a warden, a primary homeroom teacher) could see the
+    register and the syllabus and was **refused her own class's exam feed and report cards**.
+    `ExamService._taught_class_ids` and `ReportCardService._assert_class` both delegate to it.
+  - **My Class is a six-tab area** (Overview · Attendance · Students · Syllabus · Homework · ABC
+    bands). `services/my_class.py` **composes and computes almost nothing**: coverage from
+    `MySyllabusService`, homework from `core/homework_verdict`, exams from `ExamService.feed`, bands
+    from `BandService.placements`, attendance from `day_matrix`/`classify_marked_day` — so a class
+    teacher and her principal cannot read different numbers for one Tuesday (`S-51`). The unmarked
+    rules hold on every tab: the register shows the roll and a **word**, the homework funnel reports
+    **no completion figure at all** rather than 0% when nothing is checked, and the band block counts
+    **placements not children** (`D-75`) with `not_assessed` its own number and never a tier.
+  - **`student_notes`** — the class teacher's own log about a child, **append-only** (law 3, the
+    `fee_notes` shape), staff-only, and writable only by the homeroom's teacher or an admin (reading
+    is the wider `visible_class_ids` set). The one deliberate exception to P5: everything else the
+    school knows is a byproduct of doing the work; this is the thing she noticed that no capture
+    surface has a field for. It stays out of the parent portal **by construction** — that projection
+    is an allowlist built field by field. Mounted at the foot of `/students/[id]`.
+  - **`GET /attendance/my-classes` + `/attendance`** — the register's own door. The school's rule is
+    *the class teacher takes it at period one, and if she is away any teacher of the class can*;
+    `assert_can_take_class` has permitted exactly that since V2-P2, but attendance was reachable
+    **only from a My Day period card**, so the person covering — who by definition is not standing in
+    that class at period one — had nowhere to go. **Nothing here widens permission**: it adds the
+    screen the rule needed. Any date (a register missed on Tuesday is taken on Wednesday), a class
+    this teacher takes nothing in never appears at all, an already-marked class stays editable by the
+    same set (correcting a mis-tap is not a privilege), and the day's first marked period is still
+    the only one that alerts guardians. Capture reuses `RollCall` — `S-12`'s one component, one
+    default — so a second way to write the same rows was not created. Nav gains **Attendance** for
+    every teacher.
+  - `test_staff_directory.py` (7) · `test_my_class_v2.py` (9) · `test_attendance_board.py` (6);
+    `test_presence_v1_14.py` +1 and its denominator test rewritten to the two-denominator contract.
+    Full suite **609 passing**, ruff clean; web tsc + eslint + `next build` clean.
+  - ⚠️ **Staff attendance itself needed no change** — SF-1 + V1-4 already own it (admin-marked,
+    exception-shaped, half-day/late, the month summary). It was verified, not rebuilt.
+  - **Revision 1 (same day, founder walkthrough).** Three changes, one of them a defect that had
+    been shipped in four files:
+    · 🔴 **`toISOString().slice(0, 10)` broke day navigation.** It serialises a LOCAL-midnight Date
+      through UTC, so east of UTC stepping forward a day returns the same string (the button looks
+      dead — the reported symptom on Staff → Attendance) while stepping back jumps two. V1-14 fixed
+      the identical bug in the cover sheet and the reason sheet; six more files still had it.
+      **`dayKey`/`todayKey`/`shiftDay`/`shiftMonth`/`thisMonth` in `lib/format.ts` are now the one
+      implementation** — never format a calendar date through UTC again.
+    · **`/attendance` is the register book** (`D-90`): class buttons (assigned classes only, first
+      open by default) + **Take attendance** beside them, then the month as a read-only grid.
+      **`build_register` was extracted from `MyClassService.register`** so the class teacher's
+      annotated grid and the every-teacher read-only one are ONE computation with two doors —
+      they differ only in who may open which class. `GET /attendance/register` guards on
+      `visible_class_ids`: reading is deliberately not narrower than writing, because a teacher who
+      can mark the roll and cannot see last week's is being asked to work blind. `RegisterBook`
+      replaces the old `<table>` + `position: sticky` with **two panes** — a fixed name column and
+      a grid that scrolls sideways — so the phone and the desktop run one code path (sticky cells
+      inside a scroller depend on table layout, and at 360px the name column had to truncate to
+      nothing). `contain: layout inline-size` on the scroller is load-bearing (the V1-14 `ScrollX`
+      fix). Column totals ride at the foot of each day, `—` on a day nobody marked.
+    · 🔴 **`D-91` — once-per-day is now the DAY's register, not period 1's.** `first_period` has
+      existed since V1-3 but its rules said *"attendance happens in period 1"*, which asks the
+      wrong thing all afternoon and has no answer at all for the morning period 1 does not happen.
+      Now: **`mark` lands on the day's existing register wherever it was taken** (and `roster`
+      READS the same one, or period 5 would show a blank sheet and save it over the morning's
+      absences — invisible data loss); the redirect clears `class_subject_id` so the register
+      moving does not relabel the period; `marks_attendance` on My Day is **dynamic** — every
+      period while the register is missing, none once it is done, except the holder so its taker
+      can still correct it; `day_attendance_taken` rides alongside so a card can say *"already
+      taken today"* instead of silently dropping the section. The heatmap treats the holder as the
+      only expected cell (otherwise a register taken at period 3 left period 1 amber forever and a
+      captured day read "1 of 2"), and `periods_scheduled` is the MODE's count, so a once-per-day
+      school never reads "1 of 7 periods marked". `test_once_per_day.py` (8); one V1-3 test updated
+      to the new contract and pinned in both directions.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
@@ -1577,8 +1685,12 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: local dev, test DB and **DO prod are all at head `c1d2e3f4a5b6`** (V1-19), applied
-2026-08-04 (prod was at `b0c1d2e3f4a5` until then); 57 tables carry an `org_isolation` policy. **The LOCAL dev DB
+Current state: **head is `c2d3e4f5a6b7`** (AT-1, `student_notes`, 2026-08-05). Local dev and the
+test DB are on it; **DO prod is still at `c1d2e3f4a5b6`** and needs it before the next deploy — it
+is purely additive (one new table + its RLS policy), so prod code that predates it is unaffected.
+It was applied with `ALEMBIC_DATABASE_URL` pointed at each local database explicitly, because
+`api/.env` is in `ACTIVE: PRODUCTION` mode and a bare `alembic upgrade head` would have migrated
+production with no confirmation. 58 tables carry an `org_isolation` policy. **The LOCAL dev DB
 (`localhost/trackbit_school`) was brought to the same head at V1-13 close** — it had been left one
 migration behind, so anything run against it before then was missing `guardian_messages` and
 `parent_login_attempts`.

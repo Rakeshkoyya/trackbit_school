@@ -146,7 +146,15 @@ class PeriodCardOut(BaseModel):
     attendance_marked: bool = False
     # V1-3 (D-01/Q-02a): False when the org's mode doesn't take attendance in
     # this period — the card's OTHER sections (topic, homework, checks) stay.
+    #
+    # Dynamic in `first_period` (founder, 2026-08-05): the register belongs to
+    # the DAY, so this is true on every period until somebody takes it and only
+    # on the holder afterwards. Read it with `day_attendance_taken`, which is
+    # what separates "not asked because it is done" from "not asked because this
+    # period never marks" — the card says the first out loud and stays silent
+    # about the second.
     marks_attendance: bool = True
+    day_attendance_taken: bool | None = None
     roster: list[AttendanceRosterRow] = []
     roster_count: int = 0
     present_count: int | None = None

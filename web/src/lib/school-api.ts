@@ -15,6 +15,9 @@ import type {
   RosterCommitResult,
   SchoolClass,
   StaffAttendance,
+  StaffDetail,
+  StaffDirectory,
+  StaffUpdateIn,
   StaffMark,
   StaffMonth,
   StudentHomeworkHistory,
@@ -299,6 +302,40 @@ export const schoolApi = {
   classRegister: (classId: string, month?: string) =>
     api.get<import("@/lib/school-types").ClassRegister>(
       `/my-class/${classId}/register${qs({ month })}`),
+
+  // My Class, expanded (founder, 2026-08-05). Six reads, one per tab, each
+  // composed server-side from the service that already owns those figures.
+  myClassOverview: (classId: string) =>
+    api.get<import("@/lib/school-types").MyClassOverview>(
+      `/my-class/${classId}/overview`),
+  myClassStudents: (classId: string, days?: number) =>
+    api.get<import("@/lib/school-types").MyClassStudents>(
+      `/my-class/${classId}/students${qs({ days: days ? String(days) : undefined })}`),
+  myClassHomework: (classId: string, days?: number) =>
+    api.get<import("@/lib/school-types").MyClassHomework>(
+      `/my-class/${classId}/homework${qs({ days: days ? String(days) : undefined })}`),
+  myClassBands: (classId: string) =>
+    api.get<import("@/lib/school-types").MyClassBands>(`/my-class/${classId}/bands`),
+  /** The class teacher's own log about a child — staff-only, append-only. */
+  studentNotes: (studentId: string) =>
+    api.get<import("@/lib/school-types").StudentNotes>(
+      `/my-class/students/${studentId}/notes`),
+  addStudentNote: (studentId: string, b: {
+    kind: import("@/lib/school-types").StudentNoteKind; note: string;
+  }) => api.post<import("@/lib/school-types").StudentNotes>(
+    `/my-class/students/${studentId}/notes`, b),
+
+  /** The month register book for a class this teacher takes — view only.
+   *  Same drawing as My Class's grid, behind a wider door: a teacher who may be
+   *  asked to take the roll must be able to read it. */
+  classRegisterFor: (classId: string, month?: string) =>
+    api.get<import("@/lib/school-types").ClassRegister>(
+      `/attendance/register${qs({ class_id: classId, month })}`),
+
+  /** Every class this teacher may take the register for, on any date. */
+  myAttendance: (onDate?: string) =>
+    api.get<import("@/lib/school-types").MyAttendanceBoard>(
+      `/attendance/my-classes${qs({ on_date: onDate })}`),
 
   // daily checks / recommendations (V2-P3, SPRD2 §5.5)
   checks: (classSubjectId: string, onDate?: string) =>
@@ -631,6 +668,17 @@ export const schoolApi = {
   /** D-78 — days worked out of working days. Admin: everyone. Teacher: herself. */
   staffMonth: (p: { month?: string; member_id?: string } = {}) =>
     api.get<StaffMonth>(`/staff/month${qs(p)}`),
+
+  // ── the staff directory (founder, 2026-08-05) ───────────────────────────
+  // The people screen, not the accounts screen. `updateStaff` is one PATCH for
+  // one form: profile, role and homeroom together, because that is how an admin
+  // edits a person. `class_teacher_of` writes the CLASS — there is no
+  // class-teacher role to set.
+  staffDirectory: () => api.get<StaffDirectory>("/staff/directory"),
+  staffDetail: (memberId: string) =>
+    api.get<StaffDetail>(`/staff/directory/${memberId}`),
+  updateStaff: (memberId: string, b: StaffUpdateIn) =>
+    api.patch<StaffDetail>(`/staff/directory/${memberId}`, b),
 
   workTypes: () => api.get<WorkType[]>("/staff/work-types"),
   timesheetWeek: (p: { member_id?: string; week_start?: string } = {}) =>

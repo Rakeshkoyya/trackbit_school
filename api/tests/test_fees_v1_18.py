@@ -101,14 +101,17 @@ def test_a_scope_with_nothing_due_is_neutral_and_never_a_score():
 def test_tone_thresholds_are_measured_against_what_was_asked_for():
     """Not against what was billed — that is the whole point. A school 100% of
     the way through what it asked for is green even at 25% of the year."""
-    level = Collection(); level.add(billed=100000, collected=25000, due_by_today=25000)
+    level = Collection()
+    level.add(billed=100000, collected=25000, due_by_today=25000)
     assert level.pct == 25.0
     assert pace_tone(level) == "green", "25% of the year, and every rupee asked for is in"
 
-    slipping = Collection(); slipping.add(billed=100000, collected=23000, due_by_today=25000)
+    slipping = Collection()
+    slipping.add(billed=100000, collected=23000, due_by_today=25000)
     assert pace_tone(slipping) == "amber"
 
-    behind = Collection(); behind.add(billed=100000, collected=10000, due_by_today=25000)
+    behind = Collection()
+    behind.add(billed=100000, collected=10000, due_by_today=25000)
     assert pace_tone(behind) == "red"
 
 

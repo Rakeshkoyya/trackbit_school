@@ -38,12 +38,45 @@ from app.schemas.staff import (
     TimesheetWeek,
     WorkTypeOut,
 )
+from app.schemas.staff_directory import StaffDetailOut, StaffDirectoryOut, StaffUpdateIn
 from app.services.leave import LeaveService
 from app.services.staff_attendance import StaffAttendanceService
+from app.services.staff_directory import StaffDirectoryService
 from app.services.staff_month import StaffMonthService
 from app.services.timesheet import TimesheetService
 
 router = APIRouter()
+
+
+# ── the directory (founder, 2026-08-05) ──────────────────────────────────────
+@router.get("/directory", response_model=StaffDirectoryOut)
+def staff_directory(m: CurrentMember = Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    """Who works here and what they carry — the join across memberships,
+    homerooms and class-subjects that no screen had ever made."""
+    return StaffDirectoryService(db).list_staff(m)
+
+
+@router.get("/directory/{member_id}", response_model=StaffDetailOut)
+def staff_detail(member_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+                 db: Session = Depends(get_db)):
+    """`require_academic`, not `require_admin`: the service lets a teacher read
+    their own file and refuses a colleague's — the V1-16 record's rule, for the
+    same reason. `can_edit` on the payload is what the page keys the form off."""
+    return StaffDirectoryService(db).detail(m, member_id)
+
+
+@router.patch("/directory/{member_id}", response_model=StaffDetailOut)
+def update_staff(member_id: uuid.UUID, body: StaffUpdateIn,
+                 m: CurrentMember = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """Profile, role and homeroom in one call, because they are one form.
+
+    `class_teacher_of` is a FULL REPLACE and writes `school_classes`, never a
+    role column — the class teacher is derived from the assignment and is stored
+    in exactly one place.
+    """
+    return StaffDirectoryService(db).update(m, member_id, body)
 
 
 # ── staff attendance (admin) ─────────────────────────────────────────────────

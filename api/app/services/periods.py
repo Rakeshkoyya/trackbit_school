@@ -26,6 +26,30 @@ def today_for(m: CurrentMember) -> date:
     return datetime.now(ZoneInfo(m.org.timezone)).date()
 
 
+def visible_class_ids(db: Session, m: CurrentMember) -> set[uuid.UUID] | None:
+    """The classes this member may read. `None` = unrestricted (admin).
+
+    A teacher's set is **the subjects she teaches ∪ the homeroom she owns**, and
+    the second half is the fix (founder, 2026-08-05). Every class-scoped read in
+    the app derived its own version of this from `class_subjects` alone, so a
+    class teacher who takes none of her own class's subjects — a warden, a
+    primary homeroom teacher whose subjects sit under someone else — was locked
+    out of her own class's exam feed and report cards while the register, the
+    syllabus block and the homework load all let her in. One rule, here, so the
+    two halves of My Class cannot answer the question differently.
+    """
+    if m.is_coordinator_up:
+        return None
+    from app.models import SchoolClass as _SchoolClass  # noqa: PLC0415
+
+    taught = set(db.scalars(select(ClassSubject.class_id).where(
+        ClassSubject.org_id == m.org_id,
+        ClassSubject.teacher_member_id == m.membership.id)))
+    return taught | set(db.scalars(select(_SchoolClass.id).where(
+        _SchoolClass.org_id == m.org_id,
+        _SchoolClass.class_teacher_member_id == m.membership.id)))
+
+
 def assert_can_take_class(
     db: Session, m: CurrentMember, class_id: uuid.UUID, class_subject_id: uuid.UUID | None,
     on_date: date | None = None, period_no: int | None = None,
