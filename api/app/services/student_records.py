@@ -165,7 +165,13 @@ class StudentRecordsService:
                 deviations[sid][status] = n
 
         # ── 4. exams — batched across every class on the page ────────────────
-        marks = load_marks(self.db, m.org_id, class_ids, sids)
+        # Deliberately NOT narrowed by `student_ids`. The cycles already belong
+        # to these classes, so their scores already belong to these children —
+        # the filter was redundant, and passing 240 ids made an 11.7KB query
+        # that cost 2.3s on its own against the remote database. `figures()`
+        # keys by student, so a search box narrows the rows without needing the
+        # scores query to know about it.
+        marks = load_marks(self.db, m.org_id, class_ids)
 
         # ── 5/6. homework — the recent run, per child ────────────────────────
         homework = self._homework(m, class_ids, sids, by_class, since, today)
@@ -222,16 +228,28 @@ class StudentRecordsService:
         if not rows:
             return out
         on_page = set(sids)
-        ids = [r[0] for r in rows]
+        # Both of these JOIN back to the assignment rather than listing its ids.
+        # Passing them (plus 240 student ids) built 10–16KB query strings for
+        # what the same three-table scope expresses in a few hundred bytes, and
+        # the database has the ids already.
+        scope = (
+            HomeworkAssignment.org_id == m.org_id,
+            ClassSubject.class_id.in_(class_ids),
+            HomeworkAssignment.date >= since,
+            HomeworkAssignment.date <= until,
+        )
         checked = set(self.db.scalars(
             select(HomeworkCheck.assignment_id)
-            .where(HomeworkCheck.assignment_id.in_(ids))))
+            .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkCheck.assignment_id)
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .where(*scope)))
         results = {
             (r.assignment_id, r.student_id): r.status
             for r in self.db.scalars(
-                select(HomeworkResult).where(
-                    HomeworkResult.assignment_id.in_(ids),
-                    HomeworkResult.student_id.in_(sids)))
+                select(HomeworkResult)
+                .join(HomeworkAssignment, HomeworkAssignment.id == HomeworkResult.assignment_id)
+                .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+                .where(*scope))
         }
 
         per_student: dict[uuid.UUID, list[tuple[date, str, str]]] = defaultdict(list)
