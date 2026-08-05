@@ -38,7 +38,7 @@ import { SyllabusPulseBlock } from "@/components/insights/syllabus";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { ReasonSheet, type ReasonTarget } from "@/components/insights/reason-sheet";
 import { SetupGate } from "@/components/school/setup-gate";
-import { WhatsOnCard } from "@/components/school/whats-on";
+import { DayNotice } from "@/components/school/day-notice";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -379,11 +379,13 @@ function DashboardInner() {
     queryFn: () => schoolApi.dashboard(yearId ?? undefined),
     enabled: !!yearId,
   });
-  // V1-7 (D-51): today's specials + what is coming. Read once for the page —
-  // it is the same feed the teacher's My Day strip renders, at more depth.
+  // V1-7 (D-51): today's specials and the week ahead, in one dismissible line.
+  // Seven days, deliberately: the founder's rule is that a date shows up a week
+  // before, which is what removed the "Coming up" list under this — a 21-day
+  // horizon needed a second section to hold it, and nobody acts three weeks out.
   const { data: whatsOn } = useQuery({
-    queryKey: ["whats-on"],
-    queryFn: () => eventsApi.whatsOn(),
+    queryKey: ["whats-on", "week"],
+    queryFn: () => eventsApi.whatsOn({ horizon: 7 }),
   });
   const { data: pendingCaptures = [] } = useQuery({
     queryKey: ["captures", "pending"],
@@ -445,6 +447,14 @@ function DashboardInner() {
   return (
     <div>
       <SetupGate />
+
+      {/* V1-7, re-sited by the founder (2026-08-05): the day's notice leads the
+          screen and is dismissible, because it is the one block here nobody has
+          to act on. It was a section below the board with a "Coming up" list of
+          its own; the horizon is now a week and there is no second list — a date
+          joins the notice seven days out, which is the only warning a school
+          actually uses. */}
+      <div className="mb-4"><DayNotice data={whatsOn} scope="school" calendarHref="/plan" /></div>
 
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="[&>header]:mb-0">
@@ -553,13 +563,6 @@ function DashboardInner() {
             {exams ? <SectionCard section={exams} /> : null}
           </div>
         )}
-      </section>
-
-      {/* V1-7: the read side of a calendar the school has written for a year.
-          It sits below the board because it is context, not a task — and above
-          alerts because it is often the explanation for one. */}
-      <section className="mb-6">
-        <WhatsOnCard data={whatsOn} onOpenCalendar="/plan" />
       </section>
 
       {/* Alerts feed — each becomes a task, or opens the screen that fixes it. */}

@@ -35,12 +35,18 @@ router = APIRouter()
 
 @router.get("/whats-on", response_model=WhatsOn)
 def whats_on(on_date: date | None = None, horizon: int = DEFAULT_HORIZON,
+             class_id: uuid.UUID | None = None,
              m: CurrentMember = Depends(require_academic),
              db: Session = Depends(get_db)):
     """Today's specials and what is coming — birthdays, the school's own
-    calendar, and nothing provisional."""
+    calendar, and nothing provisional.
+
+    `class_id` narrows it to that class's birthdays (the teacher's row, founder
+    2026-08-05); the service holds the access rule.
+    """
     return WhatsOnService(db).feed(m, on_date, min(max(horizon, 1), 120),
-                                   for_admin=m.membership.org_role == "admin")
+                                   for_admin=m.membership.org_role == "admin",
+                                   class_id=class_id)
 
 
 @router.get("/suggestions", response_model=list[SuggestionOut])

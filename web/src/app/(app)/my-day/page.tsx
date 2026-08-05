@@ -7,7 +7,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
-import { WhatsOnCard } from "@/components/school/whats-on";
 import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ import { Sheet } from "@/components/ui/sheet";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { dayLabel } from "@/lib/format";
-import { eventsApi } from "@/lib/events-api";
 import { schoolApi } from "@/lib/school-api";
 import type { MyDayClass, MyDayPeriod } from "@/lib/school-types";
 import type { Task } from "@/lib/types";
@@ -252,12 +250,12 @@ function MyDayInner() {
   const toCheck = queue?.to_check ?? 0;
   const overdue = queue?.overdue ?? 0;
 
-  // S-132 — the one thing on this screen that asks her for nothing. It is
-  // absent entirely when there is nothing on, never an empty state.
-  const { data: whatsOn } = useQuery({
-    queryKey: ["whats-on"],
-    queryFn: () => eventsApi.whatsOn({ horizon: 7 }),
-  });
+  // The what's-on strip is deliberately GONE from My Day (founder, 2026-08-05).
+  // It showed a teacher the whole school — the office's exam block, a
+  // colleague's birthday, another class's children — on the one screen she opens
+  // between rooms. What she actually needs is her own class's birthdays, and she
+  // gets them where they are useful: on the period she is about to log and
+  // across My Class (`DayNotice`, scoped to the class).
 
   // Classes already covered by a period row don't need a second card below.
   const periodCsIds = new Set((data?.periods ?? []).map((p) => p.class_subject_id));
@@ -284,8 +282,6 @@ function MyDayInner() {
           {overdue > 0 ? <Badge tone="warning">{overdue} past due</Badge> : null}
         </Link>
       ) : null}
-
-      <div className="mb-6"><WhatsOnCard data={whatsOn} variant="strip" /></div>
 
       {/* S-145 — the school locked today, so there is nothing to capture and
           she is told why rather than shown eight rows saying "not logged".

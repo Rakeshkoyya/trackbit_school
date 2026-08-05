@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Users } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { ClassDayNotice } from "@/components/school/day-notice";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageLoading } from "@/components/ui/page-loading";
@@ -51,6 +52,10 @@ export function MyClassShell({
 
   return (
     <div>
+      {/* Whose birthday it is in THIS class, dismissible for the day (founder,
+          2026-08-05). It rides on the shell rather than on each tab so it says
+          the same thing on all six, and it re-scopes with the picker. */}
+      <div className="mb-3"><ClassDayNotice classId={active.class_id} /></div>
       <PageHeader title={title(active)} subtitle={subtitle?.(active)} />
       {classes.length > 1 ? (
         <div className="mb-4 flex flex-wrap gap-1.5">

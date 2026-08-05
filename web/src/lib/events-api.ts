@@ -186,8 +186,12 @@ export interface ObservanceImportResult {
 }
 
 export const eventsApi = {
-  whatsOn: (p: { onDate?: string; horizon?: number } = {}) =>
-    api.get<WhatsOn>(`/events/whats-on${qs({ on_date: p.onDate, horizon: p.horizon })}`),
+  /** The day's notice. `classId` narrows it to that class's birthdays — the
+   *  teacher's row (founder, 2026-08-05); without it, the school's whole feed. */
+  whatsOn: (p: { onDate?: string; horizon?: number; classId?: string } = {}) =>
+    api.get<WhatsOn>(`/events/whats-on${qs({
+      on_date: p.onDate, horizon: p.horizon, class_id: p.classId,
+    })}`),
   suggestions: (horizon?: number) =>
     api.get<Suggestion[]>(`/events/suggestions${qs({ horizon })}`),
   /** V1-20 — the whole researched catalogue as a SCHOOL sees it, filterable by
