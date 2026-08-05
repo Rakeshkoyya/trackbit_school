@@ -139,25 +139,30 @@ class StudentRecordsService:
                 ClassPeriod.attendance_marked_at.is_not(None)]
         if floor:
             cond.append(ClassPeriod.date >= floor)
-        period_rows = self.db.execute(
-            select(ClassPeriod.id, ClassPeriod.class_id).where(*cond)).all()
-        marked_per_class: dict[uuid.UUID, int] = defaultdict(int)
-        for _pid, cid in period_rows:
-            marked_per_class[cid] += 1
-        pids = [p for p, _ in period_rows]
+        # Both halves aggregate in POSTGRES. The first cut of this read pulled
+        # every marked period id into Python purely to count them, then sent the
+        # thousands back in an `IN (...)` for the exceptions — on a real school
+        # (240 children, 422 marked periods per class) that was seconds of round
+        # trip and a query string measured in kilobytes. The join does the same
+        # work in the database, where the ids already are.
+        marked_per_class: dict[uuid.UUID, int] = dict(self.db.execute(
+            select(ClassPeriod.class_id, func.count())
+            .where(*cond).group_by(ClassPeriod.class_id)).all())
 
         deviations: dict[uuid.UUID, dict[str, int]] = defaultdict(
             lambda: {"absent": 0, "late": 0})
-        if pids:
-            for sid, status, n in self.db.execute(
-                    select(AttendanceException.student_id, AttendanceException.status,
-                           func.count())
-                    .where(AttendanceException.period_id.in_(pids),
-                           AttendanceException.student_id.in_(sids))
-                    .group_by(AttendanceException.student_id,
-                              AttendanceException.status)).all():
-                if status in deviations[sid]:
-                    deviations[sid][status] = n
+        on_page = set(sids)
+        for sid, status, n in self.db.execute(
+                select(AttendanceException.student_id, AttendanceException.status,
+                       func.count())
+                .join(ClassPeriod, ClassPeriod.id == AttendanceException.period_id)
+                .where(*cond)
+                .group_by(AttendanceException.student_id,
+                          AttendanceException.status)).all():
+            # The class join already scopes these rows; the page's own narrowing
+            # (a search box) is applied here rather than as a second huge IN.
+            if sid in on_page and status in deviations[sid]:
+                deviations[sid][status] = n
 
         # ── 4. exams — batched across every class on the page ────────────────
         marks = load_marks(self.db, m.org_id, class_ids, sids)
