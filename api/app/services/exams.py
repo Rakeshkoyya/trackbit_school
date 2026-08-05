@@ -53,6 +53,7 @@ from app.models import (
 from app.schemas.assessments import (
     CapturePageOut,
     ExamDetail,
+    ExamFeedPage,
     ExamLockRow,
     ExamRosterRow,
     ExamSaveIn,
@@ -118,19 +119,54 @@ class ExamService:
         return out
 
     # ── feed ─────────────────────────────────────────────────────────────────
-    def feed(self, m: CurrentMember, class_id: uuid.UUID | None = None,
-             limit: int = 30) -> list[ExamSummary]:
-        q = (select(AssessmentCycle).where(AssessmentCycle.org_id == m.org_id)
-             .order_by(AssessmentCycle.date.desc(), AssessmentCycle.created_at.desc())
-             .limit(min(limit, 100)))
+    def _feed_query(self, m: CurrentMember, class_id: uuid.UUID | None,
+                    subject_id: uuid.UUID | None, exam_event_id: uuid.UUID | None,
+                    scale: str | None):
+        q = select(AssessmentCycle).where(AssessmentCycle.org_id == m.org_id)
         if class_id:
             q = q.where(AssessmentCycle.class_id == class_id)
+        if subject_id:
+            q = q.where(AssessmentCycle.subject_id == subject_id)
+        if exam_event_id:
+            q = q.where(AssessmentCycle.exam_event_id == exam_event_id)
+        if scale:
+            q = q.where(AssessmentCycle.scale == scale)
         taught = self._taught_class_ids(m)
         if taught is not None:
             # A teacher's feed: their classes, plus org-wide cycles (which
             # concern every class).
             q = q.where(AssessmentCycle.class_id.in_(taught)
                         | AssessmentCycle.class_id.is_(None))
+        return q
+
+    def feed_page(self, m: CurrentMember, *, class_id: uuid.UUID | None = None,
+                  subject_id: uuid.UUID | None = None,
+                  exam_event_id: uuid.UUID | None = None,
+                  scale: str | None = None,
+                  page: int = 1, size: int = 20) -> ExamFeedPage:
+        """The feed, paginated (founder, 2026-08-05).
+
+        A school records dozens of tests a term, and the landing page returned a
+        flat `limit`-capped list — so the 31st test was simply unreachable from
+        any screen. Same rows, same summaries, one extra COUNT.
+        """
+        size = min(max(size, 1), 100)
+        page = max(page, 1)
+        base = self._feed_query(m, class_id, subject_id, exam_event_id, scale)
+        total = int(self.db.scalar(
+            select(func.count()).select_from(base.subquery())) or 0)
+        rows = self.feed(m, class_id=class_id, subject_id=subject_id,
+                         exam_event_id=exam_event_id, scale=scale,
+                         limit=size, offset=(page - 1) * size)
+        return ExamFeedPage(rows=rows, page=page, size=size, total=total)
+
+    def feed(self, m: CurrentMember, class_id: uuid.UUID | None = None,
+             limit: int = 30, *, subject_id: uuid.UUID | None = None,
+             exam_event_id: uuid.UUID | None = None, scale: str | None = None,
+             offset: int = 0) -> list[ExamSummary]:
+        q = (self._feed_query(m, class_id, subject_id, exam_event_id, scale)
+             .order_by(AssessmentCycle.date.desc(), AssessmentCycle.created_at.desc())
+             .limit(min(limit, 100)).offset(max(offset, 0)))
         cycles = list(self.db.scalars(q))
         if not cycles:
             return []
@@ -248,7 +284,13 @@ class ExamService:
             .where(ScoreCapture.cycle_id == c.id, ScoreCapture.status != "discarded")
             .order_by(ScoreCapture.created_at, ScoreCapturePage.page_no)).scalars())
         exam_type = self.db.get(ExamType, c.exam_type_id) if c.exam_type_id else None
-        event_name = self.db.scalar(select(CalendarEvent.name).where(
+        # ⚠️ This read `CalendarEvent.name`, which does not exist — the column is
+        # `title`. So opening ANY exam filed under an exam block raised
+        # AttributeError and 500'd. It never fired because `exam_event_id` has
+        # been on the cycle since V1-8 (`S-115`) and **nothing ever populated it
+        # from a screen**; the Plan → Exams grid is the first thing that does,
+        # which is what turned a dormant line into the module's main path.
+        event_name = self.db.scalar(select(CalendarEvent.title).where(
             CalendarEvent.id == c.exam_event_id)) if c.exam_event_id else None
         return ExamDetail(
             id=c.id, type=c.type,
@@ -296,6 +338,15 @@ class ExamService:
                 Subject.id == body.subject_id, Subject.org_id == m.org_id)):
             raise NotFoundError("Subject")
         assert_can_take_class(self.db, m, body.class_id, None)
+        # Founder 2026-08-05: standing in front of a class is not the same as
+        # owning its Maths paper. `assert_can_take_class` is true for every
+        # subject of a class she teaches one subject of, which let the Hindi
+        # teacher overwrite a colleague's marks. The narrower rule lives in
+        # `MainExamService` and is asked here, so every write path gets it —
+        # the Plan → Exams grid, the scores capture page and Lucy alike.
+        from app.services.main_exams import MainExamService  # noqa: PLC0415
+        MainExamService(self.db).assert_can_record_subject(
+            m, body.class_id, body.subject_id)
 
         class_roster = {s.id for s in self._roster(m, body.class_id, None)}
         student_ids: list[str] | None = None

@@ -13,6 +13,7 @@ Thin as law 6 requires — every line here is plumbing.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -23,6 +24,8 @@ from app.core.dependencies import require_academic
 from app.schemas.my_class import (
     MyClassBands,
     MyClassHomework,
+    MyClassHomeworkDay,
+    MyClassHomeworkDays,
     MyClassOut,
     MyClassOverview,
     MyClassStudentsOut,
@@ -30,6 +33,7 @@ from app.schemas.my_class import (
     StudentNoteIn,
     StudentNotesOut,
 )
+from app.schemas.syllabus_board import SyllabusBoardOut
 from app.services.my_class import MyClassService
 
 router = APIRouter()
@@ -89,6 +93,36 @@ def homework(class_id: uuid.UUID, days: int = 14,
              db: Session = Depends(get_db)):
     """`given ⊇ checked ⊇ graded`, in student-homeworks (V1-17's unit)."""
     return MyClassService(db).homework_board(m, class_id, days)
+
+
+@router.get("/{class_id}/syllabus", response_model=SyllabusBoardOut)
+def syllabus(class_id: uuid.UUID, term_id: uuid.UUID | None = None,
+             m: CurrentMember = Depends(require_academic),
+             db: Session = Depends(get_db)):
+    """The SY-1 chapter table for EVERY subject this class takes.
+
+    The same board Plan → Syllabus renders, at the one scope Plan deliberately
+    no longer offers: Plan is her own teaching, this is her homeroom. The
+    service establishes the homeroom before widening, so there is no
+    `whole_class` flag on the wire for anyone to pass.
+    """
+    return MyClassService(db).syllabus_board(m, class_id, term_id)
+
+
+@router.get("/{class_id}/homework/days", response_model=MyClassHomeworkDays)
+def homework_days(class_id: uuid.UUID, page: int = 1, size: int = 20,
+                  m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    """What actually went home: today in full, earlier days as openable rows."""
+    return MyClassService(db).homework_days(m, class_id, page, size)
+
+
+@router.get("/{class_id}/homework/day", response_model=MyClassHomeworkDay)
+def homework_day(class_id: uuid.UUID, on: date,
+                 m: CurrentMember = Depends(require_academic),
+                 db: Session = Depends(get_db)):
+    """One day opened — every homework in full, and who did not do it."""
+    return MyClassService(db).homework_day(m, class_id, on)
 
 
 @router.get("/{class_id}/bands", response_model=MyClassBands)

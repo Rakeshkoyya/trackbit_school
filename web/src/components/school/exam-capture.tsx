@@ -67,7 +67,8 @@ const today = () => todayKey();
 
 type RosterStudent = { student_id: string; full_name: string; roll_no: string | null };
 
-export function ExamCapture({ classId, studentIds, examId, fixedType, onSaved }: {
+export function ExamCapture({ classId, studentIds, examId, fixedType,
+  fixedSubjectId, examEventId, defaultName, onSaved }: {
   classId: string;
   /** Few-students test: only these students sat it. Omit = whole class. */
   studentIds?: string[];
@@ -75,15 +76,25 @@ export function ExamCapture({ classId, studentIds, examId, fixedType, onSaved }:
   examId?: string;
   /** Pins the type (the Bands page records band tests). */
   fixedType?: CycleType;
+  /** Pins the subject and hides the picker. Plan → Exams opens capture from a
+   *  class × subject CELL, so the subject is already decided — and a teacher
+   *  may only enter her own subject, which a dropdown of all of them invites
+   *  her to try and the server then refuses. */
+  fixedSubjectId?: string;
+  /** `S-115` — files this paper under a declared main exam. The link has
+   *  existed on the cycle since V1-8 and nothing ever populated it. */
+  examEventId?: string;
+  /** Seeds the title, so a term paper is not typed thirty times. */
+  defaultName?: string;
   onSaved?: (exam: ExamDetail) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [seeded, setSeeded] = useState(false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(defaultName ?? "");
   const [type, setType] = useState<string>(fixedType ?? "chapter_test");
   const [examTypeId, setExamTypeId] = useState<string>("");
   const [date, setDate] = useState(today());
-  const [subjectId, setSubjectId] = useState("");
+  const [subjectId, setSubjectId] = useState(fixedSubjectId ?? "");
   const [topic, setTopic] = useState("");
   const [total, setTotal] = useState("100");
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -137,7 +148,10 @@ export function ExamCapture({ classId, studentIds, examId, fixedType, onSaved }:
     return subset.map((s) => ({ student_id: s.id, full_name: s.full_name, roll_no: s.roll_no }));
   }, [examId, exam?.rows, allStudents, studentIds]);
 
-  const effSubject = subjects.some((s) => s.id === subjectId) ? subjectId : (subjects[0]?.id ?? "");
+  // A pinned subject wins outright — never falls back to subjects[0], which
+  // would silently record the paper against the wrong subject.
+  const effSubject = fixedSubjectId
+    ?? (subjects.some((s) => s.id === subjectId) ? subjectId : (subjects[0]?.id ?? ""));
   const markOf = (sid: string) => edits[sid] ?? photoFill[sid] ?? "";
   const pickable = fixedType
     ? examTypes.filter((t) => t.system_type === fixedType)
@@ -150,7 +164,8 @@ export function ExamCapture({ classId, studentIds, examId, fixedType, onSaved }:
     const m = c.parsed_meta;
     if (m) {
       if (m.title && !name.trim()) setName(m.title);
-      if (m.subject_id) setSubjectId(m.subject_id);
+      // Never let a parsed header move a pinned subject.
+      if (m.subject_id && !fixedSubjectId) setSubjectId(m.subject_id);
       if (m.total_marks && (total === "100" || !total)) setTotal(String(m.total_marks));
       if (m.topic && !topic.trim()) setTopic(m.topic);
       if (m.date && /^\d{4}-\d{2}-\d{2}$/.test(m.date)) setDate(m.date);
@@ -225,7 +240,7 @@ export function ExamCapture({ classId, studentIds, examId, fixedType, onSaved }:
       cycle_id: examId, class_id: classId, subject_id: effSubject,
       type: pickedType?.system_type ?? type, exam_type_id: examTypeId || null,
       name: name.trim(), date, topic: topic.trim() || null,
-      total_marks: totalNum,
+      total_marks: totalNum, exam_event_id: examEventId ?? null,
       student_ids: examId ? (exam?.student_ids ?? undefined)
         : (studentIds?.length ? studentIds : undefined),
       capture_id: captureId ?? undefined, rows }),
@@ -424,10 +439,16 @@ export function ExamCapture({ classId, studentIds, examId, fixedType, onSaved }:
         </div>
         <div>
           <Label>Subject</Label>
-          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm"
-            value={effSubject} onChange={(e) => setSubjectId(e.target.value)}>
-            {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          {fixedSubjectId ? (
+            <p className="rounded-md border border-border bg-muted/40 px-2 py-2 text-sm">
+              {subjects.find((s) => s.id === fixedSubjectId)?.name ?? "This subject"}
+            </p>
+          ) : (
+            <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm"
+              value={effSubject} onChange={(e) => setSubjectId(e.target.value)}>
+              {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
         </div>
         <div>
           <Label>Total marks</Label>

@@ -23,6 +23,7 @@ from app.schemas.assessments import (
     CycleCreate,
     CycleOut,
     ExamDetail,
+    ExamFeedPage,
     ExamLockIn,
     ExamSaveIn,
     ExamSummary,
@@ -124,6 +125,25 @@ def verify_scores(cycle_id: uuid.UUID, m: CurrentMember = Depends(require_coordi
 def exam_feed(class_id: uuid.UUID | None = None, limit: int = 30,
               m: CurrentMember = Depends(require_academic), db: Session = Depends(get_db)):
     return ExamService(db).feed(m, class_id, limit)
+
+
+@router.get("/exams/page", response_model=ExamFeedPage)
+def exam_feed_page(class_id: uuid.UUID | None = None,
+                   subject_id: uuid.UUID | None = None,
+                   exam_event_id: uuid.UUID | None = None,
+                   scale: str | None = None,
+                   page: int = 1, size: int = 20,
+                   m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """The same feed with a page and a total (founder, 2026-08-05).
+
+    Declared BEFORE `/exams/{cycle_id}` — FastAPI matches in order, and a
+    literal segment after a path parameter is shadowed by it, so `page` would
+    otherwise be parsed as a UUID and 422 forever.
+    """
+    return ExamService(db).feed_page(
+        m, class_id=class_id, subject_id=subject_id,
+        exam_event_id=exam_event_id, scale=scale, page=page, size=size)
 
 
 @router.get("/exams/{cycle_id}", response_model=ExamDetail)

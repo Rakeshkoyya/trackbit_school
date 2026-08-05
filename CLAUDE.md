@@ -1800,6 +1800,77 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     `<table>`, so auto layout put "Attendance" at a different x in 6-A than in 6-B and no column
     could be scanned down — `table-fixed` + a colgroup on both halves.
 
+- **MC-3 / EX-3 (My Class deepened · the exam module gets its calendar, 2026-08-05)** — **no
+  migration.** Founder walkthrough of the class teacher's area and of exams. Two halves, one rule
+  each time: a screen must answer the question it is *opened with*.
+  - 🔴 **Plan → Syllabus was showing a class teacher her homeroom's five other subjects.**
+    `SyllabusBoardService.board` filtered on `visible_class_ids` — her subjects **∪** the homeroom
+    she owns — so the screen she opens to plan *her own teaching* was four-fifths somebody else's
+    plan, and her own rows were outnumbered on it. The union is gone from that board; the homeroom
+    read has its own door in **My Class → Syllabus**, which asks for the SAME
+    `SyllabusBoardService.board` with `whole_class=True` after `_klass` has established she owns
+    it. The flag is deliberately **not on the wire** (no query param) — only `MyClassService` sets
+    it, or any teacher could ask for any class by guessing an id. `scope` gains `class`.
+  - **My Class → Syllabus is now the full SY-1 chapter table**, not a five-line pace list: which
+    chapter, when it was due, when it was taught, the frozen baseline beside the live date. Same
+    `SyllabusTable` component, same service — a class teacher and her principal cannot read
+    different figures for one chapter (`S-51`). The pace list stays above it as the summary, since
+    *"is Maths moving?"* and *"which chapter is late?"* are two questions.
+  - **My Class → Homework is a day book.** V1-17's funnel says how much came back and cannot say
+    **what was given**, which is the question asked at the gate. Today's homework now renders in
+    full (the `text`, the subject, the teacher, who did not do it, by name), earlier days are
+    paginated rows that open, and the funnel is folded to a strip. Same arithmetic throughout —
+    `core/homework_verdict`, student-homeworks, `carried`/`waived` outside the denominator — and
+    the rule that mattered most here: **a day nobody checked carries no percentage at all**, never
+    a 0% and never red. Paginated over DAYS, not assignments: a day cut in half by a page boundary
+    is unreadable.
+  - **My Class → ABC bands expands to its children.** "Not assessed" is no longer a **tile** — beside
+    A, B and C it read as a fourth tier, the one thing it must never be (`D-75`); it survives as the
+    header denominator ("11 of 15 assessed") and as the dashed segment of the bar. Opening a subject
+    names its children with how each is doing **in that subject**, through
+    `exam_marks::ClassMarks.figures`, so the row carries the **scale** its percentage came from
+    (`S-114` — a bare number here is exactly what `ScaleTally` exists to prevent) and reads "no marks
+    yet" rather than 0%. Ordered A → B → C then by **name**: sorting children by their marks turns a
+    teaching group into a ranking (`S-170`). `_attendance_window` was extracted so the roster table
+    and the tier list walk the register **once**.
+  - **Plan → Exams (new tab) — the school's own exam calendar, in use.** Not a new table:
+    `calendar_events` with `type='exam_block'` has been the exam calendar since V2-P7 (the planner
+    paces against it, `ExamPortion` maps chapters onto it) and the only way to make one was to
+    paint a date on the year grid. `services/main_exams.py` **composes** — the exam is the calendar
+    row, a paper's marks are `ExamService.save` unchanged, the report card is
+    `ReportCardService` — and gives it two levels: the exam list (admin adds/edits/removes; a
+    teacher reads the identical list locked, never a second thinner one) and, under a picked exam,
+    the class × subject papers. The link is `assessment_cycles.exam_event_id`, which V1-8 added
+    (`S-115`) and **nothing had ever populated from a screen**.
+  - 🔴 **A teacher could overwrite a colleague's paper.** `ExamService.save` asked
+    `assert_can_take_class`, which answers *may she stand in front of this class* — true for every
+    subject of a class she teaches one subject of. Right for attendance, wrong for a mark.
+    `MainExamService.assert_can_record_subject` is the narrower question (admin · the subject's own
+    teacher · the homeroom's class teacher, who enters the paper for a colleague who has left) and
+    is asked in the **service**, so every write path gets it. `can_edit` on the grid is computed
+    from the same three clauses — a greyed cell the server would have accepted is a screen lying
+    about permission. Reading stays deliberately **wider** than writing: she sees every subject's
+    card for her classes, and may alter only her own column.
+  - 🔴 **`ExamService.detail` 500'd on any exam filed under an exam block** — it selected
+    `CalendarEvent.name`, and the column is `title`. Dormant since V1-8 precisely because nothing
+    populated `exam_event_id`; the new grid turned that line into the module's main path.
+  - **Students → Exams redesigned + ABC bands → Exams (new tab), one component.** The landing was
+    class tiles over a flat feed: you picked a class, then picked your subject *again* inside the
+    capture form from a dropdown of every subject in the school — most of which the server now
+    refuses. Now **class → subject → record**, with the subject **pinned** into `ExamCapture`
+    (`fixedSubjectId`), and the feed below filtered to that pair and **paginated**
+    (`ExamService.feed_page`, `GET /assessments/exams/page`) — the old `limit`-capped list left the
+    31st test of a term unreachable from any screen. `components/school/exam-workbench.tsx` is
+    mounted twice: Students (every class-subject she teaches, from `/planner/my-subjects`) and ABC
+    bands (only **monitored** class-subjects, type pinned to `band_test`). Deliberately the same
+    screen — a band test IS an exam (`D-76`), and a band-specific capture surface would be a second
+    place for a child's mark to live. ⚠️ Recording there still **does not move a band**: the letter
+    moves from a *locked* test in Manage bands with the moves reviewed first (`D-70`/`S-184`/`Q-81`).
+  - New: `services/main_exams.py`, `schemas/main_exams.py`, `endpoints/main_exams.py` (`/main-exams`),
+    `components/school/{main-exam-board,exam-workbench}.tsx`, `/plan/exams`, `/bands/exams`.
+    `test_myclass_exams.py` (11) — the two syllabus scopes pinned in **both** directions, because a
+    scope test that only checks what is present cannot tell a block from an empty screen.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep

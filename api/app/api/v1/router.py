@@ -19,6 +19,7 @@ from app.api.v1.endpoints import (
     homework,
     insights,
     lucy,
+    main_exams,
     marketing,
     me,
     my_class,
@@ -75,6 +76,9 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 api_router.include_router(insights.router, prefix="/insights", tags=["insights"])
 api_router.include_router(daily_report.router, prefix="/reports", tags=["reports"])
 api_router.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
+# The school's own exam calendar (founder 2026-08-05) — the `exam_block`
+# calendar rows as a screen. Marks still go through /assessments/exams.
+api_router.include_router(main_exams.router, prefix="/main-exams", tags=["main-exams"])
 # V1-9 the support programme — bands, promotion, ownership and the weekly
 # check-in. Its own prefix because it is a programme, not an assessment surface.
 api_router.include_router(bands.router, prefix="/bands", tags=["bands"])

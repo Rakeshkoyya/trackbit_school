@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.core.coverage import PARTIAL_WEIGHT
 from app.core.exceptions import ForbiddenError, NotFoundError
-from app.core.homework_verdict import is_miss, verdict_weight
+from app.core.homework_verdict import is_miss, tally, verdict_weight
 from app.models import (
     AcademicYear,
     AssessmentCycle,
@@ -51,16 +51,23 @@ from app.models import (
     StudentAbsenceNote,
     StudentCategory,
     StudentNote,
+    Subject,
     TimetableSlot,
     User,
 )
 from app.schemas.my_class import (
+    HomeworkDayRow,
+    HomeworkItem,
+    HomeworkMissRow,
     MyClassAbsentee,
     MyClassAttendance,
     MyClassBands,
+    MyClassBandStudent,
     MyClassBandSubject,
     MyClassExams,
     MyClassHomework,
+    MyClassHomeworkDay,
+    MyClassHomeworkDays,
     MyClassOut,
     MyClassOverview,
     MyClassStudentRow,
@@ -74,11 +81,13 @@ from app.schemas.my_class import (
 from app.services.attendance import build_register, classify_marked_day, day_matrix
 from app.services.bands import BandService
 from app.services.calendar import org_working_days
+from app.services.exam_marks import load_class_marks
 from app.services.exams import ExamService
 from app.services.insights.actions import ActionService
 from app.services.my_syllabus import MySyllabusService
 from app.services.periods import visible_class_ids
 from app.services.school_clock import marking_period_nos, today_in
+from app.services.syllabus_board import SyllabusBoardService
 
 # Day statuses that mean "the child was in school at some point".
 PRESENT_STATUSES = ("present", "partial", "left_after_lunch")
@@ -162,7 +171,7 @@ class MyClassService:
 
         attendance = self._attendance_block(m, klass, roster, today)
         homework = self._homework_block(m, class_id, today)
-        bands = self._bands_block(m, roster)
+        bands = self._bands_block(m, roster, klass=klass)
         exams = self._exams_block(m, class_id)
         syllabus = self._syllabus_block(m, class_id)
 
@@ -436,12 +445,269 @@ class MyClassService:
                         else "amber" if out.completion_pct >= 70 else "red")
         return out
 
+    # ── the day book: what actually went home (founder, 2026-08-05) ──────────
+    def homework_days(self, m: CurrentMember, class_id: uuid.UUID, page: int = 1,
+                      size: int = 20) -> MyClassHomeworkDays:
+        """Today in full, every earlier day as a row.
+
+        Paginated over DAYS. The window is deliberately the whole year rather
+        than the funnel's fortnight: the funnel answers "how are we doing", this
+        answers "what went home on the 14th", and that question is asked about
+        dates long past the fortnight.
+        """
+        klass = self._klass(m, class_id)
+        today = today_in(m.org.timezone)
+        size = min(max(size, 1), 100)
+        page = max(page, 1)
+
+        roster_size = int(self.db.scalar(
+            select(func.count(Student.id)).where(
+                Student.org_id == m.org_id, Student.class_id == class_id,
+                Student.status == "active")) or 0)
+
+        # Every day this class was set homework, newest first. One query, and it
+        # is the pagination key — assignments per day vary from one to six and
+        # paging on them would cut a day in half.
+        days = [d for (d,) in self.db.execute(
+            select(HomeworkAssignment.date)
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   ClassSubject.class_id == class_id)
+            .group_by(HomeworkAssignment.date)
+            .order_by(HomeworkAssignment.date.desc())).all()]
+
+        # Today is shown in full above the table and is never also a row in it —
+        # the same day in two places invites the reader to compare them.
+        past = [d for d in days if d != today]
+        window = past[(page - 1) * size: page * size]
+
+        rows = self._day_rows(m, class_id, window, roster_size) if window else []
+        today_items = (self._day_items(m, class_id, today, roster_size)
+                       if today in days else [])
+
+        out = MyClassHomeworkDays(
+            class_id=class_id, class_label=_label(klass), today=today,
+            today_items=today_items, rows=rows, page=page, size=size,
+            total_days=len(past))
+        if today_items:
+            n = len(today_items)
+            subjects = sorted({i.subject_name for i in today_items})
+            out.headline = (f"{n} {_plural(n, 'homework')} went home today — "
+                            + ", ".join(subjects) + ".")
+        elif days:
+            out.headline = ("Nothing has been set today. The last homework for "
+                            f"this class was on {days[0]}.")
+        else:
+            out.headline = "No homework has ever been recorded for this class."
+        return out
+
+    def homework_day(self, m: CurrentMember, class_id: uuid.UUID,
+                     on: date) -> MyClassHomeworkDay:
+        """One day, opened — every homework in full, with who did not do it."""
+        klass = self._klass(m, class_id)
+        roster_size = int(self.db.scalar(
+            select(func.count(Student.id)).where(
+                Student.org_id == m.org_id, Student.class_id == class_id,
+                Student.status == "active")) or 0)
+        items = self._day_items(m, class_id, on, roster_size)
+        day = self._roll_up(on, items)
+        if not items:
+            headline = "No homework was set for this class on that day."
+        elif day.completion_pct is None:
+            headline = (f"{day.assignments} {_plural(day.assignments, 'homework')} "
+                        "set, and none of it has been gone through — so there is "
+                        "nothing to report about the children yet.")
+        else:
+            headline = (f"{day.completion_pct}% of the {day.graded} checked came "
+                        "back done"
+                        + (f", {day.late} of them late" if day.late else "")
+                        + (f" · {day.unchecked_assignments} still unchecked."
+                           if day.unchecked_assignments else "."))
+        return MyClassHomeworkDay(
+            class_id=class_id, class_label=_label(klass), date=on, day=day,
+            items=items, headline=headline)
+
+    def _day_items(self, m: CurrentMember, class_id: uuid.UUID, on: date,
+                   roster_size: int) -> list[HomeworkItem]:
+        """Every homework set on one day, with its verdicts. Four queries."""
+        rows = self.db.execute(
+            select(HomeworkAssignment, Subject.name, Subject.id, User.name,
+                   HomeworkCheck)
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .outerjoin(Membership, Membership.id == ClassSubject.teacher_member_id)
+            .outerjoin(User, User.id == Membership.user_id)
+            .outerjoin(HomeworkCheck, HomeworkCheck.assignment_id == HomeworkAssignment.id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   ClassSubject.class_id == class_id,
+                   HomeworkAssignment.date == on)
+            .order_by(Subject.name, HomeworkAssignment.created_at)).all()
+        if not rows:
+            return []
+
+        aids = [a.id for a, *_ in rows]
+        # The exception rows, with the child's name — this list IS the record of
+        # who did not do it, because doing it on time writes nothing (P1v2).
+        results: dict[uuid.UUID, list[HomeworkMissRow]] = defaultdict(list)
+        for aid, sid, status, note, name, roll in self.db.execute(
+            select(HomeworkResult.assignment_id, HomeworkResult.student_id,
+                   HomeworkResult.status, HomeworkResult.note,
+                   Student.full_name, Student.roll_no)
+            .join(Student, Student.id == HomeworkResult.student_id)
+            .where(HomeworkResult.org_id == m.org_id,
+                   HomeworkResult.assignment_id.in_(aids))
+            .order_by(Student.full_name)).all():
+            results[aid].append(HomeworkMissRow(
+                student_id=sid, full_name=name, roll_no=roll, status=status,
+                note=note))
+
+        personal = {a.student_id for a, *_ in rows if a.student_id}
+        names = dict(self.db.execute(
+            select(Student.id, Student.full_name)
+            .where(Student.id.in_(personal))).all()) if personal else {}
+        checkers = dict(self.db.execute(
+            select(Membership.id, User.name).join(User, User.id == Membership.user_id)
+            .where(Membership.id.in_(
+                {c.checked_by_member_id for *_x, c in rows
+                 if c is not None and c.checked_by_member_id}))).all())
+
+        out: list[HomeworkItem] = []
+        for a, subject_name, subject_id, teacher_name, check in rows:
+            item = HomeworkItem(
+                assignment_id=a.id, date=a.date, class_subject_id=a.class_subject_id,
+                subject_id=subject_id, subject_name=subject_name,
+                teacher_name=teacher_name, text=a.text, due_date=a.due_date,
+                student_id=a.student_id,
+                student_name=names.get(a.student_id) if a.student_id else None,
+                # A personal addition has a roster of exactly one.
+                given=1 if a.student_id else roster_size,
+                checked=check is not None,
+                checked_at=check.checked_at if check is not None else None,
+                checked_by_name=(checkers.get(check.checked_by_member_id)
+                                 if check is not None else None))
+            if check is not None:
+                misses = results.get(a.id, [])
+                item.misses = misses
+                counts = tally([r.status for r in misses])
+                item.late = counts.get("late", 0)
+                item.partial = counts.get("partial", 0)
+                item.not_done = counts.get("not_done", 0)
+                item.carried = counts.get("carried", 0)
+                item.waived = counts.get("waived", 0)
+                # Done on time is the ABSENCE of a row; carried and waived leave
+                # the denominator entirely (`D-34`/`S-98`).
+                item.graded = max(0, item.given - item.carried - item.waived)
+                on_time = max(0, item.given - len(misses))
+                item.done = on_time + item.late
+                weighted = on_time + item.late + PARTIAL_WEIGHT * item.partial
+                item.completion_pct = (round(weighted / item.graded * 100, 1)
+                                       if item.graded else None)
+            out.append(item)
+        return out
+
+    def _day_rows(self, m: CurrentMember, class_id: uuid.UUID, days: list[date],
+                  roster_size: int) -> list[HomeworkDayRow]:
+        """The table's rows. One pass over the page's days, not one query each."""
+        rows = self.db.execute(
+            select(HomeworkAssignment.id, HomeworkAssignment.date,
+                   HomeworkAssignment.student_id, Subject.name, HomeworkCheck.id)
+            .join(ClassSubject, ClassSubject.id == HomeworkAssignment.class_subject_id)
+            .join(Subject, Subject.id == ClassSubject.subject_id)
+            .outerjoin(HomeworkCheck, HomeworkCheck.assignment_id == HomeworkAssignment.id)
+            .where(HomeworkAssignment.org_id == m.org_id,
+                   ClassSubject.class_id == class_id,
+                   HomeworkAssignment.date.in_(days))).all()
+        verdicts: dict[uuid.UUID, dict[str, int]] = defaultdict(dict)
+        aids = [r[0] for r in rows]
+        if aids:
+            for aid, status, n in self.db.execute(
+                select(HomeworkResult.assignment_id, HomeworkResult.status,
+                       func.count(HomeworkResult.id))
+                .where(HomeworkResult.org_id == m.org_id,
+                       HomeworkResult.assignment_id.in_(aids))
+                .group_by(HomeworkResult.assignment_id, HomeworkResult.status)).all():
+                verdicts[aid][status] = int(n)
+
+        by_day: dict[date, HomeworkDayRow] = {
+            d: HomeworkDayRow(date=d) for d in days}
+        subjects: dict[date, set[str]] = defaultdict(set)
+        weighted: dict[date, float] = defaultdict(float)
+        for aid, d, student_id, subject_name, check_id in rows:
+            row = by_day[d]
+            row.assignments += 1
+            subjects[d].add(subject_name)
+            given = 1 if student_id else roster_size
+            row.given += given
+            if check_id is None:
+                row.not_checked += given
+                row.unchecked_assignments += 1
+                continue
+            row.checked += given
+            v = verdicts.get(aid, {})
+            late = v.get("late", 0)
+            partial = v.get("partial", 0)
+            not_done = v.get("not_done", 0)
+            carried = v.get("carried", 0)
+            waived = v.get("waived", 0)
+            exceptions = late + partial + not_done + carried + waived
+            on_time = max(0, given - exceptions)
+            graded = max(0, given - carried - waived)
+            row.graded += graded
+            row.late += late
+            row.missed += not_done + partial
+            weighted[d] += on_time + late + PARTIAL_WEIGHT * partial
+
+        out: list[HomeworkDayRow] = []
+        for d in days:
+            row = by_day[d]
+            row.subjects = sorted(subjects[d])
+            row.done_weighted = round(weighted[d], 1)
+            row.completion_pct = (round(weighted[d] / row.graded * 100, 1)
+                                  if row.graded else None)
+            row.tone = self._hw_tone(row.completion_pct)
+            out.append(row)
+        return out
+
+    @staticmethod
+    def _hw_tone(pct: float | None) -> str:
+        """A day nobody checked is NEUTRAL, never red — HW-1's rule, and the one
+        thing this table could most easily get wrong at a glance."""
+        if pct is None:
+            return "neutral"
+        return "green" if pct >= 85 else "amber" if pct >= 70 else "red"
+
+    @staticmethod
+    def _roll_up(on: date, items: list[HomeworkItem]) -> HomeworkDayRow:
+        row = HomeworkDayRow(date=on, assignments=len(items),
+                             subjects=sorted({i.subject_name for i in items}))
+        weighted = 0.0
+        for i in items:
+            row.given += i.given
+            if not i.checked:
+                row.not_checked += i.given
+                row.unchecked_assignments += 1
+                continue
+            row.checked += i.given
+            row.graded += i.graded
+            row.late += i.late
+            row.missed += i.not_done + i.partial
+            on_time = i.done - i.late
+            weighted += on_time + i.late + PARTIAL_WEIGHT * i.partial
+        row.done_weighted = round(weighted, 1)
+        row.completion_pct = (round(weighted / row.graded * 100, 1)
+                              if row.graded else None)
+        row.tone = MyClassService._hw_tone(row.completion_pct)
+        return row
+
     # ── the support tiers, per subject ───────────────────────────────────────
     def bands_board(self, m: CurrentMember, class_id: uuid.UUID) -> MyClassBands:
-        self._klass(m, class_id)
-        return self._bands_block(m, self._class_roster(m, class_id))
+        klass = self._klass(m, class_id)
+        return self._bands_block(m, self._class_roster(m, class_id),
+                                 klass=klass, with_students=True)
 
-    def _bands_block(self, m: CurrentMember, roster: list[Student]) -> MyClassBands:
+    def _bands_block(self, m: CurrentMember, roster: list[Student],
+                     klass: SchoolClass | None = None,
+                     with_students: bool = False) -> MyClassBands:
         """A/B/C per MONITORED subject, for this class.
 
         The unit is the PLACEMENT, not the child (`D-75`) — there is no overall
@@ -458,7 +724,19 @@ class MyClassService:
                             if not monitored else "No children on the roll.")
             return out
 
-        placements = bands.placements(m, [s.id for s in roster])
+        ids = [s.id for s in roster]
+        placements = bands.placements(m, ids)
+
+        # Expanded, the subject names its children and says how each is doing in
+        # THAT subject — the one figure a band is supposed to be about. Loaded
+        # only for the tab; the Overview's block is counts and does not pay for
+        # it. Both are batched reads, four queries and one walk, not per child.
+        marks = attendance = None
+        if with_students and klass is not None and ids:
+            marks = load_class_marks(self.db, m.org_id, klass.id, ids)
+            attendance, _captured, _away = self._attendance_window(
+                m, klass, roster, today_in(m.org.timezone), STUDENT_WINDOW)
+
         for subject in monitored:
             row = MyClassBandSubject(subject_id=subject.id, subject_name=subject.name)
             for s in roster:
@@ -471,7 +749,18 @@ class MyClassService:
                 elif tier == "C":
                     row.c += 1
                 else:
+                    # Not a tier and never rendered as one — only the
+                    # denominator beside "assessed" (`D-75`).
                     row.not_assessed += 1
+                    continue
+                if not with_students:
+                    continue
+                row.students.append(self._band_student(
+                    s, tier, subject.id, marks, attendance))
+            # A band is a teaching group, so the list reads A → B → C and by
+            # name inside a tier: never ordered by the percentage, which would
+            # make it a ranking of children (`S-170`).
+            row.students.sort(key=lambda r: ("ABC".index(r.tier), r.full_name))
             row.assessed = row.a + row.b + row.c
             out.subjects.append(row)
 
@@ -486,6 +775,36 @@ class MyClassService:
                 f"{out.monitored} monitored {_plural(out.monitored, 'subject')}"
                 + (f", most of them in {worst.subject_name}." if worst.c else "."))
         return out
+
+    @staticmethod
+    def _band_student(s: Student, tier: str, subject_id: uuid.UUID,
+                      marks, attendance) -> MyClassBandStudent:
+        """One child under a tier, with how they are actually doing in it.
+
+        The figure is `ClassMarks.figures`' — the school's marks read through
+        `core/exams.py`, which refuses to pool a slip test with a term paper. So
+        the row carries the **scale its percentage came from**, and prefers the
+        major one where both exist: standing is read from major, trajectory from
+        minor, and a bare blended number is the one thing that module exists to
+        make un-writable. Nothing recorded is null, never 0.
+        """
+        row = MyClassBandStudent(
+            student_id=s.id, full_name=s.full_name, roll_no=s.roll_no, tier=tier)
+        if attendance is not None:
+            row.attendance_pct = attendance.get(s.id, (None, 0, 0))[0]
+        if marks is None:
+            return row
+        figures = [f for f in marks.figures(s.id, subject_id) if f.tests_held]
+        if not figures:
+            return row
+        best = next((f for f in figures if f.scale == "major" and f.tests_taken), None) \
+            or next((f for f in figures if f.tests_taken), figures[0])
+        row.scale = best.scale
+        row.pct = best.pct
+        row.tests_taken = best.tests_taken
+        row.tests_held = best.tests_held
+        row.sentence = best.sentence()
+        return row
 
     # ── exams ────────────────────────────────────────────────────────────────
     def _exams_block(self, m: CurrentMember, class_id: uuid.UUID) -> MyClassExams:
@@ -528,6 +847,26 @@ class MyClassService:
             # the board rather than a 403 for the whole page.
             return None
 
+    def syllabus_board(self, m: CurrentMember, class_id: uuid.UUID,
+                       term_id: uuid.UUID | None = None):
+        """The SY-1 chapter table, for every subject this class takes.
+
+        The same `SyllabusBoardService.board` the Plan tab renders — chapter by
+        chapter, with planned dates, the frozen baseline, pace and the status
+        word — and not a second, thinner shape of it. The per-subject pace list
+        the Overview carries answers *"is Maths moving?"*; a class teacher asked
+        for a chapter also needs to know **which** chapter and when it was due,
+        and that is a table.
+
+        `whole_class=True` is safe here and only here: `_klass` has already
+        established this is her homeroom (or that she is an admin), which is
+        exactly the fact Plan → Syllabus deliberately no longer reads.
+        """
+        klass = self._klass(m, class_id)
+        return SyllabusBoardService(self.db).board(
+            m, klass.academic_year_id, class_id=class_id, term_id=term_id,
+            whole_class=True)
+
     # ── the roster as a table, each row a door into a child's file ───────────
     def students(self, m: CurrentMember, class_id: uuid.UUID,
                  days: int = STUDENT_WINDOW) -> MyClassStudentsOut:
@@ -550,30 +889,8 @@ class MyClassService:
             return out
 
         ids = [s.id for s in roster]
-        year = self.db.get(AcademicYear, klass.academic_year_id)
-        marking = marking_period_nos(
-            year.period_times if year else None, m.org.attendance_mode)
-
-        # Attendance over the window, from the same matrix the register draws.
-        marked, exc = day_matrix(self.db, m.org_id, [class_id], since, today)
-        captured = sorted({d for (_c, d) in marked if marked[(_c, d)]})
-        absent_days: dict[uuid.UUID, int] = defaultdict(int)
-        marked_days: dict[uuid.UUID, int] = defaultdict(int)
-        absent_today: set[uuid.UUID] = set()
-        for d in captured:
-            periods = marked.get((class_id, d), [])
-            for s in roster:
-                # `S-02`: a mid-year joiner's denominator starts at enrolment.
-                if s.enrolled_on and d < s.enrolled_on:
-                    continue
-                per = exc.get((s.id, d), {})
-                status, _l = classify_marked_day(
-                    periods, {p: st for p, (st, _r) in per.items()}, marking)
-                marked_days[s.id] += 1
-                if status == "absent":
-                    absent_days[s.id] += 1
-                    if d == today:
-                        absent_today.add(s.id)
+        att, captured, absent_today = self._attendance_window(
+            m, klass, roster, today, days)
 
         homework = self._student_homework(m, class_id, ids, since, today)
         placements = BandService(self.db).placements(m, ids)
@@ -593,9 +910,7 @@ class MyClassService:
             .where(StudentCategory.org_id == m.org_id)).all())
 
         for s in roster:
-            md = marked_days.get(s.id, 0)
-            absent = absent_days.get(s.id, 0)
-            pct = round((md - absent) / md * 100, 1) if md else None
+            pct, md, absent = att.get(s.id, (None, 0, 0))
             hw = homework.get(s.id)
             gname, gphone = guardians.get(s.id, (None, None))
             # The chip is "C · Hindi" (`S-186`) — the lowest band with the
@@ -638,6 +953,54 @@ class MyClassService:
                             "this class in the window, so there is no attendance "
                             "figure to show.")
         return out
+
+    def _attendance_window(self, m: CurrentMember, klass: SchoolClass,
+                           roster: list[Student], today: date, days: int,
+                           ) -> tuple[dict[uuid.UUID, tuple[float | None, int, int]],
+                                      list[date], set[uuid.UUID]]:
+        """student → (attendance %, marked days, days absent), over `days`.
+
+        Extracted so the roster table and the band tiers read ONE walk of the
+        register rather than each writing their own — the `S-51` rule at the
+        smallest scale it still matters at, since two lists on two tabs quoting
+        different attendance for the same child is exactly the defect.
+
+        The denominator is the days THIS class marked, and a child with nothing
+        captured gets `None`, never 0: a class nobody took the register for must
+        not read as a class of absentees.
+        """
+        since = today - timedelta(days=max(1, days) - 1)
+        year = self.db.get(AcademicYear, klass.academic_year_id)
+        marking = marking_period_nos(
+            year.period_times if year else None, m.org.attendance_mode)
+        marked, exc = day_matrix(self.db, m.org_id, [klass.id], since, today)
+        captured = sorted({d for (_c, d) in marked if marked[(_c, d)]})
+
+        absent_days: dict[uuid.UUID, int] = defaultdict(int)
+        marked_days: dict[uuid.UUID, int] = defaultdict(int)
+        absent_today: set[uuid.UUID] = set()
+        for d in captured:
+            periods = marked.get((klass.id, d), [])
+            for s in roster:
+                # `S-02`: a mid-year joiner's denominator starts at enrolment.
+                if s.enrolled_on and d < s.enrolled_on:
+                    continue
+                per = exc.get((s.id, d), {})
+                status, _l = classify_marked_day(
+                    periods, {p: st for p, (st, _r) in per.items()}, marking)
+                marked_days[s.id] += 1
+                if status == "absent":
+                    absent_days[s.id] += 1
+                    if d == today:
+                        absent_today.add(s.id)
+
+        out: dict[uuid.UUID, tuple[float | None, int, int]] = {}
+        for s in roster:
+            md = marked_days.get(s.id, 0)
+            absent = absent_days.get(s.id, 0)
+            out[s.id] = (round((md - absent) / md * 100, 1) if md else None,
+                         md, absent)
+        return out, captured, absent_today
 
     def _student_homework(self, m: CurrentMember, class_id: uuid.UUID,
                           ids: list[uuid.UUID], since: date, today: date,

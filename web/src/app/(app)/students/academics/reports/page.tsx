@@ -28,7 +28,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { FileText } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -144,13 +145,19 @@ function ReportGrid({ classId }: { classId: string }) {
 function Reports() {
   const { me } = useAuth();
   const { yearId } = useYear();
+  // Plan → Exams links straight here with a class on it ("Report cards" beside
+  // a class's papers), so the link lands on the card being asked about rather
+  // than on whichever class sorts first.
+  const wanted = useSearchParams().get("class");
   const [classId, setClassId] = useState<string | null>(null);
   const { data: classes = [] } = useQuery({
     queryKey: ["classes", yearId, me?.org_role !== "admin"],
     queryFn: () => schoolApi.classes(yearId ?? undefined, me?.org_role !== "admin"),
     enabled: !!yearId,
   });
-  const active = classId ?? classes[0]?.id ?? null;
+  const active = classId
+    ?? (classes.some((c) => c.id === wanted) ? wanted : null)
+    ?? classes[0]?.id ?? null;
 
   return (
     <div>
@@ -183,7 +190,10 @@ function Reports() {
 export default function AcademicsReportsPage() {
   return (
     <AuthGuard>
-      <Reports />
+      {/* `useSearchParams` needs its own boundary. */}
+      <Suspense fallback={<PageLoading />}>
+        <Reports />
+      </Suspense>
     </AuthGuard>
   );
 }

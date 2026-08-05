@@ -375,6 +375,21 @@ export const schoolApi = {
       `/my-class/${classId}/homework${qs({ days: days ? String(days) : undefined })}`),
   myClassBands: (classId: string) =>
     api.get<import("@/lib/school-types").MyClassBands>(`/my-class/${classId}/bands`),
+  /** The SY-1 chapter table for EVERY subject her class takes — the same board
+   *  Plan → Syllabus renders, at the one scope Plan no longer offers. */
+  myClassSyllabus: (classId: string, termId?: string) =>
+    api.get<import("@/lib/syllabus-types").SyllabusBoard>(
+      `/my-class/${classId}/syllabus${qs({ term_id: termId })}`),
+  /** The homework day book: today in full, earlier days as openable rows. */
+  myClassHomeworkDays: (classId: string, p: { page?: number; size?: number } = {}) =>
+    api.get<import("@/lib/school-types").MyClassHomeworkDays>(
+      `/my-class/${classId}/homework/days${qs({
+        page: p.page ? String(p.page) : undefined,
+        size: p.size ? String(p.size) : undefined,
+      })}`),
+  myClassHomeworkDay: (classId: string, on: string) =>
+    api.get<import("@/lib/school-types").MyClassHomeworkDay>(
+      `/my-class/${classId}/homework/day${qs({ on })}`),
   /** The class teacher's own log about a child — staff-only, append-only. */
   studentNotes: (studentId: string) =>
     api.get<import("@/lib/school-types").StudentNotes>(
@@ -488,6 +503,35 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").ExamDetail>(`/assessments/exams/${cycleId}`),
   saveExam: (b: import("@/lib/school-types").ExamSaveBody) =>
     api.post<import("@/lib/school-types").ExamDetail>("/assessments/exams", b),
+  /** The feed with a page and a total (founder 2026-08-05). A school records
+   *  dozens of tests a term and the flat `limit` list left the 31st
+   *  unreachable from any screen. */
+  examFeedPage: (p: {
+    classId?: string; subjectId?: string; examEventId?: string;
+    scale?: "minor" | "major"; page?: number; size?: number;
+  } = {}) =>
+    api.get<import("@/lib/school-types").ExamFeedPage>(
+      `/assessments/exams/page${qs({
+        class_id: p.classId, subject_id: p.subjectId,
+        exam_event_id: p.examEventId, scale: p.scale,
+        page: p.page ? String(p.page) : undefined,
+        size: p.size ? String(p.size) : undefined,
+      })}`),
+
+  // ── the school's own exam calendar (founder, 2026-08-05) ──────────────────
+  // `calendar_events` where type='exam_block', as a screen. Marks still go
+  // through `saveExam` — one write path for every mark in the product.
+  mainExams: (yearId?: string) =>
+    api.get<import("@/lib/school-types").MainExamBoard>(
+      `/main-exams${qs({ year_id: yearId })}`),
+  mainExam: (eventId: string) =>
+    api.get<import("@/lib/school-types").MainExamDetail>(`/main-exams/${eventId}`),
+  createMainExam: (b: import("@/lib/school-types").MainExamBody) =>
+    api.post<import("@/lib/school-types").MainExamRow>("/main-exams", b),
+  updateMainExam: (eventId: string, b: import("@/lib/school-types").MainExamBody) =>
+    api.patch<import("@/lib/school-types").MainExamRow>(`/main-exams/${eventId}`, b),
+  deleteMainExam: (eventId: string) =>
+    api.del<{ message: string }>(`/main-exams/${eventId}`),
   // V1-8 (D-80): the exam's second tab — the analysis beside Score's numbers.
   examReport: (cycleId: string) =>
     api.get<import("@/lib/school-types").ExamReport>(`/assessments/exams/${cycleId}/report`),

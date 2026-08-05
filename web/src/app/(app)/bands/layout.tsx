@@ -67,6 +67,10 @@ export default function BandsLayout({ children }: { children: React.ReactNode })
             // hunting. Her list is her own; the school's is Reports.
             { label: "My students", href: "/bands/my-students" },
             { label: "Assessments", href: "/bands/assessments" },
+            // Founder 2026-08-05. Keyed on `can_band` like Manage bands: the
+            // band test is a monitored class-subject's exam, so an owner who
+            // teaches none of them would open it on "nothing here".
+            ...(canBand ? [{ label: "Exams", href: "/bands/exams" }] : []),
           ]}
         />
         {children}

@@ -1,92 +1,106 @@
 "use client";
 
 /**
- * Scores landing (SC-5) — pick a class to record a test, scroll the feed of
- * previous exams below. Teachers see the classes they teach; the admin sees
- * all. Each feed card opens the saved exam for review/edit.
+ * Students → Academics → Exams (SC-5; redesigned by the founder 2026-08-05).
+ *
+ * It was a grid of class tiles over a flat feed. Pick a class, land on a
+ * capture form, and pick your subject again there — from a dropdown of every
+ * subject in the school, most of which are not yours. And the feed was
+ * `limit`-capped and unfiltered, so the 31st test of the term was unreachable
+ * from any screen.
+ *
+ * Now: **class, then subject, then record** — and the feed underneath is filtered
+ * to that pair and paginated, so "how did 6-B do in Hindi this term" is a
+ * question the screen can answer.
+ *
+ * The scope is the two roles' own:
+ *
+ *   a teacher   `/planner/my-subjects` — the class-subjects assigned to HER,
+ *               which is exactly the set `assert_can_record_subject` now
+ *               permits her to write. Offering her a colleague's subject would
+ *               be offering a refusal.
+ *   an admin    every class, every subject.
  */
 
-import { useQuery } from "@tanstack/react-query";
-import { Camera, ChevronRight, ClipboardList, GraduationCap, Lock, Plus, Users } from "lucide-react";
-import Link from "next/link";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { NewCycleSheet } from "@/components/school/assessments";
-import { EXAM_TYPE_LABEL } from "@/components/school/exam-capture";
+import { ExamWorkbench, type WorkbenchClass } from "@/components/school/exam-workbench";
 import { YearSwitcher } from "@/components/school/year-switcher";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
 import { schoolApi } from "@/lib/school-api";
-import type { ExamSummary } from "@/lib/school-types";
 
-function ExamPost({ exam }: { exam: ExamSummary }) {
-  return (
-    <Link href={`/students/academics/exams/exam/${exam.id}`}
-      className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <p className="text-sm font-semibold">{exam.name}</p>
-          {/* V1-8 `D-55`: the school's OWN word for the type, falling back to
-              the system kind's label only where nobody has named one. */}
-          <Badge tone="neutral">{exam.type_label || EXAM_TYPE_LABEL[exam.type] || exam.type}</Badge>
-          {exam.locked ? <Badge tone="success"><Lock className="h-3 w-3" /> locked</Badge> : null}
-          {exam.class_label ? <Badge tone="neutral">{exam.class_label}</Badge> : <Badge tone="neutral">All classes</Badge>}
-          {exam.subject_name ? <Badge tone="neutral">{exam.subject_name}</Badge> : null}
-          {exam.few_students ? <Badge tone="warning"><Users className="h-3 w-3" /> {exam.roster_count} students</Badge> : null}
-        </div>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
-          {exam.date}
-          {exam.topic ? ` · ${exam.topic}` : ""}
-          {exam.total_marks ? ` · out of ${exam.total_marks}` : ""}
-          {exam.created_by_name ? ` · by ${exam.created_by_name}` : ""}
-          {exam.page_count ? ` · ${exam.page_count} photo${exam.page_count === 1 ? "" : "s"}` : ""}
-        </p>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">{exam.scored_count}</span>
-          {exam.roster_count ? `/${exam.roster_count}` : ""} marks recorded
-          {exam.verified ? " · verified" : ""}
-          {/* `S-114`: which bucket this exam sits in — a slip test and a term
-              exam are never added together anywhere downstream. */}
-          {exam.scale === "major" ? " · major exam" : ""}
-        </p>
-      </div>
-      <div className="shrink-0 text-right">
-        {exam.avg_pct != null ? (
-          <>
-            <p className="text-2xl font-bold tabular-nums">{exam.avg_pct}%</p>
-            <p className="text-[11px] text-muted-foreground">class average</p>
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground">no marks yet</p>
-        )}
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-    </Link>
-  );
+/** An admin's scope: every class, and every subject on it. One query per class,
+ *  run together — a school has a dozen or two, not a thousand. */
+function useAdminScope(yearId: string | null) {
+  const { data: classes = [], isLoading } = useQuery({
+    queryKey: ["classes", yearId, "all"],
+    queryFn: () => schoolApi.classes(yearId!),
+    enabled: !!yearId,
+  });
+  const subjectQueries = useQueries({
+    queries: classes.map((c) => ({
+      queryKey: ["class-subjects", c.id],
+      queryFn: () => schoolApi.classSubjects(c.id),
+    })),
+  });
+  const rows: WorkbenchClass[] = classes.map((c, i) => ({
+    class_id: c.id,
+    class_label: `${c.name}${c.section ? `-${c.section}` : ""}`,
+    subjects: (subjectQueries[i]?.data ?? [])
+      .filter((cs) => cs.subject_id)
+      .map((cs) => ({ id: cs.subject_id, label: cs.subject_name ?? "Subject" })),
+  }));
+  return { rows, isLoading: isLoading || subjectQueries.some((q) => q.isLoading) };
 }
 
-function ScoresInner() {
+/** A teacher's scope: the class-subjects assigned to her, grouped by class. */
+function useTeacherScope(yearId: string | null) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["my-subjects", yearId],
+    queryFn: () => schoolApi.mySubjects(yearId ?? undefined),
+  });
+  const byClass = new Map<string, WorkbenchClass>();
+  for (const r of data?.rows ?? []) {
+    if (!r.subject_id) continue;
+    const entry = byClass.get(r.class_id) ?? {
+      class_id: r.class_id, class_label: r.class_label, subjects: [],
+    };
+    if (!entry.subjects.some((s) => s.id === r.subject_id)) {
+      entry.subjects.push({ id: r.subject_id, label: r.subject_name });
+    }
+    byClass.set(r.class_id, entry);
+  }
+  return { rows: [...byClass.values()], isLoading };
+}
+
+function ExamsInner() {
   const { me } = useAuth();
   const isAdmin = me?.org_role === "admin";
   const { yearId } = useYear();
   const [newCycle, setNewCycle] = useState(false);
 
-  const { data: classes = [] } = useQuery({
-    queryKey: ["classes", yearId, !isAdmin],
-    queryFn: () => schoolApi.classes(yearId!, !isAdmin),
+  const admin = useAdminScope(isAdmin ? yearId : null);
+  const teacher = useTeacherScope(isAdmin ? null : yearId);
+  const scope = isAdmin ? admin : teacher;
+
+  const { data: terms = [] } = useQuery({
+    queryKey: ["terms", yearId],
+    queryFn: () => schoolApi.terms(yearId ?? undefined),
     enabled: !!yearId,
   });
-  const { data: terms = [] } = useQuery({ queryKey: ["terms", yearId], queryFn: () => schoolApi.terms(yearId ?? undefined), enabled: !!yearId });
-  const { data: feed = [], isLoading } = useQuery({ queryKey: ["exam-feed"], queryFn: () => schoolApi.examFeed({ limit: 30 }) });
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <PageHeader title="Scores" subtitle="Record a test's results, browse previous exams" />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <PageHeader title="Exams"
+          subtitle="Record a test for a class and subject, and read every previous one" />
         <div className="flex flex-wrap items-center justify-end gap-2">
           <YearSwitcher />
           {isAdmin ? (
@@ -97,51 +111,22 @@ function ScoresInner() {
         </div>
       </div>
 
-      {/* 1 · pick a class to record a test */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {classes.map((c) => (
-          <Link key={c.id} href={`/students/academics/exams/${c.id}`}
-            className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.99]">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
-              <GraduationCap className="h-5 w-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold">
-                Class {c.name}{c.section ? `-${c.section}` : ""}
-              </span>
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Camera className="h-3 w-3" /> record a test
-              </span>
-            </span>
-          </Link>
-        ))}
-        {classes.length === 0 ? (
-          <p className="col-span-full rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-            {isAdmin ? "No classes in this year yet — set them up first." : "No classes assigned to you yet."}
-          </p>
-        ) : null}
-      </div>
+      <ExamWorkbench classes={scope.rows} isLoading={scope.isLoading}
+        captureHint="Photograph the marked scripts or type the marks — review, then save."
+        emptyScopeText={isAdmin
+          ? "No classes in this year yet — set them up in Setup → Academics."
+          : "You are not assigned to any subject yet, so there is nothing here to record. Your admin assigns subjects in Setup → Academics."} />
 
-      {/* 2 · previous exams */}
-      <h2 className="mb-2 text-sm font-semibold text-muted-foreground">Previous exams</h2>
-      <div className="space-y-2.5">
-        {feed.map((exam) => <ExamPost key={exam.id} exam={exam} />)}
-        {!isLoading && feed.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-            <ClipboardList className="mx-auto mb-2 h-6 w-6" /> No exams recorded yet — tap a class above to record the first one.
-          </p>
-        ) : null}
-      </div>
-
-      <NewCycleSheet open={newCycle} onOpenChange={setNewCycle} termId={terms[0]?.id ?? null} yearId={yearId} />
+      <NewCycleSheet open={newCycle} onOpenChange={setNewCycle}
+        termId={terms[0]?.id ?? null} yearId={yearId} />
     </div>
   );
 }
 
-export default function ScoresPage() {
+export default function ExamsPage() {
   return (
     <AuthGuard allow={["admin", "teacher"]}>
-      <ScoresInner />
+      <ExamsInner />
     </AuthGuard>
   );
 }

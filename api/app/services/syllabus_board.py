@@ -14,8 +14,17 @@ traced to the roll-up the tab it links to already renders.
 
 Scope is the only thing that differs between the admin's board and the
 teacher's, and it is a **block, not a filter** (`D-15`): her rows are chosen by
-`teacher_member_id` ∪ the homeroom she owns (AT-1's `visible_class_ids`), so
-another teacher's subject is never loaded and then dropped.
+`teacher_member_id`, so another teacher's subject is never loaded and then
+dropped.
+
+**Founder 2026-08-05: the homeroom is NOT in that set here.** It used to be —
+`visible_class_ids`' subjects ∪ homeroom — which put every subject of her own
+class on the board she opens to plan *her teaching*, mixed in with her own rows
+and outnumbering them five to one. Her class's other subjects are somebody
+else's plan; what she needs from them is a read of how her children are doing,
+and that read now has its own door in **My Class → Syllabus**, which asks for
+this same board with `whole_class=True` after checking she owns the homeroom.
+One computation, two scopes, and each screen answers one question.
 
 Query budget: six, for any number of classes.
 """
@@ -97,13 +106,23 @@ class SyllabusBoardService:
     def board(self, m: CurrentMember, year_id: uuid.UUID | None = None,
               *, class_id: uuid.UUID | None = None,
               class_subject_id: uuid.UUID | None = None,
-              term_id: uuid.UUID | None = None) -> SyllabusBoardOut:
+              term_id: uuid.UUID | None = None,
+              whole_class: bool = False) -> SyllabusBoardOut:
         """The whole board. `class_id`/`class_subject_id`/`term_id` narrow it;
-        none of them widen it past what this member may see."""
+        none of them widen it past what this member may see.
+
+        `whole_class` is the ONE exception and it is deliberately not reachable
+        from the HTTP route: it lifts the own-subjects filter for the class
+        already named in `class_id`, and only `MyClassService` sets it, after
+        `_klass` has established that this member is that homeroom's teacher.
+        Putting the flag on the endpoint would let any teacher ask for any
+        class's board by guessing an id.
+        """
         today = today_in(m.org.timezone)
         year = self._year(m, year_id)
         allowed = visible_class_ids(self.db, m)
-        scope = "school" if allowed is None else "mine"
+        scope = ("school" if allowed is None
+                 else "class" if whole_class else "mine")
         if year is None:
             return SyllabusBoardOut(as_of=today, scope=scope,
                                     headline="No academic year is set up yet.")
@@ -122,18 +141,16 @@ class SyllabusBoardService:
         if class_subject_id is not None:
             q = q.where(ClassSubject.id == class_subject_id)
         rows = self.db.execute(q).all()
-        if allowed is not None:
-            # Her own subjects, plus every subject of the homeroom she owns.
-            homerooms = set(self.db.scalars(select(SchoolClass.id).where(
-                SchoolClass.org_id == m.org_id,
-                SchoolClass.class_teacher_member_id == m.membership.id)))
-            rows = [r for r in rows
-                    if r[0].teacher_member_id == m.membership.id
-                    or r[0].class_id in homerooms]
+        if allowed is not None and not whole_class:
+            # Her own subjects, and nothing else. The homeroom she owns is a
+            # different question with its own screen (My Class → Syllabus).
+            rows = [r for r in rows if r[0].teacher_member_id == m.membership.id]
         if not rows:
             return SyllabusBoardOut(
                 academic_year_id=year.id, as_of=today, scope=scope,
                 headline=("No classes in this year yet." if scope == "school"
+                          else "This class has no subjects set up yet."
+                          if scope == "class"
                           else "You are not assigned to any class-subject yet."))
 
         cs_ids = [cs.id for cs, _k, _s, _t in rows]
@@ -238,7 +255,8 @@ class SyllabusBoardService:
         says what has been finished — never "0 overdue", which reads as a
         warning that failed to fire.
         """
-        who = "Your subjects" if scope == "mine" else "The school"
+        who = ("Your subjects" if scope == "mine"
+               else "This class" if scope == "class" else "The school")
         if not total:
             return "No chapters recorded yet — import a syllabus to fill this in."
         done = tally[CHAPTER_COMPLETED]

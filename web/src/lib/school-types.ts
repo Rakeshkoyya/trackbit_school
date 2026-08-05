@@ -3084,6 +3084,100 @@ export interface MyClassHomework {
   tone: SchoolTone;
 }
 
+/** One child who did not simply do it. Doing it on time writes no row (P1v2),
+ *  so this list IS the record — everyone absent from it did the work. */
+export interface HomeworkMissRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  /** not_done | partial | late | carried | waived */
+  status: string;
+  note: string | null;
+}
+
+/** One homework as the children received it — the text, and what came back. */
+export interface HomeworkItem {
+  assignment_id: string;
+  date: string;
+  class_subject_id: string;
+  subject_id: string | null;
+  subject_name: string;
+  teacher_name: string | null;
+  text: string;
+  due_date: string | null;
+  /** Set = a personal addition; its roster is exactly one child. */
+  student_id: string | null;
+  student_name: string | null;
+  given: number;
+  /** HW-1: false means nobody has gone through it — never "everyone did it".
+   *  While it is false `completion_pct` stays null rather than becoming 0. */
+  checked: boolean;
+  checked_at: string | null;
+  checked_by_name: string | null;
+  done: number;
+  late: number;
+  partial: number;
+  not_done: number;
+  carried: number;
+  waived: number;
+  graded: number;
+  completion_pct: number | null;
+  misses: HomeworkMissRow[];
+}
+
+/** One school day of homework, rolled up — the day book's row. */
+export interface HomeworkDayRow {
+  date: string;
+  assignments: number;
+  subjects: string[];
+  given: number;
+  checked: number;
+  not_checked: number;
+  graded: number;
+  done_weighted: number;
+  completion_pct: number | null;
+  late: number;
+  missed: number;
+  unchecked_assignments: number;
+  tone: SchoolTone;
+}
+
+export interface MyClassHomeworkDays {
+  class_id: string;
+  class_label: string;
+  today: string;
+  today_items: HomeworkItem[];
+  rows: HomeworkDayRow[];
+  page: number;
+  size: number;
+  total_days: number;
+  headline: string;
+}
+
+export interface MyClassHomeworkDay {
+  class_id: string;
+  class_label: string;
+  date: string;
+  day: HomeworkDayRow;
+  items: HomeworkItem[];
+  headline: string;
+}
+
+/** One child under a subject's band, with how they are doing in THAT subject.
+ *  `pct` carries the scale it came from — minor and major never pool. */
+export interface MyClassBandStudent {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  tier: "A" | "B" | "C";
+  pct: number | null;
+  scale: string | null;
+  tests_taken: number;
+  tests_held: number;
+  sentence: string | null;
+  attendance_pct: number | null;
+}
+
 export interface MyClassBandSubject {
   subject_id: string;
   subject_name: string;
@@ -3091,8 +3185,10 @@ export interface MyClassBandSubject {
   b: number;
   c: number;
   assessed: number;
-  /** Its own number in its own word — never a tier, never a step on the ramp. */
+  /** The DENOMINATOR only ("11 of 15 assessed"). Never rendered as a fourth
+   *  tier — founder 2026-08-05 removed the tile it used to have. */
   not_assessed: number;
+  students: MyClassBandStudent[];
 }
 
 export interface MyClassBands {
@@ -3104,6 +3200,99 @@ export interface MyClassBands {
 export interface MyClassExams {
   recent: ExamSummary[];
   headline: string;
+}
+
+// ── the school's own exam calendar (founder, 2026-08-05) ─────────────────────
+// `calendar_events` where type='exam_block' — the rows the planner already
+// paces against and `ExamPortion` maps chapters onto. Not a new store: the link
+// to a paper is `assessment_cycles.exam_event_id`, and recording marks under a
+// main exam is the SAME write as recording any other exam.
+
+export interface ExamFeedPage {
+  rows: ExamSummary[];
+  page: number;
+  size: number;
+  total: number;
+}
+
+export interface MainExamRow {
+  exam_event_id: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  notes: string | null;
+  affects_teaching: boolean;
+  blocks_periods: number[] | null;
+  /** upcoming | running | past — decided server-side in the school's timezone. */
+  state: string;
+  days_away: number;
+  subjects_total: number;
+  recorded_subjects: number;
+  locked_subjects: number;
+  scored_students: number;
+  classes_total: number;
+  /** Null until something is recorded. Never 0%. */
+  avg_pct: number | null;
+  caption: string;
+}
+
+export interface MainExamBoard {
+  academic_year_id: string | null;
+  as_of: string;
+  scope: string;
+  /** Adding, editing and removing an exam is the admin's act — a teacher gets
+   *  the identical board with the pencils absent, not a different screen. */
+  can_edit: boolean;
+  rows: MainExamRow[];
+  headline: string;
+}
+
+export interface MainExamSubjectRow {
+  class_subject_id: string;
+  subject_id: string;
+  subject_name: string;
+  teacher_name: string | null;
+  cycle_id: string | null;
+  cycle_name: string | null;
+  total_marks: number | null;
+  scored: number;
+  roster: number;
+  avg_pct: number | null;
+  locked: boolean;
+  /** The SERVER's answer. Reading a colleague's card is deliberately wider
+   *  than writing her marks; the refusal lives in `ExamService.save`. */
+  can_edit: boolean;
+  portion_chapters: number;
+}
+
+export interface MainExamClassGroup {
+  class_id: string;
+  class_label: string;
+  subjects: MainExamSubjectRow[];
+  recorded: number;
+  total: number;
+}
+
+export interface MainExamDetail {
+  exam_event_id: string;
+  title: string;
+  start_date: string;
+  end_date: string;
+  notes: string | null;
+  state: string;
+  can_edit_exam: boolean;
+  classes: MainExamClassGroup[];
+  headline: string;
+}
+
+export interface MainExamBody {
+  academic_year_id?: string | null;
+  title: string;
+  start_date: string;
+  end_date: string;
+  notes?: string | null;
+  affects_teaching?: boolean;
+  blocks_periods?: number[] | null;
 }
 
 export interface MyClassOverview {

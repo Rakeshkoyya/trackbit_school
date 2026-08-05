@@ -31,6 +31,10 @@ export default function PlanLayout({ children }: { children: React.ReactNode }) 
           { label: "Year", href: "/plan" },
           ...(isTeacher ? [{ label: "My subjects", href: "/plan/my-subjects" }] : []),
           { label: "Syllabus", href: "/plan/syllabus" },
+          // Founder 2026-08-05: the school's own exam calendar and the papers
+          // under it. Its own tab rather than a third under Syllabus — those
+          // two are both about chapters; this is about the exams themselves.
+          { label: "Exams", href: "/plan/exams" },
           { label: "Week plan", href: "/plan/week" },
           { label: "Timetable", href: "/plan/timetable" },
           { label: "Hostel", href: "/plan/hostel" },

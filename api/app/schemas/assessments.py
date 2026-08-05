@@ -294,6 +294,21 @@ class ExamSummary(BaseModel):
     grid_only: bool
 
 
+class ExamFeedPage(BaseModel):
+    """The feed, paginated (founder, 2026-08-05).
+
+    A school records dozens of tests a term and the landing page returned a flat
+    `limit`-capped list, so the 31st was unreachable from any screen. `total` is
+    what lets the table say which page of what — a pager without a denominator
+    is a Next button that may or may not do anything.
+    """
+
+    rows: list[ExamSummary] = []
+    page: int = 1
+    size: int = 20
+    total: int = 0
+
+
 class ExamRosterRow(BaseModel):
     student_id: uuid.UUID
     full_name: str

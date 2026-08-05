@@ -351,15 +351,19 @@ function TopicRows({ row }: { row: Row }) {
   );
 }
 
-export function SyllabusTable({ board, canEdit, onChanged, onAdjust }: {
+export function SyllabusTable({ board, canEdit, onChanged, onAdjust,
+  defaultGroupBy = "class" }: {
   board: SyllabusBoard;
   canEdit: boolean;
   onChanged: () => void;
   /** Offered per subject when the caller can re-plan (the teacher's screen). */
   onAdjust?: (subject: SyllabusSubjectGroup) => void;
+  /** My Class mounts this for ONE class, where grouping by class is a single
+   *  heading over everything — subject is the axis that separates rows there. */
+  defaultGroupBy?: GroupBy;
 }) {
   const [q, setQ] = useState("");
-  const [groupBy, setGroupBy] = useState<GroupBy>("class");
+  const [groupBy, setGroupBy] = useState<GroupBy>(defaultGroupBy);
   const [sortBy, setSortBy] = useState<SortBy>("syllabus");
   const [status, setStatus] = useState<string>("all");
   const [difficulty, setDifficulty] = useState<string>("all");
