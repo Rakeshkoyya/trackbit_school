@@ -15,7 +15,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, CalendarSearch, Trash2 } from "lucide-react";
+import { CalendarDays, CalendarSearch, Eye, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -60,6 +60,13 @@ function PlanYearInner() {
   const { yearId } = useYear();
   const qc = useQueryClient();
 
+  // SY-1 (founder): the calendar opens in VIEW mode. Painting used to be
+  // always on, so a tap meant "declare a holiday here" — on a year grid at
+  // phone width that is a fat-fingered closure that silently takes a teaching
+  // day out of every plan's capacity. Marking is now something you switch on.
+  // Reviewing a suggested date still works in view mode: it opens the approval
+  // sheet, which commits nothing until she presses Approve.
+  const [editing, setEditing] = useState(false);
   const [kind, setKind] = useState<PaintKind>("holiday");
   const [title, setTitle] = useState("Holiday");
   // D-58 defect fix: painting a Celebration used to silently remove a teaching day,
@@ -165,6 +172,26 @@ function PlanYearInner() {
             <CalendarDays className="h-3 w-3" /> {summary.teaching_days} teaching days
           </Badge>
           {canEdit ? (
+            <div role="group" aria-label="Calendar mode"
+              className="inline-flex items-center rounded-full border border-border bg-card p-0.5">
+              {([
+                { on: false, label: "View", icon: Eye },
+                { on: true, label: "Mark dates", icon: Pencil },
+              ] as const).map((m) => (
+                <button key={m.label} type="button" onClick={() => setEditing(m.on)}
+                  aria-pressed={editing === m.on}
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                    editing === m.on
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground")}>
+                  <m.icon className="h-3.5 w-3.5" />
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {canEdit ? (
             <button
               type="button"
               onClick={() => setBrowsing(true)}
@@ -183,7 +210,7 @@ function PlanYearInner() {
             min-content, which at 360px pushed the whole page sideways. The
             second column already had it. */}
         <div className="min-w-0 space-y-4">
-          {canEdit ? (
+          {canEdit && editing ? (
             <div className="space-y-3 rounded-xl border border-border bg-card p-4">
               <div>
                 <Label>What are you marking?</Label>
@@ -317,7 +344,7 @@ function PlanYearInner() {
             endDate={summary.end_date}
             ranges={ranges}
             suggestions={canEdit ? suggestedDays : []}
-            paintable={canEdit}
+            paintable={canEdit && editing}
             workingWeekdays={summary.working_weekdays}
             onPaint={(start, end) => create.mutate({ start, end })}
             onSuggestion={(day) => {

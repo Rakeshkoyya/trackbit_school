@@ -131,6 +131,14 @@ class _Topic:
     best: str | None = None
     logs: int = 0
     last_on: date | None = None
+    # SY-1 — the chapter this topic belongs to, by id rather than by title.
+    # `chapter` is a label and two chapters may legitimately share one ("Revision"),
+    # so anything grouping chapters groups on `unit_id`. `first_on` is the date the
+    # chapter was first taught, which the board reports beside the planned start.
+    unit_id: uuid.UUID | None = None
+    term_id: uuid.UUID | None = None
+    baseline_week_start: date | None = None
+    first_on: date | None = None
 
 
 @dataclass
@@ -251,7 +259,8 @@ class CoverageReader:
                 by_cs[unit.class_subject_id].append(_Topic(
                     id=topic.id, title=topic.title, chapter=unit.title,
                     est_periods=topic.est_periods,
-                    order=(unit.position, topic.position)))
+                    order=(unit.position, topic.position),
+                    unit_id=unit.id, term_id=unit.term_id))
         for topics in by_cs.values():
             topics.sort(key=lambda t: t.order)
         return by_cs
@@ -261,17 +270,18 @@ class CoverageReader:
         """`plan_entries` is UNIQUE on (class_subject, topic), so one row here is
         one planned topic — no dedupe needed."""
         weeks = {
-            topic_id: week for topic_id, week in self.db.execute(
-                select(PlanEntry.topic_id, PlanEntry.week_start)
+            topic_id: (week, baseline) for topic_id, week, baseline in self.db.execute(
+                select(PlanEntry.topic_id, PlanEntry.week_start,
+                       PlanEntry.baseline_week_start)
                 .where(PlanEntry.org_id == org_id,
                        PlanEntry.class_subject_id.in_(cs_ids))).all()
         }
         for topics in topics_by_cs.values():
             for t in topics:
-                week = weeks.get(t.id)
-                if week is not None:
+                row = weeks.get(t.id)
+                if row is not None:
                     t.planned = True
-                    t.week_start = week
+                    t.week_start, t.baseline_week_start = row
 
     def _apply_logs(self, org_id: uuid.UUID, cs_ids: list[uuid.UUID],
                     topics_by_cs: dict[uuid.UUID, list[_Topic]]) -> dict[uuid.UUID, int]:
@@ -292,6 +302,7 @@ class CoverageReader:
             t.best = better_coverage(t.best, coverage)
             t.logs += 1
             t.last_on = on if t.last_on is None or on >= t.last_on else t.last_on
+            t.first_on = on if t.first_on is None or on < t.first_on else t.first_on
 
         # The sample size counts EVERY log, including ones against chapters this
         # scope filtered out — "did this teacher record anything" is a question

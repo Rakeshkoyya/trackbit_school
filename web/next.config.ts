@@ -26,6 +26,11 @@ const nextConfig: NextConfig = {
       // in ABC bands. Only the LIST moved; `/support/[id]`, the child page with
       // the weekly check-in, is unchanged and every link to it still resolves.
       { source: "/support", destination: "/bands/my-students", permanent: false },
+      // Founder 2026-08-05 (SY-1): Plan → Classes is gone. What it checked now
+      // reads off the Syllabus board by name rather than by count, so both its
+      // routes land there instead of 404ing for anyone holding a bookmark.
+      { source: "/plan/classes", destination: "/plan/syllabus", permanent: false },
+      { source: "/plan/classes/:id", destination: "/plan/syllabus", permanent: false },
     ];
   },
 };

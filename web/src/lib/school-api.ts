@@ -151,6 +151,41 @@ export const schoolApi = {
   generatePlan: (csId: string, termId?: string | null) =>
     api.post<import("@/lib/school-types").PlanGenerateResult>(
       `/planner/plan/${csId}/generate${qs({ term_id: termId ?? undefined })}`),
+
+  // ── the syllabus board (SY-1) ─────────────────────────────────────────────
+  /** Every chapter the caller may see, grouped by class. Scope is decided by
+   *  the server — an admin gets the school, a teacher gets her own subjects. */
+  syllabusBoard: (p: {
+    yearId?: string; classId?: string; classSubjectId?: string; termId?: string;
+  } = {}) =>
+    api.get<import("@/lib/syllabus-types").SyllabusBoard>(
+      `/planner/syllabus/board${qs({
+        year_id: p.yearId, class_id: p.classId,
+        class_subject_id: p.classSubjectId, term_id: p.termId,
+      })}`),
+  /** Difficulty, remarks, title, term — the chapter's own columns. */
+  patchChapter: (unitId: string, body: import("@/lib/syllabus-types").ChapterPatch) =>
+    api.patch<import("@/lib/school-types").SyllabusUnit>(
+      `/planner/syllabus/units/${unitId}`, body),
+  /** The reschedule dialog's read: movable chapters + the fixed points. */
+  planTimeline: (csId: string, termId?: string | null) =>
+    api.get<import("@/lib/syllabus-types").PlanTimeline>(
+      `/planner/plan/${csId}/timeline${qs({ term_id: termId ?? undefined })}`),
+  /** Move chapters. Saved even when the dates don't hold them — the violations
+   *  come back so she can see what she chose (V2-P5: reported, never squeezed). */
+  reschedulePlan: (csId: string, chapters: {
+    unit_id: string; start_date: string; end_date: string;
+  }[]) =>
+    api.put<import("@/lib/syllabus-types").RescheduleResult>(
+      `/planner/plan/${csId}/schedule`, { chapters }),
+  examMap: (classId: string) =>
+    api.get<import("@/lib/syllabus-types").ExamMap>(
+      `/planner/exam-map${qs({ class_id: classId })}`),
+  /** Full replace of one (exam, class-subject) portion. `[]` clears it. */
+  setExamPortionChapters: (b: {
+    exam_event_id: string; class_subject_id: string; unit_ids: string[];
+  }) =>
+    api.put<import("@/lib/syllabus-types").ExamMap>("/planner/exam-map/portion", b),
   // ── document ingestion (V2-P7, SPRD2 §5.1) ────────────────────────────────
   /** Staff sheet -> proposed mapping + the gaps a human must close. */
   staffImportAnalyze: (file: File) => {
@@ -184,13 +219,13 @@ export const schoolApi = {
     "/planner/syllabus/import/commit", b),
 
   // ── post-setup read models (V2-P10) ───────────────────────────────────────
-  schoolOverview: (yearId?: string) =>
-    api.get<import("@/lib/school-types").SchoolOverview>(
-      `/overview/school${qs({ year_id: yearId })}`),
+  // `schoolOverview` and `teacherLoad` were removed with Plan → Classes (SY-1),
+  // their only caller. Teacher load is answered by Dashboard → Staff, which
+  // computes it from real timetable and timesheet rows; the class-readiness
+  // gaps are named chapter by chapter on the Syllabus board. Their GET routes
+  // still exist and are on V1-13's reported orphan list.
   classOverview: (classId: string) =>
     api.get<import("@/lib/school-types").ClassOverview>(`/overview/classes/${classId}`),
-  teacherLoad: () =>
-    api.get<import("@/lib/school-types").TeacherLoadRow[]>("/overview/teacher-load"),
 
   // setup wizard (V2-P5, SPRD2 §5.1)
   wizardState: () => api.get<import("@/lib/school-types").WizardState>("/wizard/state"),

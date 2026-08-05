@@ -1679,6 +1679,74 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     stays *not evaluated* rather than scoring zero. Full suite **637 passing**, ruff clean; web tsc
     + eslint + `next build` clean.
 
+- **SY-1 (the syllabus board — the table, the exam map, the teacher's plan, 2026-08-05)** —
+  migration **`e4f5a6b7c8d9`** (head) **on dev + test; prod is at `c1d2e3f4a5b6` and now owes
+  three** (`c2d3e4f5a6b7` → `d3e4f5a6b7c8` → this; all purely additive). Founder call. Plan →
+  Syllabus was a one-class, one-subject **editor**: to answer *"which chapters are late?"* an admin
+  picked her way through class × subject holding the comparison in her head, and the module could
+  say *how much* (V1-6) and *is that good for today* (V1-15) but could never show **the syllabus
+  itself**.
+  - 🔴 **`plan_entries.baseline_week_start` — the change everything else rests on.**
+    `_forecast_rows` computed `baseline_finish = max(week_start)` from the LIVE rows, so "the
+    baseline" was whatever the plan currently said. Harmless while the only writer was a full
+    re-draft behind a lock; a hole the moment a teacher can move a chapter, because dragging
+    chapters into December would raise the baseline to meet the projection and **turn every red
+    subject in the school green with nothing taught**. Stamped once at `approve`
+    (`_freeze_baseline`, NULL rows only — approving Term 2 in October must not forgive Term 1's
+    slip since April), read as `COALESCE(baseline_week_start, week_start)`. P2's "the approved plan
+    is the baseline" is now true of the *data*, not only as long as nobody wrote to it. The table
+    renders both dates, so a move is visible rather than silent.
+  - **`services/plan_schedule.py` — moving a chapter, and it is allowed on an APPROVED plan.**
+    That is safe only because of the freeze above: she reschedules the schedule, the promise stays
+    where the admin locked it, and the distance between them is the slip. Refused: a chapter nobody
+    sized, dates outside the year, another teacher's subject (403 `not_your_subject`, `S-46` — a
+    sentence, never an empty screen). **Reported but still saved**: a range too short for what she
+    put in it (V2-P5's rule — she is the one who knows whether she can go faster).
+    ⚠️ `_place` deliberately does **not** reuse the drafter's greedy `distribute`: greedy fills from
+    the front and stops, so dragging a chapter's end out a fortnight saved the dates and returned
+    an identical plan — the control looked broken. **The range she draws IS the chapter's span**;
+    topics spread across it in proportion to their sizes, last topic in the final teaching week.
+  - **`exam_portion_units` — a portion is a SET of chapters.** `upto_topic_id` is a prefix and
+    cannot say what a school says in November: *"Term 1 examines chapters 1, 2, 3 and 5; chapter 4
+    goes to Term 2."* The prefix is **kept, nullable, and still read** (`_portion_topic_ids`
+    resolves either form to one topic set), so every portion recorded before today keeps its exact
+    arithmetic and is shown as `legacy_prefix` rather than silently rewritten. `_exam_fit_rows` now
+    subtracts SETS instead of walking "after the previous cut", which is what makes the skipped
+    chapter land in Term 2 instead of vanishing between the two exams.
+  - **`services/syllabus_board.py` COMPOSES and computes nothing** — coverage/plan/logs from
+    `CoverageReader.snapshot` (V1-6's one definition), pace from `forecast_org`, the status word
+    from the new `core/coverage.py::chapter_status`. Six queries for any number of classes. Scope
+    is a **block**: admin = the school, teacher = `visible_class_ids` (her subjects ∪ her homeroom).
+    `expected_pct` is V1-15's pace marker at chapter scale — how much of the chapter's own window
+    has gone by in **teaching** days — divided server-side, because two of the five places
+    "syllabus covered" used to be computed were `.reduce()` calls in React.
+  - `difficulty` + `remarks` on `syllabus_units`: plain editable columns, not an append log (law 3
+    governs *decisions*; a remark is corrected in place, the `homework_results` call). Writable by
+    the subject's own teacher — a chapter remark only an admin may write is a remark nobody writes.
+    `difficulty` is NULL until judged and renders **"not set"**, never a defaulted "moderate".
+  - **Web:** Plan → Syllabus is two tabs (**Syllabus** · **Exam mapping**). The table groups by
+    class/subject/term/status, filters, sorts, expands to topics **only when the school tracks
+    them** (`has_topic_detail` — a chapter-only school's single topic mirrors its chapter and does
+    not expand). The subject is a **sub-heading, not a column** (grouping by class already names
+    the class, and the column was eating the width that made chapter names readable), the chapter
+    column is **sticky** and the progress cell is V1-15's `PaceBar`. `not_scheduled` wears the
+    dashed no-record texture everywhere and is never red and never a 0%. **`/plan/classes` is
+    deleted** (founder) — both routes 307 to the board; `TeacherLoad` + `schoolOverview`/
+    `teacherLoad` went with it (teacher load is Dashboard → Staff, off real timetable rows).
+    **My subjects** is now a dashboard: four tiles about *her*, the V1-6 pace list, one subject's
+    chapters, and **Adjust the plan** — a ribbon where chapters are draggable bars, exams and term
+    ends are rules drawn through every lane, gaps are hatched and counted, and the ledger below is
+    the keyboard path. **Plan → Year opens in View mode** with a View / Mark dates switch: a tap
+    used to declare a holiday on the spot, which on a year grid at phone width is a fat-fingered
+    closure that silently leaves every plan's capacity. Reviewing a suggested date still works in
+    view mode — that opens the approval sheet and commits nothing.
+  - `test_syllabus_board.py` (15). ⚠️ **Three defects the browser found and the suite could not**,
+    all now pinned by tests: the board **500'd whenever `year_id` was omitted** (`AcademicYear
+    .is_current` does not exist — and the first request a real screen makes has no year yet, so
+    that was the common path, not an edge case) · **extending a chapter did nothing** (the greedy
+    placer above) · and the ribbon's scale was read live mid-drag, so a bar dragged past the axis
+    edge accelerated away from the pointer.
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
@@ -1795,11 +1863,11 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: **head is `d3e4f5a6b7c8`** (BA-1, the support owner's assessments, 2026-08-05).
+Current state: **head is `e4f5a6b7c8d9`** (SY-1, the syllabus board, 2026-08-05).
 Local dev and the test DB are on it; **DO prod is still at `c1d2e3f4a5b6`** and needs
-`c2d3e4f5a6b7` (AT-1, `student_notes`) then `d3e4f5a6b7c8` before the next deploy. Both are purely
-additive — new tables, one nullable column, one widened CHECK — so prod code that predates them is
-unaffected.
+`c2d3e4f5a6b7` (AT-1, `student_notes`) → `d3e4f5a6b7c8` (BA-1) → `e4f5a6b7c8d9` (SY-1) before the
+next deploy. All three are purely additive — new tables, nullable columns, one widened CHECK, one
+constraint relaxed — so prod code that predates them is unaffected.
 It was applied with `ALEMBIC_DATABASE_URL` pointed at each local database explicitly, because
 `api/.env` is in `ACTIVE: PRODUCTION` mode and a bare `alembic upgrade head` would have migrated
 production with no confirmation. 58 tables carry an `org_isolation` policy. **The LOCAL dev DB

@@ -39,7 +39,7 @@ from app.models.classroom import (
     LessonLog,
     LessonObservation,
 )
-from app.models.exams import ExamPortion
+from app.models.exams import ExamPortion, ExamPortionUnit
 from app.models.fees import (
     FEE_NOTE_KINDS,
     FeeInstallmentTemplate,
@@ -130,6 +130,7 @@ __all__ = [
     "EventDecision",
     "ExamLockEvent",
     "ExamPortion",
+    "ExamPortionUnit",
     "ExamType",
     "FEE_NOTE_KINDS",
     "FeeInstallmentTemplate",

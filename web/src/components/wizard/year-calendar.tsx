@@ -116,6 +116,11 @@ export function YearCalendar({
   paintable = false,
   onPaint,
   onSuggestion,
+  // SY-1 (founder): the calendar is a VIEW by default and only paints when the
+  // admin says so. Tapping a date used to add an event on the spot, which on a
+  // year grid is a fat-fingered holiday nobody meant to declare. Reviewing a
+  // suggested date stays available in view mode, because that opens an approval
+  // sheet and commits nothing.
   workingWeekdays = [0, 1, 2, 3, 4, 5],
   className,
 }: {
@@ -123,6 +128,7 @@ export function YearCalendar({
   endDate: string;
   ranges?: PaintedRange[];
   suggestions?: SuggestedDay[];
+  /** Drag across days to create an event. Off = read-only calendar. */
   paintable?: boolean;
   onPaint?: (start: string, end: string) => void;
   onSuggestion?: (s: SuggestedDay) => void;
@@ -180,14 +186,20 @@ export function YearCalendar({
         return;
       }
     }
+    // In view mode a drag selects nothing and paints nothing. Only the
+    // suggestion tap above survives, and that opens a sheet rather than
+    // writing anything.
+    if (!paintable) return;
     onPaint?.(a, b);
-  }, [onPaint, onSuggestion, suggestionFor]);
+  }, [onPaint, onSuggestion, paintable, suggestionFor]);
+
+  const interactive = paintable || !!onSuggestion;
 
   useEffect(() => {
-    if (!paintable) return;
+    if (!interactive) return;
     window.addEventListener("pointerup", commit);
     return () => window.removeEventListener("pointerup", commit);
-  }, [paintable, commit]);
+  }, [interactive, commit]);
 
   const pending = useMemo(() => {
     if (!anchor) return null;
@@ -268,11 +280,11 @@ export function YearCalendar({
                     <button
                       key={day}
                       type="button"
-                      disabled={!paintable || !inYear}
+                      disabled={!interactive || !inYear}
                       aria-label={suggested ? `${day}: ${suggested.name}, suggested` : day}
                       title={label}
                       onPointerDown={() => {
-                        if (!paintable || !inYear) return;
+                        if (!interactive || !inYear) return;
                         painting.current = true;
                         anchorRef.current = day;
                         hoverRef.current = day;
@@ -280,7 +292,10 @@ export function YearCalendar({
                         setHover(day);
                       }}
                       onPointerEnter={() => {
-                        if (!painting.current) return;
+                        // No hover-extend in view mode: there is no range to
+                        // build, so the ring would promise a paint that never
+                        // happens.
+                        if (!painting.current || !paintable) return;
                         hoverRef.current = day;
                         setHover(day);
                       }}

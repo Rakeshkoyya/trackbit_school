@@ -19,7 +19,7 @@ import re
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
@@ -603,8 +603,34 @@ class PlannerService:
                 "and draft the plan, then approve.")
 
         self._append_approval(m, cs_id, term_id, "approve")
+        self._freeze_baseline(m, cs_id, [t.id for t in scoped])
         self._recompute_plan_status(m, cs_id, plan)
         return self.get_plan(m, cs_id)
+
+    def _freeze_baseline(self, m: CurrentMember, cs_id: uuid.UUID,
+                         topic_ids: list[uuid.UUID]) -> None:
+        """Stamp the promise, once, at approval (SY-1).
+
+        Before this, `baseline_finish` was `max(week_start)` over the LIVE rows,
+        so the baseline was whatever the plan currently said. Harmless while the
+        only writer was a full re-draft behind a lock; a hole the moment a
+        teacher can move a chapter, because dragging chapters later would raise
+        the baseline to meet the projection and turn every red subject in the
+        school green with nothing taught.
+
+        Only NULL rows are stamped. A window approved in April keeps April's
+        promise when a later term is approved in October — re-stamping would
+        quietly forgive every slip since.
+        """
+        if not topic_ids:
+            return
+        self.db.execute(
+            update(PlanEntry)
+            .where(PlanEntry.org_id == m.org_id,
+                   PlanEntry.class_subject_id == cs_id,
+                   PlanEntry.topic_id.in_(topic_ids),
+                   PlanEntry.baseline_week_start.is_(None))
+            .values(baseline_week_start=PlanEntry.week_start))
 
     def unapprove_plan(self, m: CurrentMember, cs_id: uuid.UUID,
                        term_id: uuid.UUID | None = None) -> PlanOut:
@@ -707,25 +733,26 @@ class PlannerService:
         would report a locked, fully-planned Term 1 as "not scheduled at all" the
         moment someone generated Term 2."""
         portions = self.db.execute(
-            select(ExamPortion.upto_topic_id, CalendarEvent.title, CalendarEvent.start_date)
+            select(ExamPortion, CalendarEvent.title, CalendarEvent.start_date)
             .join(CalendarEvent, CalendarEvent.id == ExamPortion.exam_event_id)
             .where(ExamPortion.org_id == m.org_id, ExamPortion.class_subject_id == cs_id)
+            .options(selectinload(ExamPortion.units))
         ).all()
         if not portions:
             return []
-        all_topics = self._ordered_topics(self._units(m.org_id, cs_id))
-        index = {t.id: i for i, t in enumerate(all_topics)}
+        units = self._units(m.org_id, cs_id)
+        all_topics = self._ordered_topics(units)
         scoped_ids = {t.id for t in scoped}
         placement = {tid: wk for tid, wk in self._entry_map(m, cs_id).items()
                      if tid not in scoped_ids}
         placement.update(zip((t.id for t in sized), weeks, strict=True))
 
         out: list[Violation] = []
-        for upto_topic_id, exam_title, exam_start in portions:
-            cut = index.get(upto_topic_id)
-            if cut is None:
-                continue  # the portion's topic was deleted from the syllabus
-            portion = all_topics[: cut + 1]
+        for portion_row, exam_title, exam_start in portions:
+            ids = self._portion_topic_ids(portion_row, all_topics, units)
+            if not ids:
+                continue  # the portion's chapters/cut were deleted from the syllabus
+            portion = [t for t in all_topics if t.id in ids]
             unplanned = [t for t in portion if t.id not in placement]
             if unplanned:
                 out.append(Violation(
@@ -806,12 +833,6 @@ class PlannerService:
             css_by_class.setdefault(cs.class_id, []).append((cs, sname))
 
         all_cs_ids = [cs.id for cs, _n in css_rows]
-        portions: dict[tuple[uuid.UUID, uuid.UUID], uuid.UUID] = {
-            (p.exam_event_id, p.class_subject_id): p.upto_topic_id
-            for p in self.db.scalars(select(ExamPortion).where(
-                ExamPortion.org_id == m.org_id,
-                ExamPortion.class_subject_id.in_(all_cs_ids)))
-        }
         units_by_cs: dict[uuid.UUID, list[SyllabusUnit]] = {}
         for u in self.db.scalars(
             select(SyllabusUnit)
@@ -823,6 +844,7 @@ class PlannerService:
             units_by_cs.setdefault(u.class_subject_id, []).append(u)
         topics_of = {cs_id: self._ordered_topics(units_by_cs.get(cs_id, []))
                      for cs_id in all_cs_ids}
+        portions = self._portion_sets(m.org_id, all_cs_ids, topics_of, units_by_cs)
 
         blocked, partial = self._calendar(m.org_id, year.id)
         floor = self._tracking_floor(year)
@@ -833,6 +855,47 @@ class PlannerService:
                     css_by_class.get(class_id, []), exams, portions, topics_of,
                     year, blocked, partial, floor))
         return out_by_class
+
+    def _portion_sets(self, org_id: uuid.UUID, cs_ids: list[uuid.UUID],
+                      topics_of: dict, units_by_cs: dict,
+                      ) -> dict[tuple[uuid.UUID, uuid.UUID], set[uuid.UUID]]:
+        """(exam, class-subject) → the set of topic ids that exam examines.
+
+        SY-1: one shape at read time, two ways in. An explicit chapter set wins;
+        otherwise the original prefix (`upto_topic_id`) is expanded to the topics
+        up to and including its cut, which is exactly what it has always meant.
+        A portion whose chapters or cut have since been deleted resolves to
+        nothing and is absent from the dict — `no_portion`, never a silent zero.
+        """
+        out: dict[tuple[uuid.UUID, uuid.UUID], set[uuid.UUID]] = {}
+        if not cs_ids:
+            return out
+        for p in self.db.scalars(
+            select(ExamPortion)
+            .where(ExamPortion.org_id == org_id,
+                   ExamPortion.class_subject_id.in_(cs_ids))
+            .options(selectinload(ExamPortion.units))
+        ):
+            ids = self._portion_topic_ids(
+                p, topics_of.get(p.class_subject_id, []),
+                units_by_cs.get(p.class_subject_id, []))
+            if ids:
+                out[(p.exam_event_id, p.class_subject_id)] = ids
+        return out
+
+    @staticmethod
+    def _portion_topic_ids(portion: ExamPortion, ordered_topics: list,
+                           units: list) -> set[uuid.UUID]:
+        unit_ids = {pu.unit_id for pu in portion.units}
+        if unit_ids:
+            return {t.id for u in units if u.id in unit_ids for t in u.topics}
+        if portion.upto_topic_id is None:
+            return set()
+        index = {t.id: i for i, t in enumerate(ordered_topics)}
+        cut = index.get(portion.upto_topic_id)
+        if cut is None:
+            return set()
+        return {t.id for t in ordered_topics[: cut + 1]}
 
     def _exam_fit_rows(self, css: list, exams: list, portions: dict, topics_of: dict,
                        year: AcademicYear, blocked: set, partial: dict,
@@ -858,21 +921,23 @@ class PlannerService:
             subjects: list[ExamFitSubject] = []
             for cs, sname in css:
                 topics = topics_of[cs.id]
-                index = {t.id: j for j, t in enumerate(topics)}
-                cut = portions.get((ex.id, cs.id))
-                if cut is None or cut not in index:
+                mine = portions.get((ex.id, cs.id))
+                if not mine:
                     subjects.append(ExamFitSubject(
                         class_subject_id=cs.id, subject_name=sname, verdict="no_portion",
                         required_periods=0, capacity_periods=0, unsized_topics=0))
                     continue
-                # The segment this exam ADDS: everything after the latest earlier
-                # exam's cut, up to and including this exam's cut.
-                prev_idx = -1
+                # The segment this exam ADDS: its own portion minus everything
+                # every earlier exam already examined. Set subtraction rather
+                # than the old "after the latest earlier cut", because a portion
+                # is now a set and may legitimately skip a chapter an earlier
+                # exam did not cover either — chapter 4 held over to Term 2 must
+                # land in Term 2's segment, not vanish between the two.
+                earlier: set[uuid.UUID] = set()
                 for prior in exams[:i]:
-                    pc = portions.get((prior.id, cs.id))
-                    if pc is not None and pc in index:
-                        prev_idx = max(prev_idx, index[pc])
-                seg = topics[prev_idx + 1: index[cut] + 1]
+                    earlier |= portions.get((prior.id, cs.id)) or set()
+                seg_ids = mine - earlier
+                seg = [t for t in topics if t.id in seg_ids]
                 required = sum(t.est_periods or 0 for t in seg)
                 unsized = sum(1 for t in seg if t.est_periods is None)
                 if not cs.periods_per_week:
@@ -980,7 +1045,8 @@ class PlannerService:
         return self._forecast_rows(m, rows)
 
     def forecast_org(self, m: CurrentMember, year_id: uuid.UUID,
-                     extra_events: list[tuple] | None = None) -> list[ForecastOut]:
+                     extra_events: list[tuple] | None = None,
+                     cs_ids: list[uuid.UUID] | None = None) -> list[ForecastOut]:
         """Every class-subject in the year, in ONE batch (DASH3 PR-6).
 
         `extra_events` is V1-7's cost preview (`S-143`): the same computation run
@@ -996,16 +1062,23 @@ class PlannerService:
         For a 20-class school that is ~80 round-trips for one card. This does the
         identical computation with the loop moved inside a single query set, so
         the cost stops scaling with the number of classes.
+        `cs_ids` narrows it to a caller's own scope (SY-1). The syllabus board is
+        often one class-subject — the teacher's plan dialog always is — and
+        pacing the whole school to render one row is the per-class loop this
+        method exists to remove, wearing a different hat.
         """
-        rows = self.db.execute(
-            select(ClassSubject, Subject.name, SchoolClass)
-            .join(Subject, Subject.id == ClassSubject.subject_id)
-            .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
-            .where(ClassSubject.org_id == m.org_id,
-                   SchoolClass.academic_year_id == year_id)
-            .order_by(SchoolClass.name, SchoolClass.section, Subject.name)
-        ).all()
-        return self._forecast_rows(m, rows, extra_events=extra_events)
+        q = (select(ClassSubject, Subject.name, SchoolClass)
+             .join(Subject, Subject.id == ClassSubject.subject_id)
+             .join(SchoolClass, SchoolClass.id == ClassSubject.class_id)
+             .where(ClassSubject.org_id == m.org_id,
+                    SchoolClass.academic_year_id == year_id)
+             .order_by(SchoolClass.name, SchoolClass.section, Subject.name))
+        if cs_ids is not None:
+            if not cs_ids:
+                return []
+            q = q.where(ClassSubject.id.in_(cs_ids))
+        return self._forecast_rows(m, self.db.execute(q).all(),
+                                   extra_events=extra_events)
 
     def _forecast_rows(self, m: CurrentMember, rows,
                        extra_events: list[tuple] | None = None) -> list[ForecastOut]:
@@ -1111,7 +1184,14 @@ class PlannerService:
 
             # RAG over the planned portion only. Chapters not yet sized (the later
             # terms, planned when they begin) ride along as info, not a warning.
-            baseline_finish = max(e.week_start for e in entries)
+            #
+            # The baseline is the week the plan was APPROVED to, not the week it
+            # currently says (SY-1). They are the same until somebody
+            # reschedules a chapter; after that, reading the live row would let
+            # a teacher clear her own slip by moving the chapter — the pace
+            # would measure the plan against itself. NULL means never approved,
+            # in which case there is no promise yet and the live week is it.
+            baseline_finish = max(e.baseline_week_start or e.week_start for e in entries)
             projected = distribute(
                 [t.est_periods for t in planned], periods_per_week=cs.periods_per_week,
                 working_weekdays=year.working_weekdays, blocked=blocked, partial=partial,

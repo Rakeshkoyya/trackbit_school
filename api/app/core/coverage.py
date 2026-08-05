@@ -234,3 +234,58 @@ def completion_pct(done: int, partial: int, denominator: int) -> float | None:
     if not denominator:
         return None
     return round((done + PARTIAL_WEIGHT * partial) / denominator, 3)
+
+
+# ── SY-1: the four states a CHAPTER can be in, on the board ──────────────────
+# The syllabus table's "teaching status" column. Deliberately four words and no
+# colour rule of its own — a chapter is late or not by comparison with its
+# planned dates, which is `rated_status`' job on the class-subject above it.
+#
+#   not_started   nothing logged against any of its topics
+#   in_progress   some taught, or one taught partially
+#   completed     every topic taught in full
+#   not_scheduled the chapter is not on the plan at all — a state, not a zero
+#
+# `not_scheduled` outranks the rest because it answers a different question: an
+# unplanned chapter has not been missed, it has not been promised. Rendering it
+# as "not started" would put a school that plans term by term permanently in
+# the red every April (V2-P11's whole reason for existing).
+CHAPTER_NOT_SCHEDULED = "not_scheduled"
+CHAPTER_NOT_STARTED = "not_started"
+CHAPTER_IN_PROGRESS = "in_progress"
+CHAPTER_COMPLETED = "completed"
+
+CHAPTER_STATUS_LABEL: dict[str, str] = {
+    CHAPTER_NOT_SCHEDULED: "not scheduled",
+    CHAPTER_NOT_STARTED: "not started",
+    CHAPTER_IN_PROGRESS: "in progress",
+    CHAPTER_COMPLETED: "completed",
+}
+
+
+def chapter_status(*, topics: int, taught_full: int, taught_partial: int,
+                   planned: int) -> str:
+    """THE chapter-level teaching status. Import it; do not re-decide it.
+
+    `taught_full`/`taught_partial` are counts of topics at their BEST logged
+    state (`better_coverage` has already run), so a topic taught twice is
+    counted once here.
+
+    A chapter with no topics at all is `not_scheduled`: there is nothing to
+    teach and nothing to have finished, and calling it completed would let an
+    empty chapter carry a school's coverage figure upward.
+    """
+    if not topics:
+        return CHAPTER_NOT_SCHEDULED
+    if taught_full >= topics:
+        return CHAPTER_COMPLETED
+    if taught_full or taught_partial:
+        return CHAPTER_IN_PROGRESS
+    # Nothing taught. Only now does it matter whether anybody ever promised to.
+    return CHAPTER_NOT_STARTED if planned else CHAPTER_NOT_SCHEDULED
+
+
+# The school's own reading of how hard a chapter is (SY-1). A vocabulary rather
+# than free text because it is a filter and a sort key on the board; NULL —
+# nobody has judged it — is a fourth state and never renders as 'moderate'.
+DIFFICULTY_LEVELS = ("easy", "moderate", "hard")

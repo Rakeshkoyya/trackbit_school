@@ -22,6 +22,11 @@ class UnitOut(BaseModel):
     title: str
     position: int
     term_id: uuid.UUID | None = None
+    # SY-1 — the school's own annotation. Both stay None until somebody writes
+    # them; neither is defaulted, so "nobody has judged this chapter" remains a
+    # visible state rather than a quiet 'moderate'.
+    difficulty: str | None = None
+    remarks: str | None = None
     topics: list[TopicOut] = Field(default_factory=list)
 
 

@@ -64,7 +64,7 @@ class ExamPortionIn(BaseModel):
     """Says: this exam covers that class-subject up to and including this topic."""
     exam_event_id: uuid.UUID
     class_subject_id: uuid.UUID
-    upto_topic_id: uuid.UUID
+    upto_topic_id: uuid.UUID | None = None
 
 
 class ExamPortionOut(BaseModel):
@@ -72,4 +72,4 @@ class ExamPortionOut(BaseModel):
     id: uuid.UUID
     exam_event_id: uuid.UUID
     class_subject_id: uuid.UUID
-    upto_topic_id: uuid.UUID
+    upto_topic_id: uuid.UUID | None = None

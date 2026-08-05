@@ -44,9 +44,23 @@ class SyllabusUnit(Base, UUIDPKMixin, CreatedAtMixin):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     title: Mapped[str] = mapped_column(Text, nullable=False)
+    # SY-1 — the school's own annotation of a chapter, the two things a head of
+    # department writes in the margin of a printed syllabus. `difficulty` is
+    # NULL until somebody judges it: a defaulted 'moderate' would put a
+    # judgement nobody made on every row of the board. Both are plain editable
+    # columns — law 3's append-only is for decisions, and a remark is corrected
+    # in place, like a homework verdict or an attendance exception.
+    difficulty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     topics: Mapped[list["SyllabusTopic"]] = relationship(
         back_populates="unit", cascade="all, delete-orphan", order_by="SyllabusTopic.position",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "difficulty IS NULL OR difficulty IN ('easy', 'moderate', 'hard')",
+            name="ck_syllabus_units_difficulty"),
     )
 
 
@@ -138,7 +152,15 @@ class PlanEntry(Base, UUIDPKMixin, CreatedAtMixin):
     An unsized topic (`est_periods IS NULL`) has NO row here — you cannot schedule
     what nobody has estimated. Re-planning a term deletes and rebuilds only the
     entries whose topic sits in that term, so an approved Term 1 is never touched
-    by a Term 2 re-draft (P2)."""
+    by a Term 2 re-draft (P2).
+
+    **`week_start` is the live schedule; `baseline_week_start` is the promise.**
+    They are equal until somebody deliberately moves a chapter (SY-1's
+    `reschedule`), and the difference between them is the slip. The forecast
+    reads the baseline, so a teacher rescheduling a chapter into next month
+    cannot make her subject read as on-track — which is the only reason
+    rescheduling an approved plan is allowed at all.
+    """
 
     __tablename__ = "plan_entries"
 
@@ -151,6 +173,9 @@ class PlanEntry(Base, UUIDPKMixin, CreatedAtMixin):
         UUID(as_uuid=True), ForeignKey("syllabus_topics.id", ondelete="CASCADE"), nullable=False,
     )
     week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    # Stamped once, at approve. NULL = never approved, so the live week IS the
+    # baseline (there is no promise to have broken yet).
+    baseline_week_start: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("class_subject_id", "topic_id", name="uq_plan_entries_class_subject_id"),

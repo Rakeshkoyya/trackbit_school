@@ -37,9 +37,21 @@ from app.schemas.planner import (
     UnitOut,
     WeekScheduleOut,
 )
+from app.schemas.syllabus_board import (
+    ChapterPatchIn,
+    ExamMapOut,
+    ExamPortionSetIn,
+    PlanTimelineOut,
+    RescheduleIn,
+    RescheduleOut,
+    SyllabusBoardOut,
+)
 from app.services import templates
+from app.services.exam_map import ExamMapService
 from app.services.my_syllabus import MySyllabusService
+from app.services.plan_schedule import PlanScheduleService
 from app.services.planner import PlannerService
+from app.services.syllabus_board import SyllabusBoardService
 from app.services.syllabus_import import SyllabusImporter, analyze_file, analyze_text
 from app.services.week_schedule import WeekScheduleService
 
@@ -69,6 +81,37 @@ def class_syllabus(class_id: uuid.UUID, m: CurrentMember = Depends(require_acade
     there is no school-wide form of this endpoint by design.
     """
     return MySyllabusService(db).class_syllabus(m, class_id)
+
+
+# ── the syllabus board (SY-1) ────────────────────────────────────────────────
+@router.get("/syllabus/board", response_model=SyllabusBoardOut)
+def syllabus_board(year_id: uuid.UUID | None = None,
+                   class_id: uuid.UUID | None = None,
+                   class_subject_id: uuid.UUID | None = None,
+                   term_id: uuid.UUID | None = None,
+                   m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """Every chapter in the school as one table, grouped by class.
+
+    Scope is decided inside the service and is a **block, not a filter**: an
+    admin gets every class, a teacher gets the subjects she teaches plus the
+    homeroom she owns, and no other row is ever loaded. The `class_*` params
+    narrow what she may already see; they cannot widen it."""
+    return SyllabusBoardService(db).board(
+        m, year_id, class_id=class_id, class_subject_id=class_subject_id,
+        term_id=term_id)
+
+
+@router.patch("/syllabus/units/{unit_id}", response_model=UnitOut)
+def patch_unit(unit_id: uuid.UUID, body: ChapterPatchIn,
+               m: CurrentMember = Depends(require_academic),
+               db: Session = Depends(get_db)):
+    """Difficulty, remarks, title, term — the chapter's own columns.
+
+    `require_academic` rather than admin: the person who knows a chapter is hard
+    is the person teaching it, and the service narrows the write to her own
+    subjects (or her homeroom's)."""
+    return SyllabusBoardService(db).patch_chapter(m, unit_id, body)
 
 
 # ── syllabus ─────────────────────────────────────────────────────────────────
@@ -199,6 +242,29 @@ def topic_progress(cs_id: uuid.UUID, m: CurrentMember = Depends(require_academic
     return PlannerService(db).topic_progress(m, cs_id)
 
 
+@router.get("/plan/{cs_id}/timeline", response_model=PlanTimelineOut)
+def plan_timeline(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
+                  m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    """The reschedule dialog's read (SY-1): the chapters she can move, and the
+    exams, term ends and today she is moving them against."""
+    return PlanScheduleService(db).timeline(m, cs_id, term_id)
+
+
+@router.put("/plan/{cs_id}/schedule", response_model=RescheduleOut)
+def reschedule_plan(cs_id: uuid.UUID, body: RescheduleIn,
+                    m: CurrentMember = Depends(require_academic),
+                    db: Session = Depends(get_db)):
+    """Move chapters to new date ranges.
+
+    Deliberately NOT admin-only and deliberately allowed on an approved plan:
+    the promise is frozen at approval (`plan_entries.baseline_week_start`), so
+    the slip stays visible on every board no matter where she moves the
+    chapter. A range too small for what she put in it is reported and still
+    saved — she is the one who knows whether she can go faster (V2-P5)."""
+    return PlanScheduleService(db).reschedule(m, cs_id, body)
+
+
 @router.post("/plan/{cs_id}/extend", response_model=PlanOut)
 def extend_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
                 m: CurrentMember = Depends(require_coordinator_up),
@@ -232,6 +298,28 @@ def unapprove_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
     """Unlock a baseline so it can be re-planned. Appends a compensating row to
     `plan_approvals` — the approval history is never rewritten (law 3)."""
     return PlannerService(db).unapprove_plan(m, cs_id, term_id)
+
+
+# ── exam ↔ syllabus mapping (SY-1) ───────────────────────────────────────────
+@router.get("/exam-map", response_model=ExamMapOut)
+def exam_map(class_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+             db: Session = Depends(get_db)):
+    """Which chapters each exam examines, per subject, with the fit verdict
+    beside it — the verdict read from `PlannerService.exam_fit`, never
+    recomputed, so this screen and the Year tab's panel agree."""
+    return ExamMapService(db).map(m, class_id)
+
+
+@router.put("/exam-map/portion", response_model=ExamMapOut)
+def set_exam_map_portion(body: ExamPortionSetIn,
+                         m: CurrentMember = Depends(require_admin),
+                         db: Session = Depends(get_db)):
+    """Full replace of one (exam, class-subject) portion, as a chapter SET.
+
+    Admin-only, unlike the chapter's own remarks: what an exam examines is the
+    school's decision and changing it re-scopes every fit verdict and every
+    coverage warning that hangs off it."""
+    return ExamMapService(db).set_portion(m, body)
 
 
 # ── teacher change-requests (comment threads on the plan, §5.2) ───────────────

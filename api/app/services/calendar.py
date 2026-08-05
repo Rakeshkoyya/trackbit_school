@@ -322,7 +322,16 @@ class ExamPortionService:
         return [ExamPortionOut.model_validate(p) for p in self.db.scalars(q)]
 
     def set(self, m: CurrentMember, body: ExamPortionIn) -> ExamPortionOut:
-        """Idempotent per (exam, class-subject) — re-setting moves the cut point."""
+        """Idempotent per (exam, class-subject) — re-setting moves the cut point.
+
+        This is the PREFIX form and still requires a cut. SY-1's chapter-set form
+        lives in `ExamMapService.set_portion`; the two write the same row, and a
+        cut set here clears any chapter set, because the last thing the human
+        said is the portion."""
+        if body.upto_topic_id is None:
+            raise ValidationError(
+                "Say which topic the portion runs up to, or set the chapters "
+                "explicitly instead.")
         event = self.db.scalar(select(CalendarEvent).where(
             CalendarEvent.id == body.exam_event_id, CalendarEvent.org_id == m.org_id))
         if event is None:
@@ -346,6 +355,7 @@ class ExamPortionService:
             self.db.add(existing)
         else:
             existing.upto_topic_id = body.upto_topic_id
+            existing.units.clear()
         self.db.flush()
         return ExamPortionOut.model_validate(existing)
 

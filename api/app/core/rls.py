@@ -123,6 +123,13 @@ SCHOOL_EXAM_TABLES = (
     "exam_portions",
 )
 
+# SY-1 the syllabus board — engaged in migration e4f5a6b7c8d9. The chapters an
+# exam actually examines, as a SET: the prefix `upto_topic_id` could not say
+# "1, 2, 3 and 5, with 4 held over to Term 2".
+SCHOOL_SYLLABUS_TABLES = (
+    "exam_portion_units",
+)
+
 # V2-P3 daily checks / recommendations (SPRD2 §4.4, §5.5) — engaged in f2c3d4e5f6a7.
 SCHOOL_CHECKS_TABLES = (
     "daily_checks",
