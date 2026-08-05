@@ -1600,6 +1600,64 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   - `test_day_notice.py` (4). Reviewed in a real browser (light + dark, 1440px + 390px, expanded
     and dismissed, zero sideways scroll).
 
+- **BA-1 (the support owner's assessments — ABC bands, the teacher's half, 2026-08-05)** — migration
+  **`d3e4f5a6b7c8`** (head) **on dev + test; prod is at `c1d2e3f4a5b6` and needs `c2d3e4f5a6b7`
+  then this.** Founder walkthrough of BD-2: the admin side was right and the teacher side was a
+  list she could not filter over a programme she could not measure. She could give work
+  (per-student homework, reused) and write a weekly check-in; what she could not do was **set a
+  check and record how each child did on it**, so *"did the last three weeks move anybody?"* was
+  answered from memory.
+  - **Support loses its sidebar item.** The programme is one job and it had two doors — the weekly
+    check-in under `Support`, the bands under `ABC bands`. `/support` now 307s to
+    `/bands/my-students`; **`/support/[id]`, the child page, is unchanged** and every link to it
+    still resolves (it is the one screen the module lives or dies on and a second copy is a second
+    place for the check-in to be half-implemented).
+  - 🔴 **That removal would have stranded people, and the fix is the interesting part.** An admin
+    may hand a Band C child to **anyone** — `OwnerSuggestion` suggests and never restricts — but
+    `has_band_scope` asked only whether you *teach* a monitored subject. A warden given three
+    children would have had them assigned to her and **no nav item to reach them by**. `has_scope`
+    now means *gets the area*; **`can_band`** is the narrower signal (a monitored class-subject)
+    that the Manage-bands tab is keyed on, and **`owns_students`** is the new one. Same widening on
+    `/auth/me`.
+  - **`core/band_assessment.py` is THE vocabulary** — three metrics, and they are three kinds of
+    statement: `marks` (a number with a denominator) · `rating` (an ordinal judgement on her own
+    scale) · `other` (a word). **They never pool.** `Tally` has no method returning a blended
+    figure — the `ScaleTally` device a fourth time — a rating has **no percentage** (3 of 5 is not
+    60% of anything, and printing it as one invites it to be added to a mark), and `result_text`
+    cannot render without its scale.
+  - **Not `assessment_cycles`, and the separation is load-bearing.** That table carries
+    `core/exams.py`'s scale, verify-and-lock, question marks, and it moves a child's band under
+    `D-76`. A support owner's 1-to-5 reading rating reaching any of that is exactly the pooling
+    `ScaleTally` exists to make un-writable. Nothing recorded here touches a child's standing,
+    report card or band.
+  - **`covers_all` keeps the roster COMPUTED** (HS-1's `session_classes` rule): a child assigned to
+    her next week is on a standing weekly check with nobody editing anything, and one who moves on
+    drops off. A picked list is frozen — right for *"these two are re-doing it"*, and the create
+    dialog says which she is getting rather than leaving her to find out in a month.
+  - **Not evaluated is a word**, three times over (HW-1's rule): `pending` is a state and never a
+    bold 0% · a child with no row is not a zero · **the average divides by the children actually
+    evaluated**, so a teacher who has marked two of three does not read as a class that scored
+    badly. `status` is **derived**, never stored, so it cannot drift from the rows that decide it.
+  - **Results are a full replace** (`homework_results` / `attendance_exceptions`), not an append
+    log: law 3 governs *decisions*, and a mistyped 7 for 17 is corrected in place the way a
+    mis-tapped absence is. Leaving a child out puts him back to *not evaluated* — the only way to
+    undo a mark typed against the wrong name. Deleting an assessment is refused once any result is
+    on it (`D-53`'s reason).
+  - **The student log is `student_notes`, not a per-assessment note store** — the same log the
+    class teacher writes, with a nullable `assessment_id` for what occasioned it. A year later the
+    person asking *"what happened with Kabir"* wants everything anyone noticed in one scroll.
+    `_can_log` gains a **third author**: the owner of his active support plan (widened by one named
+    relationship, not by a role — another teacher is still refused), and **reading is no longer
+    narrower than writing**, which it was for an owner outside the class.
+  - **Deliberately not capture-by-exception**, and that is not a lapse: P1v2's budget is about
+    *daily* capture across a whole class, and this is six children where the number for each one IS
+    the point — the reasoning that already lets `file_bands` touch every row of a class.
+  - Web: **`/bands/my-students`** rewritten (class chips, table, the two actions on the row —
+    assigned work and the log) and **`/bands/assessments`** added (paginated, grouped by class,
+    status filter, create dialog, evaluation sheet whose input follows the metric: number · slider ·
+    word). `S-170` holds throughout — no completion percentage for her check-ins, no comparison
+    against another owner, no streak. `test_band_assessments.py` (15).
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep
@@ -1716,9 +1774,11 @@ Worktrees have no `.env` (gitignored, not copied). Copy it in before running Ale
 there; otherwise settings fall back to `localhost:5434` and everything DB-backed fails with
 "connection refused".
 
-Current state: **head is `c2d3e4f5a6b7`** (AT-1, `student_notes`, 2026-08-05). Local dev and the
-test DB are on it; **DO prod is still at `c1d2e3f4a5b6`** and needs it before the next deploy — it
-is purely additive (one new table + its RLS policy), so prod code that predates it is unaffected.
+Current state: **head is `d3e4f5a6b7c8`** (BA-1, the support owner's assessments, 2026-08-05).
+Local dev and the test DB are on it; **DO prod is still at `c1d2e3f4a5b6`** and needs
+`c2d3e4f5a6b7` (AT-1, `student_notes`) then `d3e4f5a6b7c8` before the next deploy. Both are purely
+additive — new tables, one nullable column, one widened CHECK — so prod code that predates them is
+unaffected.
 It was applied with `ALEMBIC_DATABASE_URL` pointed at each local database explicitly, because
 `api/.env` is in `ACTIVE: PRODUCTION` mode and a bare `alembic upgrade head` would have migrated
 production with no confirmation. 58 tables carry an `org_isolation` policy. **The LOCAL dev DB

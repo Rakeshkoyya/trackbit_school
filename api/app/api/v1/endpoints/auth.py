@@ -130,17 +130,28 @@ def me(principal=Depends(get_current_principal), db: Session = Depends(get_db)) 
     # Founder 2026-08-04: the same signal for ABC Bands. A teacher who takes none
     # of the monitored subjects never sees the item — an area that opens on
     # "nothing here for you" is worse than one that was never offered (ux §13).
-    from app.models import ClassSubject, Subject  # noqa: PLC0415
+    from app.models import ClassSubject, Intervention, Subject  # noqa: PLC0415
     band_q = select(ClassSubject.id).join(
         Subject, Subject.id == ClassSubject.subject_id).where(
         ClassSubject.org_id == member.org_id, Subject.band_monitored.is_(True))
     if not member.is_coordinator_up:
         band_q = band_q.where(ClassSubject.teacher_member_id == member.membership.id)
+    has_band_scope = db.scalar(band_q.limit(1)) is not None
+    # Founder 2026-08-05: the Support nav item is gone — the programme is
+    # reachable only through ABC bands now. So a support OWNER must get the item
+    # even when she teaches none of the monitored subjects: the admin can assign
+    # any teacher (`OwnerSuggestion` suggests, it never restricts), and without
+    # this she would have children assigned to her and no door to them at all.
+    if not has_band_scope and not member.is_coordinator_up:
+        has_band_scope = db.scalar(select(Intervention.id).where(
+            Intervention.org_id == member.org_id,
+            Intervention.owner_member_id == member.membership.id,
+            Intervention.status == "active").limit(1)) is not None
     return MeResponse(
         org_role=member.org_role, must_set_password=member.user.must_set_password,
         is_super_admin=member.user.is_super_admin,
         is_class_teacher=is_ct,
-        has_band_scope=db.scalar(band_q.limit(1)) is not None,
+        has_band_scope=has_band_scope,
         date_of_birth=member.membership.date_of_birth if member.membership else None,
         user=member.user, org=member.org,
         orgs=AuthService(db).list_user_orgs(member.user_id),

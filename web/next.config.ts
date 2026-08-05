@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
       { source: "/assessments", destination: "/students/scores", permanent: false },
       { source: "/members", destination: "/setup/members", permanent: false },
       { source: "/settings", destination: "/setup/settings", permanent: false },
+      // Founder 2026-08-05: Support lost its sidebar item — the programme lives
+      // in ABC bands. Only the LIST moved; `/support/[id]`, the child page with
+      // the weekly check-in, is unchanged and every link to it still resolves.
+      { source: "/support", destination: "/bands/my-students", permanent: false },
     ];
   },
 };

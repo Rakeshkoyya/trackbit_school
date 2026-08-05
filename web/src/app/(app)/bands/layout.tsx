@@ -11,18 +11,38 @@
  * The tab set differs by role because the two people genuinely do different
  * things here (module §1: *"the module dies if they are given the same
  * screen"*). An admin allocates owners and reads the school; a teacher bands her
- * own classes and works her own children. So Allocation is admin-only, and a
- * teacher gets "My students" instead — the same `/support` list she already has,
- * reachable from the area that now owns the subject.
+ * own classes, works her own children, and now records her own assessments.
+ *
+ * **Founder 2026-08-05: Support lost its sidebar item and everything it held
+ * lives here.** Two consequences the tabs have to carry:
+ *
+ *   · A support **owner who teaches none of the monitored subjects** — the admin
+ *     may assign anyone; `OwnerSuggestion` suggests and never restricts — would
+ *     otherwise have children assigned to her and no door to them. `has_scope`
+ *     now means "gets the area at all", and `can_band` is the narrower signal
+ *     that the class-banding tabs mean something for her.
+ *   · So Manage bands is keyed on `can_band`, not on the area being visible. A
+ *     tab that opens on "you have no classes here" is worse than an absent one
+ *     (ux §13) — the same rule that hides the whole area from a teacher outside
+ *     the programme.
  */
+
+import { useQuery } from "@tanstack/react-query";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { SubTabs } from "@/components/layout/sub-tabs";
 import { useAuth } from "@/contexts/auth-context";
+import { schoolApi } from "@/lib/school-api";
 
 export default function BandsLayout({ children }: { children: React.ReactNode }) {
   const { me } = useAuth();
   const isAdmin = me?.org_role === "admin";
+  const { data: scope } = useQuery({
+    queryKey: ["band-scope"],
+    queryFn: () => schoolApi.bandScope(),
+  });
+  // Default true while it loads, so the tabs don't visibly rearrange under her.
+  const canBand = scope?.can_band ?? true;
 
   return (
     <AuthGuard allow={["admin", "teacher"]}>
@@ -30,7 +50,7 @@ export default function BandsLayout({ children }: { children: React.ReactNode })
         <SubTabs
           tabs={[
             { label: "Overview", href: "/bands" },
-            { label: "Manage bands", href: "/bands/manage" },
+            ...(canBand ? [{ label: "Manage bands", href: "/bands/manage" }] : []),
             ...(isAdmin
               ? [
                   { label: "Teacher allocation", href: "/bands/allocation" },
@@ -38,11 +58,15 @@ export default function BandsLayout({ children }: { children: React.ReactNode })
                   // class and subject. A teacher's version of it would be her
                   // own children, which is exactly what My students already is —
                   // so she gets no Reports tab rather than one that opens on
-                  // "this is the admin's view" (ux §13, the same rule that
-                  // hides the whole area from a teacher outside the programme).
+                  // "this is the admin's view".
                   { label: "Reports", href: "/bands/reports" },
                 ]
-              : [{ label: "My students", href: "/bands/my-students" }]),
+              : []),
+            // Both roles, and last: an admin reading the programme still owns
+            // children of her own often enough that hiding it would send her
+            // hunting. Her list is her own; the school's is Reports.
+            { label: "My students", href: "/bands/my-students" },
+            { label: "Assessments", href: "/bands/assessments" },
           ]}
         />
         {children}

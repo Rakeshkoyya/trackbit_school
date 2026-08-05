@@ -192,8 +192,16 @@ class BandScopeOut(BaseModel):
     that was never offered (ux §13)."""
     # Any subject monitored in the school at all.
     enabled: bool = False
-    # This member has at least one monitored class-subject.
+    # This member gets the area at all — `can_band` or `owns_students`.
     has_scope: bool = False
+    # This member has at least one monitored class-subject, so the class-banding
+    # tabs mean something for them.
+    can_band: bool = False
+    # Founder 2026-08-05: they own at least one active support plan. Kept apart
+    # from `can_band` because they answer different questions — an owner who
+    # teaches none of the monitored subjects still needs My students, and would
+    # read an empty Manage-bands screen as a broken one.
+    owns_students: bool = False
     is_admin: bool = False
     classes: list[BandScopeClass] = []
     subjects: list[dict] = []
@@ -408,3 +416,163 @@ class SupportSummary(BaseModel):
 class InterventionCloseIn(BaseModel):
     status: str = Field(pattern="^(achieved|dropped)$")
     outcome_note: str | None = Field(default=None, max_length=300)
+
+
+# ── the owner's own assessments (founder 2026-08-05) ─────────────────────────
+# Not `assessment_cycles`. That table is the school's academic record and moves
+# a child's band (`D-76`); this is a support owner's own small check on the
+# children she owns, and its figures never leave the programme. The vocabulary
+# and every average live in `core/band_assessment.py`.
+class MyStudentRow(BaseModel):
+    """One child she owns — the row My students renders.
+
+    It carries `intervention_id` because the child page is keyed on the support
+    plan, not the student: a child who is C in Hindi and C in Maths is two rows
+    on two teachers' lists, and collapsing him to one would reinstate the
+    overall letter `D-75` retired."""
+    intervention_id: uuid.UUID
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None = None
+    class_id: uuid.UUID | None = None
+    class_label: str | None = None
+    subject_id: uuid.UUID | None = None
+    subject_name: str | None = None
+    tier: str | None = None
+    # `S-166`: the letter never travels without its sentence.
+    descriptor: str | None = None
+    since: Date | None = None
+    checkins: int = 0
+    last_checkin: Date | None = None
+    weeks_since_checkin: int | None = None
+    checked_in_this_week: bool = False
+    ready_to_retest: bool = False
+    # Per-student homework given to him and not yet checked by anyone. The
+    # teacher's gap, counted as the teacher's gap — never his miss (HW-1).
+    open_assignments: int = 0
+    notes: int = 0
+    status: str = "active"
+
+
+class MyStudentsBoard(BaseModel):
+    """`headline` states the record, never grades her (`S-170`).
+
+    `classes` is the picker's vocabulary, so the screen never guesses what
+    exists — and `total` is the unfiltered count, so a class filter that empties
+    the table can be told apart from having no children at all."""
+    headline: str = ""
+    as_of: Date
+    week_start: Date
+    class_id: uuid.UUID | None = None
+    classes: list[dict] = []
+    rows: list[MyStudentRow] = []
+    total: int = 0
+    moved_on: list[MyStudentRow] = []
+
+
+class AssessmentResultRow(BaseModel):
+    student_id: uuid.UUID
+    full_name: str
+    roll_no: str | None = None
+    class_label: str | None = None
+    tier: str | None = None
+    marks: float | None = None
+    rating: int | None = None
+    verdict: str | None = None
+    note: str | None = None
+    # `core/band_assessment.py::result_text` — the figure WITH its denominator.
+    # None is a real state and every surface renders it as a word.
+    result_text: str | None = None
+    evaluated: bool = False
+    # His running log, so the sheet can say whether anyone has written about him
+    # without a second round trip per child.
+    notes: int = 0
+
+
+class BandAssessmentRow(BaseModel):
+    id: uuid.UUID
+    name: str
+    class_id: uuid.UUID
+    class_label: str
+    subject_id: uuid.UUID | None = None
+    subject_name: str | None = None
+    instructions: str | None = None
+    description: str | None = None
+    metric: str = "marks"
+    max_marks: float | None = None
+    rating_max: int | None = None
+    covers_all: bool = True
+    given_on: Date
+    due_date: Date | None = None
+    author_name: str | None = None
+    # pending | partial | evaluated — `pending` is a state, never an empty score.
+    status: str = "pending"
+    roster: int = 0
+    evaluated: int = 0
+    not_evaluated: int = 0
+    average: float | None = None
+    average_pct: float | None = None
+    # The figure with its denominator, in this metric's own words.
+    caption: str = ""
+
+
+class BandAssessmentList(BaseModel):
+    """Paginated on purpose (founder): a year of small weekly checks is
+    hundreds of rows, and a screen that loads all of them stops opening.
+
+    Grouped by class in the rendering, so `rows` arrives sorted by class then
+    newest-first and a page never interleaves two classes at random."""
+    headline: str = ""
+    rows: list[BandAssessmentRow] = []
+    page: int = 1
+    per_page: int = 20
+    total: int = 0
+    pages: int = 1
+    classes: list[dict] = []
+    open_count: int = 0
+
+
+class BandAssessmentCreate(BaseModel):
+    class_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=200)
+    subject_id: uuid.UUID | None = None
+    instructions: str | None = Field(default=None, max_length=2000)
+    description: str | None = Field(default=None, max_length=2000)
+    metric: str = Field(default="marks", pattern="^(marks|rating|other)$")
+    max_marks: float | None = Field(default=None, gt=0, le=1000)
+    rating_max: int | None = Field(default=None, ge=2, le=10)
+    given_on: Date | None = None
+    due_date: Date | None = None
+    # True = every support child she owns in this class, and the roster stays
+    # computed so a child assigned next week is on it (HS-1). False = the
+    # explicit ids below — the founder's "or a single student".
+    covers_all: bool = True
+    student_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
+
+
+class BandAssessmentSheet(BaseModel):
+    """The evaluation surface: the assessment, its roster, and what is recorded.
+
+    Deliberately NOT capture-by-exception. P1v2's budget rule is about *daily*
+    capture across a whole class; this is a handful of support children and the
+    number for each one IS the point — the same reasoning that lets
+    `file_bands` touch every row of a class."""
+    assessment: BandAssessmentRow
+    rows: list[AssessmentResultRow] = []
+    can_record: bool = False
+
+
+class AssessmentResultIn(BaseModel):
+    student_id: uuid.UUID
+    marks: float | None = Field(default=None, ge=0, le=1000)
+    rating: int | None = Field(default=None, ge=0, le=10)
+    verdict: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class AssessmentRecordIn(BaseModel):
+    """Full replace, like `check_homework` and `mark`. Results are capture, and
+    law 3's append-only governs decisions — a mistyped 7 for 17 is corrected in
+    place, exactly as a mis-tapped absence is. A row omitted here is **cleared
+    back to not-evaluated**, which is a legitimate answer."""
+    results: list[AssessmentResultIn] = Field(default_factory=list, max_length=200)

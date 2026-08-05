@@ -223,7 +223,18 @@ class BandService:
         monitored = self.monitored_subjects(m)
         out = BandScopeOut(enabled=bool(monitored), is_admin=m.is_coordinator_up)
         pairs = self.my_scope(m)
-        out.has_scope = bool(pairs)
+        out.can_band = bool(pairs)
+        # Founder 2026-08-05: Support lost its own nav item, so the programme is
+        # reachable only through this area. An owner who teaches none of the
+        # monitored subjects — the admin may assign anyone (`OwnerSuggestion`
+        # suggests, it never restricts) — must still get in to her own children,
+        # or she has children assigned and no door. She gets My students; the
+        # class-banding tabs stay keyed on `can_band`.
+        out.owns_students = bool(self.db.scalar(select(Intervention.id).where(
+            Intervention.org_id == m.org_id,
+            Intervention.owner_member_id == m.membership.id,
+            Intervention.status == "active").limit(1))) if not m.is_coordinator_up else True
+        out.has_scope = out.can_band or out.owns_students
         if not pairs:
             return out
         names = {s.id: s.name for s in monitored}

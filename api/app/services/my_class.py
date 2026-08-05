@@ -44,6 +44,7 @@ from app.models import (
     HomeworkAssignment,
     HomeworkCheck,
     HomeworkResult,
+    Intervention,
     Membership,
     SchoolClass,
     Student,
@@ -735,26 +736,37 @@ class MyClassService:
         return student
 
     def _can_log(self, m: CurrentMember, student: Student) -> bool:
-        """Who may WRITE a note: an admin, or the class teacher of this child.
+        """Who may WRITE a note: an admin, the class teacher of this child, or
+        the teacher who **owns his support plan** (founder 2026-08-05).
 
-        Deliberately narrower than reading. A subject teacher already has the
-        deep log (`lesson_observations`) for what happens in her lesson; this
-        log is the homeroom's running account of a child, and it is only a
-        record if it has one author.
+        Still deliberately narrower than reading. A subject teacher has the deep
+        log (`lesson_observations`) for what happens in her lesson; this is the
+        running account of a child, and it is only a record if it has few
+        authors. The support owner is the third because she is the person the
+        school has made responsible for him — and the ABC bands area now asks
+        her for exactly this, both against an assessment and at any time.
         """
         if m.is_admin:
             return True
-        if student.class_id is None:
-            return False
-        return self.db.scalar(select(SchoolClass.id).where(
-            SchoolClass.id == student.class_id, SchoolClass.org_id == m.org_id,
-            SchoolClass.class_teacher_member_id == m.membership.id)) is not None
+        if student.class_id is not None and self.db.scalar(select(SchoolClass.id).where(
+                SchoolClass.id == student.class_id, SchoolClass.org_id == m.org_id,
+                SchoolClass.class_teacher_member_id == m.membership.id)) is not None:
+            return True
+        return self.db.scalar(select(Intervention.id).where(
+            Intervention.org_id == m.org_id,
+            Intervention.student_id == student.id,
+            Intervention.owner_member_id == m.membership.id,
+            Intervention.status == "active").limit(1)) is not None
 
     def notes(self, m: CurrentMember, student_id: uuid.UUID) -> StudentNotesOut:
         student = self._student(m, student_id)
+        can_write = self._can_log(m, student)
         # Reading is open to the staff already trusted with this child (the same
-        # rule the growth report uses); writing is the homeroom's.
-        if not m.is_admin and student.class_id is not None:
+        # rule the growth report uses); writing is narrower. Anyone allowed to
+        # WRITE can obviously read — which is what lets a support owner outside
+        # the class open her own child's log rather than being able to add to a
+        # record she cannot see.
+        if not m.is_admin and not can_write and student.class_id is not None:
             allowed = visible_class_ids(self.db, m)
             if allowed is not None and student.class_id not in allowed:
                 raise ForbiddenError("That is not your student.",
@@ -773,9 +785,10 @@ class MyClassService:
         } if rows else {}
         return StudentNotesOut(
             student_id=student_id, full_name=student.full_name,
-            can_write=self._can_log(m, student),
+            can_write=can_write,
             rows=[StudentNoteOut(
                 id=r.id, student_id=r.student_id, kind=r.kind, note=r.note,
+                assessment_id=r.assessment_id,
                 author_name=authors.get(r.author_member_id),
                 created_at=r.created_at) for r in rows])
 
@@ -790,6 +803,7 @@ class MyClassService:
                                  code="not_your_student")
         self.db.add(StudentNote(
             org_id=m.org_id, student_id=student_id, kind=body.kind,
-            note=body.note.strip(), author_member_id=m.membership.id))
+            note=body.note.strip(), assessment_id=body.assessment_id,
+            author_member_id=m.membership.id))
         self.db.flush()
         return self.notes(m, student_id)

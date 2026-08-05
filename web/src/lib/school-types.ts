@@ -2492,8 +2492,14 @@ export interface BandScopeClass {
 export interface BandScope {
   /** Any subject monitored in the school at all. */
   enabled: boolean;
-  /** This member has at least one monitored class-subject. */
+  /** This member gets the area at all — `can_band` or `owns_students`. */
   has_scope: boolean;
+  /** At least one monitored class-subject, so the banding tabs mean something. */
+  can_band: boolean;
+  /** At least one active support plan of their own. Kept apart from `can_band`:
+   *  an owner who teaches none of the monitored subjects still needs My
+   *  students, and would read an empty Manage-bands screen as a broken one. */
+  owns_students: boolean;
   is_admin: boolean;
   classes: BandScopeClass[];
   subjects: { id: string; label: string }[];
@@ -2648,6 +2654,114 @@ export interface SupportChild {
   checkpoints: SupportCheckpoint[];
   latest_pct: number | null;
   latest_test: string | null;
+}
+
+// ── the owner's own assessments (founder, 2026-08-05) ────────────────────────
+// Not exams. `assessment_cycles` is the school's academic record — it carries a
+// scale, verify-and-lock, and it moves a child's band. This is a support
+// owner's own small check on the children she owns, and its figures never leave
+// the programme. The arithmetic lives in `core/band_assessment.py`; the client
+// renders what the server computed and never re-derives an average.
+export type AssessmentMetric = "marks" | "rating" | "other";
+export type AssessmentStatus = "pending" | "partial" | "evaluated";
+
+export interface MyStudentRow {
+  intervention_id: string;
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  class_id: string | null;
+  class_label: string | null;
+  subject_id: string | null;
+  subject_name: string | null;
+  tier: BandTier | null;
+  /** `S-166`: the letter never renders without its sentence. */
+  descriptor: string | null;
+  since: string | null;
+  checkins: number;
+  last_checkin: string | null;
+  weeks_since_checkin: number | null;
+  checked_in_this_week: boolean;
+  ready_to_retest: boolean;
+  /** Per-student homework nobody has checked yet — the TEACHER's gap (HW-1).
+   *  Never rendered as the child having failed to do it. */
+  open_assignments: number;
+  notes: number;
+  status: string;
+}
+
+export interface MyStudentsBoard {
+  headline: string;
+  as_of: string;
+  week_start: string;
+  class_id: string | null;
+  classes: { id: string; label: string; count: number }[];
+  rows: MyStudentRow[];
+  /** The unfiltered count, so an empty class filter reads differently from
+   *  having no children at all. */
+  total: number;
+  moved_on: MyStudentRow[];
+}
+
+export interface BandAssessmentRow {
+  id: string;
+  name: string;
+  class_id: string;
+  class_label: string;
+  subject_id: string | null;
+  subject_name: string | null;
+  instructions: string | null;
+  description: string | null;
+  metric: AssessmentMetric;
+  max_marks: number | null;
+  rating_max: number | null;
+  covers_all: boolean;
+  given_on: string;
+  due_date: string | null;
+  author_name: string | null;
+  /** `pending` is a state, never an empty score. */
+  status: AssessmentStatus;
+  roster: number;
+  evaluated: number;
+  not_evaluated: number;
+  average: number | null;
+  average_pct: number | null;
+  /** The figure with its denominator, in this metric's own words. Render this
+   *  rather than composing one from `average` — the server owns the wording. */
+  caption: string;
+}
+
+export interface BandAssessmentList {
+  headline: string;
+  rows: BandAssessmentRow[];
+  page: number;
+  per_page: number;
+  total: number;
+  pages: number;
+  classes: { id: string; label: string; count: number }[];
+  open_count: number;
+}
+
+export interface AssessmentResultRow {
+  student_id: string;
+  full_name: string;
+  roll_no: string | null;
+  class_label: string | null;
+  tier: BandTier | null;
+  marks: number | null;
+  rating: number | null;
+  verdict: string | null;
+  note: string | null;
+  /** Null means NOT EVALUATED. Render it as a word, never as a zero. */
+  result_text: string | null;
+  evaluated: boolean;
+  notes: number;
+}
+
+export interface BandAssessmentSheet {
+  assessment: BandAssessmentRow;
+  rows: AssessmentResultRow[];
+  can_record: boolean;
 }
 
 export interface StudentIntervention {
@@ -3038,13 +3152,16 @@ export interface MyClassStudents {
 }
 
 export type StudentNoteKind =
-  | "general" | "behaviour" | "wellbeing" | "achievement" | "parent_contact" | "concern";
+  | "general" | "behaviour" | "wellbeing" | "achievement" | "parent_contact" | "concern"
+  | "support" | "assessment";
 
 export interface StudentNote {
   id: string;
   student_id: string;
   kind: StudentNoteKind;
   note: string;
+  /** What occasioned it, when it came off a support assessment's sheet. */
+  assessment_id: string | null;
   author_name: string | null;
   created_at: string;
 }
@@ -3052,7 +3169,7 @@ export interface StudentNote {
 export interface StudentNotes {
   student_id: string;
   full_name: string;
-  /** Only the homeroom's own teacher (and an admin) may add. */
+  /** The homeroom's own teacher, an admin, or the owner of his support plan. */
   can_write: boolean;
   rows: StudentNote[];
 }
