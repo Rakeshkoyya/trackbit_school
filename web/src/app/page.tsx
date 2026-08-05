@@ -110,33 +110,54 @@ export default function LandingPage() {
     <div className={`mk ${display.variable}`}>
       <RedirectIfAuthed />
 
-      <header className="mk-shell">
-        <nav className="mk-nav">
-          <Link
-            href="/"
-            className="mk-wordmark"
-            style={{ color: "var(--mk-chalk)", textDecoration: "none" }}
-          >
-            TrackBit <span>School</span>
-          </Link>
-          <div className="mk-navlinks">
-            <a className="mk-navlink" href="#product" data-optional="true">
-              Product
-            </a>
-            <a className="mk-navlink" href="#modules" data-optional="true">
-              Modules
-            </a>
-            <a className="mk-navlink" href="#pricing" data-optional="true">
-              Pricing
-            </a>
-            <Link className="mk-navlink" href="/auth/login">
-              Sign in
+      <header className="mk-header">
+        <div className="mk-shell">
+          <nav className="mk-nav">
+            <Link
+              href="/"
+              className="mk-wordmark"
+              style={{ color: "var(--mk-chalk)", textDecoration: "none" }}
+            >
+              TrackBit <span>School</span>
             </Link>
-            <a className="mk-btn mk-btn-primary mk-btn-sm" href="#demo">
-              Book a demo
-            </a>
-          </div>
-        </nav>
+            <div className="mk-navlinks">
+              <a className="mk-navlink" href="#product" data-optional="true">
+                Product
+              </a>
+              <a className="mk-navlink" href="#modules" data-optional="true">
+                Modules
+              </a>
+              <a className="mk-navlink" href="#pricing" data-optional="true">
+                Pricing
+              </a>
+              {/*
+                Parents are the largest group who will ever sign in here and,
+                until now, the only one with no door on the page.
+
+                Both doors are named in full where there is room for them. At
+                phone width the bar has none — wordmark, two logins and the
+                demo button do not fit in 350px — so it collapses to one
+                "Sign in" that lands on the staff form, which now carries the
+                Staff/Parent switcher as its first element. The choice is one
+                tap away rather than absent, and nobody is dropped: hiding the
+                staff link on mobile would have stranded every teacher, who
+                works on a phone all day.
+              */}
+              <Link className="mk-navlink" href="/parent/login" data-optional="true">
+                Parent login
+              </Link>
+              <Link className="mk-navlink" href="/auth/login" data-optional="true">
+                Staff sign in
+              </Link>
+              <Link className="mk-navlink" href="/auth/login" data-compact="true">
+                Sign in
+              </Link>
+              <a className="mk-btn mk-btn-primary mk-btn-sm" href="#demo">
+                Book a demo
+              </a>
+            </div>
+          </nav>
+        </div>
       </header>
 
       {/* ── Hero ────────────────────────────────────────────────────────── */}
@@ -414,7 +435,8 @@ export default function LandingPage() {
         <div className="mk-shell mk-footer-in">
           <p>{`© ${new Date().getFullYear()} TrackBit School · The school's daily operating system`}</p>
           <p>
-            <Link href="/auth/login">Sign in</Link> · <a href="#demo">Book a demo</a>
+            <Link href="/parent/login">Parent login</Link> ·{" "}
+            <Link href="/auth/login">Staff sign in</Link> · <a href="#demo">Book a demo</a>
           </p>
         </div>
       </footer>

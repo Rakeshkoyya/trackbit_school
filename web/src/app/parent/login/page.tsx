@@ -151,6 +151,7 @@ export default function ParentLoginPage() {
 
   return (
     <AuthShell
+      audience="parent"
       title="Parent sign in"
       subtitle={subtitle}
       footer={

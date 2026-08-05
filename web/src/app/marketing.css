@@ -98,12 +98,41 @@
 }
 
 /* ── Nav ─────────────────────────────────────────────────────────────────── */
+/*
+  The bar sticks. `.mk` sets `overflow-x: clip` rather than `hidden` precisely
+  so this keeps working — `hidden` on an ancestor silently kills a sticky
+  descendant, `clip` does not.
+
+  It is the header that sticks, not the nav inside it, so the board colour runs
+  the full bleed of the viewport instead of stopping at the 1120px shell and
+  letting the page show through at the edges.
+*/
+.mk-header {
+  background: color-mix(in srgb, var(--mk-board) 88%, transparent);
+  /* The rule belongs to the sticky bar, not the shell inside it, or it stops
+     at 1120px while the background bleeds to the viewport edges. */
+  border-bottom: 1px solid var(--mk-rule);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .mk-header {
+    backdrop-filter: saturate(1.4) blur(12px);
+  }
+}
+
 .mk-nav {
   align-items: center;
-  border-bottom: 1px solid var(--mk-rule);
   display: flex;
   justify-content: space-between;
   padding-block: 18px;
+}
+
+/* An in-page anchor otherwise lands with its heading hidden under the bar. */
+.mk [id] {
+  scroll-margin-top: 78px;
 }
 
 .mk-wordmark {
@@ -145,9 +174,19 @@
   color: var(--mk-chalk);
 }
 
+/* The phone-width stand-in for the two named login links; see the nav in
+   page.tsx for why the bar collapses to one door below 640px. */
+.mk-navlink[data-compact="true"] {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .mk-navlink[data-optional="true"] {
     display: none;
+  }
+
+  .mk-navlink[data-compact="true"] {
+    display: inline-flex;
   }
 }
 

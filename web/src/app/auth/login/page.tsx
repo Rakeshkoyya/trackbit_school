@@ -37,7 +37,11 @@ export default function LoginPage() {
   return (
     // No self-serve signup: schools are created by the TrackBit operator, who
     // runs setup and hands over credentials (founder decision 2026-07-20).
-    <AuthShell title="Welcome back" subtitle="Sign in to your TrackBit account.">
+    <AuthShell
+      audience="staff"
+      title="Welcome back"
+      subtitle="Sign in with the account your school gave you."
+    >
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <Label htmlFor="identifier">Email or username</Label>
