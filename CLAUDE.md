@@ -1676,7 +1676,8 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   - Reviewed in a real browser (Chrome, teacher login, light + dark via the `.dark` class — **not
     `prefers-color-scheme`, which this app does not use** — 1440px + 390px), including the whole
     create → evaluate → record flow: zero sideways scroll on every screen, and a child left blank
-    stays *not evaluated* rather than scoring zero.
+    stays *not evaluated* rather than scoring zero. Full suite **637 passing**, ruff clean; web tsc
+    + eslint + `next build` clean.
 
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
