@@ -15,6 +15,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ClassDayNotice } from "@/components/school/day-notice";
 import { CaptureReview, useStartCapture } from "@/components/school/score-capture";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -655,6 +656,10 @@ function PeriodPageInner() {
 
   return (
     <div className="mx-auto max-w-2xl">
+      {/* Whose birthday it is in the room she is walking into (founder,
+          2026-08-05). One line, dismissible for the day, and this class only —
+          the school's own calendar is the admin's notice, not hers. */}
+      <div className="mb-3"><ClassDayNotice classId={classId} /></div>
       <div className="mb-4">
         <Link href="/my-day" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> My Day

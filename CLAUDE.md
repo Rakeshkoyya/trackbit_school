@@ -1535,6 +1535,37 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
   - ⚠️ **Staff attendance itself needed no change** — SF-1 + V1-4 already own it (admin-marked,
     exception-shaped, half-day/late, the month summary). It was verified, not rebuilt.
 
+- **EV-2 (the day's notice — events & birthdays, dismissible, 2026-08-05)** — **no migration.**
+  Founder call after walking V1-7 in the built app. The feed was right and its *siting* was wrong:
+  a card on the dashboard with a "Coming up" list under it, plus a strip on My Day, spent real
+  vertical space every day on the one block nobody has to act on — and the teacher's copy showed
+  her the **whole school** (the office's exam block, a colleague's birthday, another class's
+  children) on the screen she opens walking between rooms.
+  - **One line, dismissible for the day, opening into a popover** (`components/school/day-notice.tsx`,
+    replacing `whats-on.tsx`). The expanded list is a `Popover`, not a disclosure, so **nothing on
+    the page moves** — the whole point was the layout cost. Dismissal stores the feed's own `date`
+    under `day-notice:<scope>`, so tomorrow's notice is a new notice and yesterday's press does not
+    silence it; it is an external store (`useSyncExternalStore`), not effect-written state, with an
+    in-memory fallback so a browser with storage blocked still gets a button that does something.
+  - **There is no "upcoming" section any more, and the horizon is the reason.** Both surfaces read
+    at **7 days**: a date joins the notice a week out and leaves it the day after (founder — *"any
+    event will show up 1 week before"*), which is the only warning a school acts on. A 21-day
+    horizon is what forced a second list to hold it.
+  - **`feed(class_id=…)` is the teacher's scope** — that class's children, no calendar row, no
+    staff birthday, and the `S-124` denominator is the **class's own roster**. It is a roster read,
+    so it goes through `periods.visible_class_ids` (AT-1) and is **refused with a sentence, never
+    filtered to an empty list** (`S-46`) — nothing showing for a class she may not see reads as a
+    class with no birthdays. Still one computation (`S-121`): the same rows, scoped, never a second
+    birthday reader with its own idea of a leap year or a vacation.
+  - Mounted where the class is actually in front of her: the **period card**, **My Class** (on the
+    shell, so all six tabs agree and it re-scopes with the picker) and the **register** door. The
+    My Day strip is **deleted on purpose** — recorded so nobody optimises it back.
+  - `S-132`/`S-133`/`S-128` all hold: it asks for nothing and is absent when there is nothing on ·
+    the day, never the age · a vacation birthday says it was moved. The admin keeps one quiet
+    pointer to the undecided-dates queue; the teacher's row has no action on it at all.
+  - `test_day_notice.py` (4). Reviewed in a real browser (light + dark, 1440px + 390px, expanded
+    and dismissed, zero sideways scroll).
+
 - **`test_doc/new_org/`** — the **setup-pack generator** (`generate.py`) for the roster, staff and
   syllabus importers. It invents a **different school on every run** (name, grades, subjects,
   weekly period split, teachers, students, chapters) while holding the four invariants that keep

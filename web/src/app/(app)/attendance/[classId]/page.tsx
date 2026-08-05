@@ -22,6 +22,7 @@ import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { ClassDayNotice } from "@/components/school/day-notice";
 import {
   RollCall, emptyMarks, marksFrom, rollCounts, type RollMarks,
 } from "@/components/school/roll-call";
@@ -97,6 +98,10 @@ function CaptureInner() {
 
   return (
     <div className="mx-auto max-w-2xl pb-8">
+      {/* Taking the register is the moment the class is in front of her — so
+          this is the third place the class's birthdays belong (founder,
+          2026-08-05), on the same dismissible row as the period card. */}
+      <div className="mb-3"><ClassDayNotice classId={classId} /></div>
       <Link href="/attendance"
         className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> All my classes

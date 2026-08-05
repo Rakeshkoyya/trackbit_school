@@ -33,7 +33,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.indian_states import normalise
 from app.models import (
     AcademicYear,
@@ -64,6 +64,7 @@ from app.services.calendar import (
     expand_blocked_dates,
     expand_partial_blocks,
 )
+from app.services.periods import visible_class_ids
 from app.services.school_clock import today_in
 
 # `S-126` — horizon by kind, not one "next 7 days". The founder's 7 days is
@@ -158,7 +159,28 @@ class WhatsOnService:
 
     # ── the feed ─────────────────────────────────────────────────────────────
     def feed(self, m: CurrentMember, on_date: date | None = None,
-             horizon: int = DEFAULT_HORIZON, *, for_admin: bool = False) -> WhatsOn:
+             horizon: int = DEFAULT_HORIZON, *, for_admin: bool = False,
+             class_id: uuid.UUID | None = None) -> WhatsOn:
+        """The school's feed, or one class's birthdays.
+
+        `class_id` is the teacher's surface (founder, 2026-08-05). Standing in
+        6-A she is shown 6-A's birthdays and **nothing else** — not the school's
+        calendar, not a colleague's. Those are the admin's to act on, and a strip
+        carrying them is the everything-feed she has already learned to ignore.
+        Still one computation (`S-121`): the same rows, scoped — never a second
+        birthday reader with its own idea of a leap year or a vacation.
+
+        A class row is a roster read, so it obeys the one class-read rule
+        (`periods.visible_class_ids`, AT-1) and is **blocked with a sentence
+        rather than filtered to an empty list** (`S-46`) — a teacher shown
+        nothing for a class she may not see would read it as a class with no
+        birthdays.
+        """
+        if class_id is not None:
+            allowed = visible_class_ids(self.db, m)
+            if allowed is not None and class_id not in allowed:
+                raise ForbiddenError("This is not your class.",
+                                     code="not_your_class")
         today = on_date or today_in(m.org.timezone)
         end = today + timedelta(days=horizon)
         year = self._year(m.org_id)
@@ -168,14 +190,15 @@ class WhatsOnService:
                                     end + timedelta(days=7))
 
         items: list[FeedItem] = []
-        items += self._calendar_items(m, today, end)
-        items += self._birthday_items(m, today, end, working)
+        if class_id is None:
+            items += self._calendar_items(m, today, end)
+        items += self._birthday_items(m, today, end, working, class_id=class_id)
 
         items.sort(key=lambda i: (i.on_date, i.source != "calendar", i.title))
         for it in items:
             it.days_away = (it.on_date - today).days
 
-        known, total = self._dob_coverage(m)
+        known, total = self._dob_coverage(m, class_id=class_id)
         out = WhatsOn(
             date=today,
             today=[i for i in items if i.on_date == today],
@@ -214,17 +237,19 @@ class WhatsOnService:
         return out
 
     def _birthday_items(self, m: CurrentMember, start: date, end: date,
-                        working: set[date]) -> list[FeedItem]:
+                        working: set[date], *,
+                        class_id: uuid.UUID | None = None) -> list[FeedItem]:
         """`S-133` — the day, never the age. A DOB on a class list, or "turns 12
         today" on a screen shown to a room, is a cost with no benefit; the full
         date stays on the student's own record where the register needs it."""
         b_end = min(end, start + timedelta(days=BIRTHDAY_HORIZON))
-        rows = self.db.execute(
-            select(Student, SchoolClass)
-            .outerjoin(SchoolClass, SchoolClass.id == Student.class_id)
-            .where(Student.org_id == m.org_id, Student.status == "active",
-                   Student.date_of_birth.is_not(None))
-        ).all()
+        q = (select(Student, SchoolClass)
+             .outerjoin(SchoolClass, SchoolClass.id == Student.class_id)
+             .where(Student.org_id == m.org_id, Student.status == "active",
+                    Student.date_of_birth.is_not(None)))
+        if class_id is not None:
+            q = q.where(Student.class_id == class_id)
+        rows = self.db.execute(q).all()
         out: list[FeedItem] = []
         for s, klass in rows:
             for d in _dates_between(start, b_end):
@@ -239,6 +264,11 @@ class WhatsOnService:
                     title=s.full_name, detail="Birthday",
                     student_id=s.id, class_label=_label(klass)))
                 break
+
+        # A class row is about that class's children. A colleague's birthday is
+        # the staffroom's business and reaches the admin's notice instead.
+        if class_id is not None:
+            return out
 
         staff = self.db.execute(
             select(Membership, User.name)
@@ -261,15 +291,21 @@ class WhatsOnService:
                 break
         return out
 
-    def _dob_coverage(self, m: CurrentMember) -> tuple[int, int]:
+    def _dob_coverage(self, m: CurrentMember, *,
+                      class_id: uuid.UUID | None = None) -> tuple[int, int]:
         """`S-124` — the figure with its denominator. An empty card that says
         *"birthdays known for 41 of 486 students"* tells you how to fill it; an
-        empty card that says nothing looks broken."""
-        total = self.db.scalar(select(func.count(Student.id)).where(
-            Student.org_id == m.org_id, Student.status == "active")) or 0
+        empty card that says nothing looks broken.
+
+        The denominator is the feed's own scope: a class row quoting the whole
+        school's coverage would be a figure about somebody else's students.
+        """
+        where = [Student.org_id == m.org_id, Student.status == "active"]
+        if class_id is not None:
+            where.append(Student.class_id == class_id)
+        total = self.db.scalar(select(func.count(Student.id)).where(*where)) or 0
         known = self.db.scalar(select(func.count(Student.id)).where(
-            Student.org_id == m.org_id, Student.status == "active",
-            Student.date_of_birth.is_not(None))) or 0
+            *where, Student.date_of_birth.is_not(None))) or 0
         return int(known), int(total)
 
     # ── the catalogue, scoped to this school (`D-61`) ────────────────────────
