@@ -8,7 +8,6 @@ import {
   ClipboardList,
   Clock,
   GraduationCap,
-  HeartHandshake,
   Layers,
   Settings2,
   Sparkles,
@@ -54,15 +53,18 @@ const timesheet: NavItem = { label: "My time", href: "/timesheet", icon: Clock }
 // V1-3 (D-03). Only for the teacher who owns a class + section: her children,
 // her register, who to call. Everyone else never sees it.
 const myClass: NavItem = { label: "My Class", href: "/my-class", icon: Users };
-// V1-9 (D-71/D-87). The owner of a handful of Band C children: her list, and
-// the weekly check-in. The 9:02 teacher never opens it — her band-aware surface
-// is the checks section of the period card, which differentiates already.
-const support: NavItem = { label: "Support", href: "/support", icon: HeartHandshake };
+// V1-9 (D-71/D-87) had a "Support" item here for the owner of a handful of Band
+// C children. **Founder 2026-08-05: removed.** ABC bands is the programme's
+// area, and it carries her list as "My students" — two doors to one job put the
+// weekly check-in in one place and the assessments in another. `/support` still
+// redirects (next.config.ts) and `/support/[id]`, the child page, is unchanged.
+//
 // Founder 2026-08-04. The programme's own area — bands were reachable only as a
 // tab under Students, which is where you go to look a child up, not where you go
 // to run a support programme. Shown only to members with a monitored
-// class-subject (`me.has_band_scope`): an admin always, a teacher only for the
-// subjects the school actually monitors.
+// class-subject OR an active support plan of their own (`me.has_band_scope`) —
+// the second half added when Support lost its item, so an owner who teaches none
+// of the monitored subjects is not left with children and no door.
 const bands: NavItem = { label: "ABC bands", href: "/bands", icon: Layers };
 // Founder 2026-08-05. Attendance had no door of its own: it was reachable only
 // from a My Day period card, so the teacher COVERING for an absent class teacher
@@ -95,7 +97,7 @@ export function navForRole(
       return [
         ...extra, myDay, ...(isClassTeacher ? [myClass] : []),
         attendance, lucy, sessions, planForTeacher, homework, students,
-        ...(hasBandScope ? [bands] : []), support, timesheet, tasks,
+        ...(hasBandScope ? [bands] : []), timesheet, tasks,
       ];
     case "parent":
       return []; // parents never see the staff shell — they live under /parent

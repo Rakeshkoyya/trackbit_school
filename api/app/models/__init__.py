@@ -24,6 +24,11 @@ from app.models.assessments import (
     SupportCheckpoint,
 )
 from app.models.auth_token import AuthToken
+from app.models.band_assessments import (
+    BandAssessment,
+    BandAssessmentResult,
+    BandAssessmentStudent,
+)
 from app.models.billing import Invoice
 from app.models.board import Board, BoardCategory, BoardMember
 from app.models.checks import CheckResult, DailyCheck
@@ -104,6 +109,9 @@ __all__ = [
     "Attachment",
     "AttendanceException",
     "AuthToken",
+    "BandAssessment",
+    "BandAssessmentResult",
+    "BandAssessmentStudent",
     "BandDescriptor",
     "Board",
     "BoardCategory",

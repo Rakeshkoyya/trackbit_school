@@ -81,7 +81,7 @@ function ChildInner() {
     return (
       <div className="py-12 text-center text-sm text-muted-foreground">
         <p>This child is another teacher&apos;s to support.</p>
-        <Link href="/support" className="mt-2 inline-block underline">Back to my students</Link>
+        <Link href="/bands/my-students" className="mt-2 inline-block underline">Back to my students</Link>
       </div>
     );
   }
@@ -89,7 +89,7 @@ function ChildInner() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <Link href="/support" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/bands/my-students" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> My support students
       </Link>
 

@@ -25,7 +25,12 @@ from app.core.database import get_db
 from app.core.dependencies import require_academic, require_admin
 from app.schemas.bands import (
     AllocationBoard,
+    AssessmentRecordIn,
     AssignOwnerIn,
+    BandAssessmentCreate,
+    BandAssessmentList,
+    BandAssessmentRow,
+    BandAssessmentSheet,
     BandClassBoard,
     BandDescriptorOut,
     BandDistribution,
@@ -37,6 +42,7 @@ from app.schemas.bands import (
     DescriptorUpdate,
     InterventionCloseIn,
     MonitoredIn,
+    MyStudentsBoard,
     OwnerSuggestion,
     ProgrammeBoard,
     SupportChild,
@@ -44,6 +50,7 @@ from app.schemas.bands import (
     SupportSummary,
 )
 from app.schemas.common import MessageResponse
+from app.services.band_assessments import BandAssessmentService
 from app.services.bands import BandService
 from app.services.insights.bands import BandInsights
 from app.services.support import SupportService
@@ -206,3 +213,65 @@ def close_plan(intervention_id: uuid.UUID, body: InterventionCloseIn,
     finish an intervention, so a goal met in July kept injecting a daily check in
     March."""
     return SupportService(db).close(m, intervention_id, body.status, body.outcome_note)
+
+
+# ── My students + her own assessments (founder 2026-08-05) ───────────────────
+# `require_academic` throughout, and the SERVICE does the narrowing: a teacher
+# gets her own assigned children and her own assessments, an admin gets the
+# school's. Never another owner's, in either direction (`S-170`).
+@router.get("/my-students", response_model=MyStudentsBoard)
+def my_students(class_id: uuid.UUID | None = None,
+                m: CurrentMember = Depends(require_academic),
+                db: Session = Depends(get_db)):
+    """The children assigned to her, as a table, filterable by class.
+
+    A teacher with nobody assigned gets a **sentence saying so**, not an empty
+    grid she reads as a broken screen."""
+    return BandAssessmentService(db).my_students(m, class_id)
+
+
+@router.get("/assessments", response_model=BandAssessmentList)
+def list_assessments(class_id: uuid.UUID | None = None, status: str | None = None,
+                     page: int = 1, per_page: int = 20,
+                     m: CurrentMember = Depends(require_academic),
+                     db: Session = Depends(get_db)):
+    """Paginated on purpose: a year of small weekly checks is hundreds of rows.
+    `status` is derived from the results, never stored, so it cannot drift."""
+    return BandAssessmentService(db).list(m, class_id, status, page, per_page)
+
+
+@router.post("/assessments", response_model=BandAssessmentRow)
+def create_assessment(body: BandAssessmentCreate,
+                      m: CurrentMember = Depends(require_academic),
+                      db: Session = Depends(get_db)):
+    """Set a check for the children she owns in one class — everyone, or the
+    ones she picks. The roster of an "everyone" assessment stays **computed**
+    (HS-1), so a child assigned next week is on it with no edit."""
+    return BandAssessmentService(db).create(m, body)
+
+
+@router.get("/assessments/{assessment_id}", response_model=BandAssessmentSheet)
+def assessment_sheet(assessment_id: uuid.UUID,
+                     m: CurrentMember = Depends(require_academic),
+                     db: Session = Depends(get_db)):
+    """The roster with one input each, in the metric she chose."""
+    return BandAssessmentService(db).sheet(m, assessment_id)
+
+
+@router.put("/assessments/{assessment_id}/results", response_model=BandAssessmentSheet)
+def record_results(assessment_id: uuid.UUID, body: AssessmentRecordIn,
+                   m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """**Full replace** — results are capture, and law 3's append-only governs
+    decisions. A child omitted goes back to *not evaluated*, never to zero."""
+    return BandAssessmentService(db).record(m, assessment_id, body)
+
+
+@router.delete("/assessments/{assessment_id}", response_model=MessageResponse)
+def delete_assessment(assessment_id: uuid.UUID,
+                      m: CurrentMember = Depends(require_academic),
+                      db: Session = Depends(get_db)):
+    """Only while nothing has been recorded against it — after that it is part
+    of those children's record."""
+    BandAssessmentService(db).delete(m, assessment_id)
+    return MessageResponse(message="Assessment removed.")

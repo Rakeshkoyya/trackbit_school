@@ -257,8 +257,14 @@ class MyClassStudentsOut(BaseModel):
 # ── the class teacher's own log about a child ────────────────────────────────
 class StudentNoteIn(BaseModel):
     kind: str = Field(default="general", pattern=r"^(general|behaviour|wellbeing"
-                                                 r"|achievement|parent_contact|concern)$")
+                                                 r"|achievement|parent_contact|concern"
+                                                 r"|support|assessment)$")
     note: str = Field(min_length=1, max_length=4000)
+    # Founder 2026-08-05: what occasioned it, when it came off a support
+    # assessment's sheet. A pointer on the ONE log about a child rather than a
+    # second per-assessment note store — a year later his teacher wants to read
+    # everything anyone noticed in a single scroll.
+    assessment_id: uuid.UUID | None = None
 
 
 class StudentNoteOut(BaseModel):
@@ -266,6 +272,7 @@ class StudentNoteOut(BaseModel):
     student_id: uuid.UUID
     kind: str
     note: str
+    assessment_id: uuid.UUID | None = None
     author_name: str | None = None
     created_at: datetime
 

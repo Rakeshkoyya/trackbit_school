@@ -185,6 +185,15 @@ SCHOOL_STUDENT_NOTE_TABLES = (
     "student_notes",
 )
 
+# The support programme's own assessments (founder, 2026-08-05) — engaged in
+# d3e4f5a6b7c8. Staff-only, like the rest of the programme (P4): no path to a
+# parent surface, by construction rather than by exclusion.
+SCHOOL_BAND_ASSESSMENT_TABLES = (
+    "band_assessments",
+    "band_assessment_students",
+    "band_assessment_results",
+)
+
 # V1-7 the school's decision on a catalogue suggestion (S-148) — engaged in
 # d6e7f8a9b0c1. `observances` itself is PLATFORM data (D-60/S-149): no org_id,
 # no policy, super-admin on every write — the demo_requests shape. It is

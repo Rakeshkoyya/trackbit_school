@@ -322,6 +322,9 @@ export const schoolApi = {
       `/my-class/students/${studentId}/notes`),
   addStudentNote: (studentId: string, b: {
     kind: import("@/lib/school-types").StudentNoteKind; note: string;
+    /** Set when the note came off a support assessment's sheet — one log about
+     *  a child, with a pointer to what occasioned it. */
+    assessment_id?: string | null;
   }) => api.post<import("@/lib/school-types").StudentNotes>(
     `/my-class/students/${studentId}/notes`, b),
 
@@ -508,6 +511,41 @@ export const schoolApi = {
   closeSupportPlan: (interventionId: string, b: { status: string; outcome_note?: string }) =>
     api.post<import("@/lib/school-types").SupportChild>(
       `/bands/support/${interventionId}/close`, b),
+
+  // ── ABC bands · My students + her own assessments (founder 2026-08-05) ─────
+  // A teacher gets her own assigned children and her own assessments; an admin
+  // gets the school's. The narrowing is the SERVICE's — never a client filter.
+  myBandStudents: (classId?: string) =>
+    api.get<import("@/lib/school-types").MyStudentsBoard>(
+      `/bands/my-students${qs({ class_id: classId })}`),
+  bandAssessments: (p: {
+    classId?: string; status?: string; page?: number; perPage?: number;
+  } = {}) => api.get<import("@/lib/school-types").BandAssessmentList>(
+    `/bands/assessments${qs({
+      class_id: p.classId, status: p.status,
+      page: p.page == null ? undefined : String(p.page),
+      per_page: p.perPage == null ? undefined : String(p.perPage),
+    })}`),
+  createBandAssessment: (b: {
+    class_id: string; name: string; subject_id?: string | null;
+    instructions?: string | null; description?: string | null;
+    metric: import("@/lib/school-types").AssessmentMetric;
+    max_marks?: number | null; rating_max?: number | null;
+    given_on?: string | null; due_date?: string | null;
+    covers_all: boolean; student_ids?: string[];
+  }) => api.post<import("@/lib/school-types").BandAssessmentRow>("/bands/assessments", b),
+  bandAssessmentSheet: (id: string) =>
+    api.get<import("@/lib/school-types").BandAssessmentSheet>(`/bands/assessments/${id}`),
+  /** Full replace — a child left out goes back to NOT EVALUATED, not to zero. */
+  recordBandAssessment: (id: string, b: {
+    results: {
+      student_id: string; marks?: number | null; rating?: number | null;
+      verdict?: string | null; note?: string | null;
+    }[];
+  }) => api.put<import("@/lib/school-types").BandAssessmentSheet>(
+    `/bands/assessments/${id}/results`, b),
+  deleteBandAssessment: (id: string) =>
+    api.del<{ message: string }>(`/bands/assessments/${id}`),
   // photo score capture (SC-2): photo → AI transcription → deterministic match →
   // human review grid → confirm. Scores persist only on confirm.
   // cycle_id omitted = a draft exam capture (SC-5), saved via saveExam.

@@ -133,6 +133,17 @@ class StudentNote(Base, UUIDPKMixin, CreatedAtMixin):
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="general")
     note: Mapped[str] = mapped_column(Text, nullable=False)
+    # Founder 2026-08-05. What occasioned the note, when it was a support
+    # assessment — set from the "add student log" button on the evaluation
+    # sheet. Deliberately a pointer on the ONE log about a child rather than a
+    # second per-assessment note store: a year later his teacher wants to read
+    # everything anybody noticed in one scroll, and "the remark is over there,
+    # under the exam" is how a log stops being read. SET NULL, so deleting an
+    # assessment loses the link and never the observation.
+    assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("band_assessments.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     # SET NULL so the history outlives the account (the `fee_notes` rule).
     author_member_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
@@ -141,7 +152,7 @@ class StudentNote(Base, UUIDPKMixin, CreatedAtMixin):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('general', 'behaviour', 'wellbeing', 'achievement', "
-            "'parent_contact', 'concern')",
+            "'parent_contact', 'concern', 'support', 'assessment')",
             name="ck_student_notes_kind",
         ),
     )

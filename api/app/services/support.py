@@ -159,8 +159,18 @@ class SupportService:
                       for name, rows_ in sorted(groups.items())]
         # A finished week must read as finished — and nothing here is a
         # compliance score (`S-170`).
-        overdue = [r for group in out.groups for r in group["rows"]
-                   if (r.weeks_since_checkin or 99) >= 3]
+        #
+        # ⚠️ **Never checked in is a state, not a duration** (found in the
+        # browser, 2026-08-05). This filtered on `(weeks_since_checkin or 99)
+        # >= 3`, which sweeps in a child who has NO check-in at all — and then
+        # formatted his `None` straight into the sentence, so the board read
+        # *"Asha hasn't been checked in None weeks."* The two cases now get two
+        # sentences, because they call for two different actions: start, or
+        # catch up.
+        all_rows = [r for group in out.groups for r in group["rows"]]
+        stale = [r for r in all_rows
+                 if r.weeks_since_checkin is not None and r.weeks_since_checkin >= 3]
+        never = [r for r in all_rows if r.last_checkin is None]
         if not active:
             out.headline = "Everyone you were supporting has moved on. Nothing open."
         elif done_this_week >= active:
@@ -168,10 +178,14 @@ class SupportService:
                             if active != 1 else "Your one child is checked in this week.")
         else:
             out.headline = f"{done_this_week} of your {active} checked in this week."
-            if overdue:
-                worst = min(overdue, key=lambda r: r.last_checkin or date.min)
+            if stale:
+                worst = max(stale, key=lambda r: r.weeks_since_checkin or 0)
                 out.headline += (f" {worst.full_name} hasn't been checked in "
                                  f"{worst.weeks_since_checkin} weeks.")
+            elif never:
+                n = len(never)
+                out.headline += (f" {never[0].full_name} has never been checked in."
+                                 if n == 1 else f" {n} have never been checked in.")
         return out
 
     # ── /support/[id] — the child, opening already written (S-164) ───────────
