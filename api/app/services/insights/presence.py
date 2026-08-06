@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.staff import not_operator
 from app.models import (
     AcademicYear,
     Board,
@@ -646,7 +647,7 @@ class PresenceService:
         admin_ids = list(self.db.scalars(
             select(Membership.id).where(
                 Membership.org_id == m.org_id, Membership.status == "active",
-                Membership.org_role == "admin")))
+                Membership.org_role == "admin", not_operator())))
         out.admin_work = self._admin_work(m, today, admin_ids)
         out.admin_options = [
             PresenceRow(id=w.member_id, name=w.name,
@@ -739,7 +740,7 @@ class PresenceService:
             mid: role for mid, role in self.db.execute(
                 select(Membership.id, Membership.org_role)
                 .where(Membership.org_id == m.org_id,
-                       Membership.status == "active")).all()
+                       Membership.status == "active", not_operator())).all()
         }
         totals = defaultdict(int)
         for role in roles.values():

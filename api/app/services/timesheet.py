@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.staff import not_operator
 from app.core.work_types import label_for, normalize
 from app.models import (
     AcademicYear,
@@ -456,7 +457,8 @@ class TimesheetService:
         staff = list(self.db.execute(
             select(Membership.id, User.name)
             .join(User, User.id == Membership.user_id)
-            .where(Membership.org_id == m.org_id, Membership.status == "active")
+            .where(Membership.org_id == m.org_id, Membership.status == "active",
+                   not_operator())
             .order_by(User.name)).all())
 
         grid = self.db.execute(

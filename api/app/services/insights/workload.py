@@ -39,6 +39,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.staff import not_operator
 from app.core.work_types import label_for
 from app.models import (
     AcademicYear,
@@ -103,7 +104,8 @@ class WorkloadInsights:
             (mid, uid, name, role) for mid, uid, name, role in self.db.execute(
                 select(Membership.id, Membership.user_id, User.name, Membership.org_role)
                 .join(User, User.id == Membership.user_id)
-                .where(Membership.org_id == org_id, Membership.status == "active")
+                .where(Membership.org_id == org_id, Membership.status == "active",
+                       not_operator())
                 .order_by(User.name)).all()
         ]
 

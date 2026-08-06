@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, ValidationError
+from app.core.staff import not_operator
 from app.models import (
     LeaveRequest,
     Membership,
@@ -88,7 +89,8 @@ class StaffMonthService:
         staff_q = (
             select(Membership.id, User.name, Membership.org_role)
             .join(User, User.id == Membership.user_id)
-            .where(Membership.org_id == m.org_id, Membership.status == "active")
+            .where(Membership.org_id == m.org_id, Membership.status == "active",
+                   not_operator())
             .order_by(Membership.org_role, User.name))
         if member_id is not None:
             staff_q = staff_q.where(Membership.id == member_id)

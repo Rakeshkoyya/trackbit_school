@@ -415,6 +415,7 @@ export function StaffRecordView({ memberId }: { memberId: string }) {
           {rec.slices.length ? (
             <Donut
               size={150}
+              unit="periods"
               centerValue={String(total)}
               centerLabel="periods"
               slices={rec.slices.map((s) => ({

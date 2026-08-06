@@ -24,10 +24,10 @@ if the code drifted, and the ones that carry a product law:
 import uuid
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.work_types import CATEGORY_COLORS, OTHER_COLOR, SLATE
-from app.models import Membership
+from app.models import Membership, User
 from tests.conftest import AdminSession
 
 
@@ -97,6 +97,86 @@ def _setup(client, cleanup):
     return {"h": h, "th": th, "th2": th2, "org_id": org_id, "year": year,
             "teacher_mid": teacher_mid, "teacher2_mid": teacher2_mid,
             "admin_mid": str(_membership_id(reg["user"]["id"], org_id)), "on": on}
+
+
+# ── who is on the board ──────────────────────────────────────────────────────
+def test_board_is_teaching_staff_only(client, cleanup):
+    """The population is the teaching staff (founder call, 2026-08-06).
+
+    An office admin holds no timetable and files no timesheet, so every one of
+    their periods fell through to `free` — on a real school that put two admin
+    rows and sixteen invented free periods into the ring, and made the headline's
+    denominator impossible to reconcile against the timetable it came from.
+    Nobody asked the office for a period, so those slots are not capacity the
+    school failed to use; they are capacity it never had, which is exactly what
+    `expected()` already says about a locked period.
+    """
+    ctx = _setup(client, cleanup)
+    book = client.get(f"/api/v1/insights/daybook?on={ctx['on']}",
+                      headers=ctx["h"]).json()
+
+    assert {r["role"] for r in book["rows"]} == {"teacher"}
+    assert ctx["admin_mid"] not in {r["member_id"] for r in book["rows"]}
+
+    # Two teachers x three periods. The admin's three are simply not here.
+    assert book["slots_total"] == 6
+    # The row is dropped whole, cells included, so the identity still holds — a
+    # board whose parts do not add up to its own total is worse than one that is
+    # merely counting the wrong people.
+    assert (book["slots_teaching"] + book["slots_work"]
+            + book["slots_free"]) == book["slots_total"]
+    assert sum(s["periods"] for s in book["slices"]) == book["slots_total"]
+    assert "2 teachers" in book["headline"]
+
+
+def test_platform_operator_is_not_staff(client, cleanup):
+    """V3-P0 joins the platform operator into every school it creates, so setup
+    can be run and credentials handed over. That membership is real and has to
+    keep working — but the account is the vendor's, not an employee of the
+    school, and `memberships` answering "who may sign in" was being read as "who
+    works here" by every roster in the product. Counted as staff it became a
+    person the admin is asked to mark present each morning, a name in the staff
+    directory, and eight unexplained free periods a day in the ring.
+    """
+    ctx = _setup(client, cleanup)
+    h, on = ctx["h"], ctx["on"]
+
+    bulk = client.post("/api/v1/org/members/bulk", headers=h, json={"members": [
+        {"username": f"ops{uuid.uuid4().hex[:8]}", "password": "supersecret1",
+         "role": "teacher"}]})
+    cred = bulk.json()["results"][0]
+    cleanup["users"].append(uuid.UUID(cred["user_id"]))
+    op_mid = str(_membership_id(cred["user_id"], ctx["org_id"]))
+
+    # Pinned in BOTH directions: an ordinary member IS on the board first, so
+    # this cannot pass by the row having gone missing for an unrelated reason.
+    before = client.get(f"/api/v1/insights/daybook?on={on}", headers=h).json()
+    assert op_mid in {r["member_id"] for r in before["rows"]}
+
+    db = AdminSession()
+    try:
+        db.execute(update(User).where(User.id == uuid.UUID(cred["user_id"]))
+                   .values(is_super_admin=True))
+        db.commit()
+    finally:
+        db.close()
+
+    after = client.get(f"/api/v1/insights/daybook?on={on}", headers=h).json()
+    assert op_mid not in {r["member_id"] for r in after["rows"]}
+    assert after["slots_total"] == before["slots_total"] - 3
+
+    directory = client.get("/api/v1/staff/directory", headers=h).json()
+    assert op_mid not in {r["member_id"] for r in directory["rows"]}
+
+    roster = client.get(f"/api/v1/staff/attendance?on_date={on}", headers=h).json()
+    assert op_mid not in {r["member_id"] for r in roster["roster"]}
+
+    # The exclusion is a ROSTER rule and never a permission one. Hiding somebody
+    # from a staff list must not lock them out of the org they were deliberately
+    # let into — that is the half of this which is easiest to break later.
+    login = client.post("/api/v1/auth/login", json={
+        "identifier": cred["username"], "password": "supersecret1"})
+    assert login.status_code == 200
 
 
 # ── the grid ─────────────────────────────────────────────────────────────────

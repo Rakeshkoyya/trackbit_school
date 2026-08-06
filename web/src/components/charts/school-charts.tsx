@@ -253,15 +253,49 @@ export function RowBars({
 
 // ── parts of a whole ─────────────────────────────────────────────────────────
 
+/**
+ * Shares that add up to exactly 100 — largest remainder, never per-slice rounding.
+ *
+ * A donut is a part-to-whole, so its legend carries one obligation the arithmetic
+ * has to keep: **the percentages sum to 100.** Rounding each slice on its own does
+ * not. The staff day-book's eight slices (64·12·11·7·7·6·13·64 of 184) rounded
+ * independently to 35+7+6+4+4+3+7+35 = **101%**, and a reader who adds a legend up
+ * and gets 101 has been handed a reason to distrust every other figure on the board.
+ *
+ * So: floor every share, then give the leftover points to the largest fractional
+ * parts — the slices that came closest to rounding up are the ones that do.
+ */
+function sharesOf(values: number[], total: number): number[] {
+  if (total <= 0) return values.map(() => 0);
+  const exact = values.map((v) => ((v || 0) / total) * 100);
+  const out = exact.map((e) => Math.floor(e));
+  let left = Math.max(0, 100 - out.reduce((a, b) => a + b, 0));
+  const byRemainder = exact
+    .map((e, i) => ({ i, rem: e - Math.floor(e) }))
+    .sort((a, b) => b.rem - a.rem);
+  for (const { i } of byRemainder) {
+    if (left <= 0) break;
+    out[i] += 1;
+    left -= 1;
+  }
+  return out;
+}
+
 export function Donut({
-  slices, centerValue, centerLabel, size = 168,
+  slices, centerValue, centerLabel, size = 168, unit,
 }: {
   slices: Slice[];
   centerValue?: string;
   centerLabel?: string;
   size?: number;
+  /** What one unit of `value` IS ("periods", "students"). Without it the raw
+   *  count sits unlabelled beside a percentage and gets read as one — which is
+   *  how "Teaching 64" and "Free or unrecorded 64" were reported as two 64%
+   *  shares of a day those two in fact split 35/35. */
+  unit?: string;
 }) {
   const total = slices.reduce((sum, s) => sum + (s.value || 0), 0);
+  const shares = sharesOf(slices.map((s) => s.value), total);
   return (
     <div className="flex flex-wrap items-center gap-5">
       <div className="relative shrink-0" style={{ height: size, width: size }}>
@@ -288,15 +322,27 @@ export function Donut({
       {/* Direct labels with values — never colour-alone, never a number on the arc.
           The label WRAPS rather than truncates: this legend is the chart (six
           arcs read as six arcs and nothing more), and "Notebook checki…" names
-          nothing. Two lines of text cost less than an unreadable key. */}
+          nothing. Two lines of text cost less than an unreadable key.
+
+          The share leads and the count follows it, one step down in size and in
+          muted ink. Written the other way round — `64 · 35%` — the two figures
+          read as equals, and a row whose count happens to look like a percentage
+          gets taken for one: "Teaching 64" and "Free or unrecorded 64" were
+          reported as two 64% shares of the same day. A percentage is the only
+          figure here that needs no unit, so it is the one that gets the weight. */}
       <ul className="min-w-0 flex-1 space-y-1.5">
         {slices.map((s, i) => (
           <li key={s.label} className="flex items-start gap-2 text-sm">
             <span className="mt-[5px] h-2.5 w-2.5 shrink-0 rounded-sm"
               style={{ background: s.color ?? SERIES_COLORS[i % SERIES_COLORS.length] }} />
             <span className="min-w-0 flex-1 leading-snug">{s.label}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {s.value}{total > 0 ? ` · ${Math.round((s.value / total) * 100)}%` : ""}
+            <span className="flex shrink-0 items-baseline gap-1.5 leading-snug">
+              {total > 0 ? (
+                <span className="font-medium tabular-nums">{shares[i]}%</span>
+              ) : null}
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {s.value}{unit ? ` ${unit}` : ""}
+              </span>
             </span>
           </li>
         ))}

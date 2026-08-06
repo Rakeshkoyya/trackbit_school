@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.staff import not_operator
 from app.models import (
     AcademicYear,
     ClassSubject,
@@ -245,7 +246,8 @@ class SubstitutionService:
         sub = self.db.scalar(
             select(Membership).where(Membership.id == body.substitute_member_id,
                                      Membership.org_id == m.org_id,
-                                     Membership.status == "active"))
+                                     Membership.status == "active",
+                                     not_operator()))
         if sub is None:
             raise NotFoundError("Member")
         if body.absent_member_id and sub.id == body.absent_member_id:

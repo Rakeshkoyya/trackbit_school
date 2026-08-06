@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
+from app.core.staff import not_operator
 from app.models import (
     LeaveRequest,
     Membership,
@@ -61,12 +62,21 @@ class StaffAttendanceService:
         return today_in(m.org.timezone)
 
     def _staff(self, org_id: uuid.UUID) -> list[tuple[Membership, User]]:
-        """Every active member — teachers and admin staff alike. Both are 'staff'
-        for attendance; the role rides along so the UI can group them."""
+        """Everyone who works here — teachers and admin staff alike. Both are
+        'staff' for attendance; the role rides along so the UI can group them.
+
+        `not_operator()` is what makes "works here" different from "can sign in":
+        the platform operator holds a membership in every school it created, and
+        without this the admin was asked each morning to mark the vendor's
+        account present or absent. This is the roster the presence rings, the
+        workload board and the now-board all read through `roster()`, so the
+        exclusion reaches all of them from here.
+        """
         return list(self.db.execute(
             select(Membership, User)
             .join(User, User.id == Membership.user_id)
-            .where(Membership.org_id == org_id, Membership.status == "active")
+            .where(Membership.org_id == org_id, Membership.status == "active",
+                   not_operator())
             .order_by(Membership.org_role, User.name)
         ).all())
 

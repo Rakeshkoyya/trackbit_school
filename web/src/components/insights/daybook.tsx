@@ -380,6 +380,7 @@ export function OccupancyRing({ book, size = 148 }: { book: Daybook; size?: numb
   return (
     <Donut
       size={size}
+      unit="periods"
       centerValue={book.occupied_pct == null ? "—" : `${book.occupied_pct}%`}
       centerLabel={book.occupied_pct == null ? "no denominator" : "spoken for"}
       slices={book.slices.map((s) => ({

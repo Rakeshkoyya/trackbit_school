@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.core.staff import not_operator
 from app.core.validators import normalize_username
 from app.models import (
     AcademicYear,
@@ -83,7 +84,8 @@ class StaffDirectoryService:
         people = self.db.execute(
             select(Membership, User)
             .join(User, User.id == Membership.user_id)
-            .where(Membership.org_id == m.org_id, Membership.status == "active")
+            .where(Membership.org_id == m.org_id, Membership.status == "active",
+                   not_operator())
             .order_by(User.name)).all()
 
         klasses = list(self.db.execute(

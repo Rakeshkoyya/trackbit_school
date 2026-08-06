@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.indian_states import normalise
+from app.core.staff import not_operator
 from app.models import (
     AcademicYear,
     CalendarEvent,
@@ -274,7 +275,7 @@ class WhatsOnService:
             select(Membership, User.name)
             .join(User, User.id == Membership.user_id)
             .where(Membership.org_id == m.org_id, Membership.status == "active",
-                   Membership.date_of_birth.is_not(None))
+                   Membership.date_of_birth.is_not(None), not_operator())
         ).all()
         for mem, name in staff:
             for d in _dates_between(start, b_end):

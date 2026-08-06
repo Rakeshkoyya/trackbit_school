@@ -7,9 +7,14 @@ somebody else's period. Four tables, and until now **no surface put them side by
 side**: the admin could read one teacher's week (`/timesheet`), or one period's
 live board (`/staff/today`), and had to hold the school's day in their head.
 
-So this is one grid — people down, periods across, every cell carrying what that
+So this is one grid — teachers down, periods across, every cell carrying what that
 person was doing — plus the one figure that grid implies: **how much of the
-school's period capacity was spoken for.**
+school's teaching capacity was spoken for.**
+
+Its population is the **teaching staff** (founder call, 2026-08-06). Office roles
+are on no period grid, so counting their day here invented free periods nobody
+had asked for and made the denominator impossible to check against a timetable —
+see the note in `board`.
 
 Three rules it exists to hold, all of them inherited:
 
@@ -41,6 +46,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.staff import not_operator
 from app.core.work_types import SLATE, color_for, label_for
 from app.models import AcademicYear, Membership
 from app.schemas.insights import (
@@ -75,13 +81,16 @@ class DaybookService:
         return {
             mid: role for mid, role in self.db.execute(
                 select(Membership.id, Membership.org_role)
-                .where(Membership.org_id == org_id, Membership.status == "active")).all()
+                .where(Membership.org_id == org_id, Membership.status == "active",
+                       not_operator())).all()
         }
 
     def _has_timetable(self, org_id: uuid.UUID) -> set[uuid.UUID]:
-        """Members who appear on the grid at all — used only to sort teachers
-        above office staff, never to exclude anybody. An admin who covered a
-        period today belongs on this page as much as anyone."""
+        """Members who hold a class-subject — used only to sort the timetabled
+        above the untimetabled, never to exclude anybody. A teacher with no
+        class-subject (a warden running evening study, a teacher between
+        assignments) still belongs on this page; `board` decides membership by
+        role, and this only decides the order it reads in."""
         from app.models import ClassSubject  # noqa: PLC0415
         return {
             mid for (mid,) in self.db.execute(
@@ -142,6 +151,31 @@ class DaybookService:
             day = r.days[0] if r.days else None
             if day is None:
                 continue
+            # The board is the TEACHING staff's day (founder call, 2026-08-06).
+            #
+            # It used to be every active membership, and an office admin holds no
+            # timetable and files no timesheet — so all eight of their periods
+            # fell through to `free`. On this 24-teacher school that put two admin
+            # rows and 16 invented free periods into the tally: the headline
+            # counted 184 "staff periods" for a school that timetables 21 × 8 =
+            # 168, the ring read 64 free against the 48 anyone counting the grid
+            # arrives at, and the 16 had no name anywhere on the page.
+            #
+            # Nobody asked the office for a period, so those slots are not
+            # capacity the school failed to use — they are capacity it never had.
+            # That is the same rule `expected()` applies to a locked period a few
+            # lines down, and the reason both leave the denominator rather than
+            # becoming free time somebody has to account for.
+            #
+            # The whole row goes, cells included, so `teaching + work + free`
+            # still equals `slots_total`. ⚠️ The cost, accepted with the call: a
+            # cover period taken by a NON-teacher is not on this board (nothing
+            # restricts a substitute to org_role 'teacher' — `assign` checks only
+            # that the member is active). It is still on `/staff/today` and the
+            # cover board, which is where cover is actually arranged.
+            role = roles.get(r.member_id, "teacher")
+            if role != "teacher":
+                continue
             cells: list[DaybookCell] = []
             for slot in day.slots:
                 kind = slot.kind
@@ -172,7 +206,6 @@ class DaybookService:
                     cells.append(DaybookCell(period_no=slot.period_no, kind="free",
                                              color=FREE_COLOR))
                     free += 1
-            role = roles.get(r.member_id, "teacher")
             book.rows.append(DaybookRow(
                 member_id=r.member_id, name=r.member_name, role=role,
                 cells=cells, teaching=day.teaching_count, cover=day.cover_count,
@@ -261,8 +294,15 @@ class DaybookService:
             return "No timetable for this day yet, so there is no day to show."
         pct = book.occupied_pct or 0
         recorded = book.slots_work
-        base = (f"{pct:g}% of the day's {book.slots_total} staff periods were "
-                f"spoken for — {book.slots_teaching} teaching")
+        # The denominator is named, not just printed (ux §: every figure carries
+        # its denominator). "184 staff periods" was the figure nobody could
+        # reconcile against a 21-teacher timetable — saying whose periods they
+        # are is what makes the number checkable by hand.
+        on_duty = sum(1 for r in book.rows
+                      if any(c.kind != "away" for c in r.cells))
+        base = (f"{pct:g}% of the day's {book.slots_total} period slots across "
+                f"{on_duty} teacher{'' if on_duty == 1 else 's'} were spoken "
+                f"for — {book.slots_teaching} teaching")
         if recorded:
             base += f" and {recorded} recorded as other work"
         base += f", {book.slots_free} free."

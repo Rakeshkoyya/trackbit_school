@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import NotFoundError
+from app.core.staff import not_operator
 from app.core.work_types import label_for
 from app.models import (
     AcademicYear,
@@ -797,7 +798,8 @@ class AttendanceInsights:
             .join(User, User.id == Membership.user_id)
             .where(Membership.org_id == m.org_id, Membership.status == "active",
                    Membership.id != absent_member_id,
-                   Membership.org_role.in_(("teacher", "admin")))
+                   Membership.org_role.in_(("teacher", "admin")),
+                   not_operator())
             .order_by(User.name)).all())
         if not staff or not cs_ids:
             return {}
