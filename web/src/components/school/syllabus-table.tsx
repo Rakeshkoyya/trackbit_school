@@ -177,22 +177,75 @@ function RemarksCell({ row, canEdit, onSaved }: {
   );
 }
 
-// ── cells that are just rendering rules ──────────────────────────────────────
-function StatusCell({ row }: { row: Row }) {
-  if (row.overdue) {
-    return <Badge tone="danger">Overdue</Badge>;
-  }
-  if (row.status === "not_scheduled") {
+// ── status: derived to read, one stored decision to set ──────────────────────
+/** Three of the four words here are computed from the lesson logs and the plan,
+ *  and cannot be typed over — a chapter is finished because it was taught, not
+ *  because somebody said so. The one thing a human knows and the record cannot
+ *  is whether the school ever meant to teach it at all, so that is what this
+ *  cell edits: in scope, or not planned. "Not planned" takes the chapter out of
+ *  every coverage figure; it never claims the chapter is done. */
+function StatusCell({ row, canEdit = false, onSaved }: {
+  row: Row; canEdit?: boolean; onSaved?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const save = async (value: boolean) => {
+    setOpen(false);
+    if (value === row.not_planned) return;
+    try {
+      await schoolApi.patchChapter(row.unit_id, { not_planned: value });
+      onSaved?.();
+    } catch (e) { showApiError(e, "Could not change the chapter's scope"); }
+  };
+
+  const chip = row.not_planned ? (
+    <span className="inline-flex items-center rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground">
+      Not planned
+    </span>
+  ) : row.overdue ? (
+    <Badge tone="danger">Overdue</Badge>
+  ) : row.status === "not_scheduled" ? (
     // The board's worst-looking square must never be a hole in the record.
-    return (
-      <span className="inline-flex items-center rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground">
-        Not scheduled
-      </span>
-    );
-  }
-  const tone = row.status === "completed" ? "success"
-    : row.status === "in_progress" ? "primary" : "outline";
-  return <Badge tone={tone}>{STATUS_LABEL[row.status]}</Badge>;
+    <span className="inline-flex items-center rounded-full border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground">
+      Not scheduled
+    </span>
+  ) : (
+    <Badge tone={row.status === "completed" ? "success"
+      : row.status === "in_progress" ? "primary" : "outline"}>
+      {STATUS_LABEL[row.status]}
+    </Badge>
+  );
+
+  if (!canEdit || !onSaved) return chip;
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="rounded-full transition-opacity hover:opacity-80"
+        aria-label={`Scope of ${row.title}`}>
+        {chip}
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-1 w-52 rounded-lg border border-border bg-card p-1 shadow-lg">
+            <button type="button" onClick={() => save(false)}
+              className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted">
+              In scope
+              <span className="block text-[11px] text-muted-foreground">
+                Status follows the lesson logs
+              </span>
+            </button>
+            <button type="button" onClick={() => save(true)}
+              className="block w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-muted">
+              Not planned
+              <span className="block text-[11px] text-muted-foreground">
+                Left out of every coverage figure
+              </span>
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 /** Planned above, actual below — never merged into one column. The gap between
@@ -563,7 +616,7 @@ export function SyllabusTable({ board, canEdit, onChanged, onAdjust,
                               <DatesCell from={r.actual_start} to={r.actual_end}
                                 drift={r.finish_drift_days} />
                               <ProgressCell row={r} />
-                              <StatusCell row={r} />
+                              <StatusCell row={r} canEdit={canEdit} onSaved={onChanged} />
                               <RemarksCell row={r} canEdit={canEdit} onSaved={onChanged} />
                             </div>
                             {expanded ? <TopicRows row={r} /> : null}

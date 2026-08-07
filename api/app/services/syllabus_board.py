@@ -309,22 +309,31 @@ class SyllabusBoardService:
         actual_end = max(taught_on) if taught_on else None
 
         status = chapter_status(topics=len(group), taught_full=full,
-                                taught_partial=partial, planned=len(planned_weeks))
+                                taught_partial=partial, planned=len(planned_weeks),
+                                excluded=u.not_planned)
         weighted = sum(taught_weight(t.best) for t in group if t.best)
 
         # Overdue = the plan said it would be finished by now and it is not.
         # Never true without a planned end: an unscheduled chapter has not been
         # missed, and reddening it would put every school that plans term by term
         # permanently in the wrong (rule 2 / V2-P11).
+        #
+        # `not_scheduled` is excluded explicitly rather than left to follow from
+        # "no planned end". That used to be equivalent — the only ways to be
+        # not_scheduled were to have no topics or no plan, and both leave
+        # `planned_end` None. A chapter the school marks `not_planned` breaks
+        # that: it can carry plan entries from before the decision, so it had a
+        # planned end in the past and rendered **Overdue** while reading "Not
+        # planned". The rule is the state, not the absence of a date.
         overdue = bool(planned_end and planned_end < today
-                       and status != CHAPTER_COMPLETED)
+                       and status not in (CHAPTER_COMPLETED, CHAPTER_NOT_SCHEDULED))
         drift = ((actual_end - planned_end).days
                  if actual_end and planned_end and status == CHAPTER_COMPLETED else None)
 
         return SyllabusChapterRow(
             unit_id=u.id, class_subject_id=cs.id, title=u.title, position=u.position,
             term_id=u.term_id, term_name=term_name.get(u.term_id) if u.term_id else None,
-            difficulty=u.difficulty, remarks=u.remarks,
+            difficulty=u.difficulty, remarks=u.remarks, not_planned=u.not_planned,
             # None, not 0: a chapter with nothing sized has no estimate at all.
             est_periods=sum(sized) if sized else None,
             topics_total=len(group),
@@ -441,6 +450,12 @@ class SyllabusBoardService:
             # "" clears it: an emptied box is the teacher deleting a remark, and
             # keeping the old text would make the field impossible to retract.
             u.remarks = body.remarks.strip() or None
+        if body.not_planned is not None:
+            # In scope or not — the one stored word on a board of derived ones.
+            # Corrected in place like difficulty and remarks beside it: law 3's
+            # append-only is for decisions about a PERSON, and this is a
+            # decision about a chapter, reversed by ticking the box back.
+            u.not_planned = body.not_planned
         if body.clear_term:
             u.term_id = None
         elif body.term_id is not None:

@@ -139,6 +139,10 @@ class _Topic:
     term_id: uuid.UUID | None = None
     baseline_week_start: date | None = None
     first_on: date | None = None
+    # `syllabus_units.not_planned` — the school decided this chapter is out of
+    # scope. Carried on the topic so the board can still render it, and skipped
+    # by `_assemble` so it enters no numerator and no denominator.
+    not_planned: bool = False
 
 
 @dataclass
@@ -260,7 +264,12 @@ class CoverageReader:
                     id=topic.id, title=topic.title, chapter=unit.title,
                     est_periods=topic.est_periods,
                     order=(unit.position, topic.position),
-                    unit_id=unit.id, term_id=unit.term_id))
+                    unit_id=unit.id, term_id=unit.term_id,
+                    # Carried, not filtered out here: the syllabus TABLE still
+                    # has to draw this chapter with its real topic count so the
+                    # flag can be seen and reversed. It leaves the arithmetic in
+                    # `_assemble`, which is the only place topics become figures.
+                    not_planned=unit.not_planned))
         for topics in by_cs.values():
             topics.sort(key=lambda t: t.order)
         return by_cs
@@ -322,6 +331,14 @@ class CoverageReader:
         chapters: dict[str, list[_Topic]] = defaultdict(list)
 
         for t in topics:
+            # A chapter the school has taken out of scope leaves the numerator
+            # AND the denominator — the same treatment pre-tracking chapters get
+            # in `_topics`, for the same reason. Skipped before `total_topics`,
+            # before `chapters`, before everything: a chapter nobody promised is
+            # not work anybody failed to do, and counting it would make a school
+            # that teaches 24 of its 30 chapters read as permanently 20% short.
+            if t.not_planned:
+                continue
             row.total_topics += 1
             chapters[t.chapter].append(t)
             if t.est_periods is None:

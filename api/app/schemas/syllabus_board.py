@@ -62,6 +62,14 @@ class SyllabusChapterRow(BaseModel):
     difficulty: str | None = None
     remarks: str | None = None
 
+    # The school's decision that this chapter is out of scope this year. The one
+    # STORED word on a board of derived ones: it forces `status` to
+    # `not_scheduled` and takes the chapter's topics out of every coverage
+    # numerator and denominator. The row still carries its real `topics_total`
+    # and `est_periods`, so the table can show what is being excluded and the
+    # decision can be reversed from the same cell that made it.
+    not_planned: bool = False
+
     # Σ of the sized topics. None when NOT ONE topic is sized — the chapter has
     # no estimate at all, which is different from an estimate of zero.
     est_periods: int | None = None
@@ -170,6 +178,9 @@ class ChapterPatchIn(BaseModel):
     remarks: str | None = Field(default=None, max_length=2000)
     term_id: uuid.UUID | None = None
     clear_term: bool = False
+    # True = out of scope this year, False = back in. Absent leaves it alone,
+    # like every other field here.
+    not_planned: bool | None = None
 
 
 class ChapterScheduleIn(BaseModel):

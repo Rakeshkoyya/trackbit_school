@@ -96,12 +96,16 @@ export function PaceLegend({ className = "" }: { className?: string }) {
  * disabled control explaining an absence.
  */
 export function TermSwitch({
-  terms, value, onChange, className = "",
+  terms, value, onChange, className = "", allowWholeYear = true,
 }: {
   terms: TermOption[];
   value: string;
   onChange: (id: string) => void;
   className?: string;
+  /** Offer "Whole year" as a choice. False where the switcher IS the term
+   *  checkpoint: a board headed "Term" showing the year's numbers is the bug
+   *  this flag exists to make unreachable. */
+  allowWholeYear?: boolean;
 }) {
   if (!terms.length) return null;
   return (
@@ -109,7 +113,7 @@ export function TermSwitch({
       <span className="sr-only">Narrow to a term</span>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="rounded-md border border-border bg-card px-2 py-1 font-mono text-[11px] tracking-wide text-foreground">
-        <option value="">Whole year</option>
+        {allowWholeYear ? <option value="">Whole year</option> : null}
         {terms.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}{t.is_current ? " · now" : ""}

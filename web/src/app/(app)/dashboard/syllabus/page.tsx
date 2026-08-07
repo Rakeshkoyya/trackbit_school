@@ -312,7 +312,19 @@ function SyllabusInner() {
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <div className="flex gap-1 rounded-lg border border-border p-0.5">
           {CHECKPOINTS.map((c) => (
-            <button key={c.key} type="button" onClick={() => setCheckpoint(c.key)}
+            <button key={c.key} type="button"
+              onClick={() => {
+                // Clicking "Term" with no term chosen used to leave termId at
+                // "" — so the request carried no term, the board answered with
+                // the WHOLE YEAR, and the heading still said Term. The tab read
+                // as broken because the numbers never moved. Land on the term
+                // the school is actually in.
+                if (c.key === "term" && !termId) {
+                  setTermId(data.terms.find((t) => t.is_current)?.id
+                    ?? data.terms[0]?.id ?? "");
+                }
+                setCheckpoint(c.key);
+              }}
               className={cn("rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 checkpoint === c.key ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground")}>
               {c.label}
@@ -320,9 +332,11 @@ function SyllabusInner() {
           ))}
         </div>
         {/* The terms come down with the board, so the running one is flagged
-            against the school's clock and not the browser's. */}
+            against the school's clock and not the browser's. No "Whole year"
+            option here: inside the Term checkpoint it is the same trap. */}
         {checkpoint === "term" ? (
-          <TermSwitch terms={data.terms} value={termId} onChange={setTermId} />
+          <TermSwitch terms={data.terms} value={termId} onChange={setTermId}
+            allowWholeYear={false} />
         ) : null}
         <div className="ml-auto flex gap-1 rounded-lg border border-border p-0.5">
           {SCOPES.map((s) => (

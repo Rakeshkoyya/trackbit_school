@@ -264,7 +264,7 @@ CHAPTER_STATUS_LABEL: dict[str, str] = {
 
 
 def chapter_status(*, topics: int, taught_full: int, taught_partial: int,
-                   planned: int) -> str:
+                   planned: int, excluded: bool = False) -> str:
     """THE chapter-level teaching status. Import it; do not re-decide it.
 
     `taught_full`/`taught_partial` are counts of topics at their BEST logged
@@ -274,8 +274,18 @@ def chapter_status(*, topics: int, taught_full: int, taught_partial: int,
     A chapter with no topics at all is `not_scheduled`: there is nothing to
     teach and nothing to have finished, and calling it completed would let an
     empty chapter carry a school's coverage figure upward.
+
+    `excluded` is `syllabus_units.not_planned` — the school having *decided*
+    this chapter is out of scope this year. It wins over every derived reading,
+    including a chapter somebody once logged against: the decision is the more
+    recent statement, the flag is trivially reversible, and a stale green would
+    quietly inflate the school's coverage. It returns the SAME word as "nobody
+    planned this", deliberately — to every reader both mean *there is nothing
+    here to be behind on*, and a fifth word would have to be taught to three
+    TypeScript unions and the parent report to draw a distinction only the
+    person who set the flag can act on.
     """
-    if not topics:
+    if excluded or not topics:
         return CHAPTER_NOT_SCHEDULED
     if taught_full >= topics:
         return CHAPTER_COMPLETED

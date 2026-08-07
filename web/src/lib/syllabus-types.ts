@@ -37,6 +37,11 @@ export interface SyllabusChapterRow {
   term_name: string | null;
   difficulty: Difficulty | null;
   remarks: string | null;
+  /** The school decided this chapter is out of scope this year. The one STORED
+   *  field on a row of derived ones: it forces `status` to `not_scheduled` and
+   *  takes the chapter out of every coverage numerator and denominator. The
+   *  topic counts stay real, so the table can show what is being excluded. */
+  not_planned: boolean;
   est_periods: number | null;
   topics_total: number;
   unsized_topics: number;
@@ -111,6 +116,8 @@ export interface ChapterPatch {
   /** "unset" clears it — a partial update can never blank a column by omission. */
   difficulty?: Difficulty | "unset";
   remarks?: string;
+  /** true = out of scope this year, false = back in. Omitted leaves it alone. */
+  not_planned?: boolean;
   term_id?: string;
   clear_term?: boolean;
 }

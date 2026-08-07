@@ -65,6 +65,13 @@ def test_chapter_status_vocabulary():
     # while containing nothing to teach.
     assert cov.chapter_status(topics=0, taught_full=0, taught_partial=0,
                               planned=0) == cov.CHAPTER_NOT_SCHEDULED
+    # The school's own decision beats every derived reading, including a chapter
+    # somebody once logged against: the flag is the more recent statement, and a
+    # stale "completed" would quietly inflate the school's coverage.
+    assert cov.chapter_status(topics=3, taught_full=3, taught_partial=0,
+                              planned=3, excluded=True) == cov.CHAPTER_NOT_SCHEDULED
+    assert cov.chapter_status(topics=3, taught_full=0, taught_partial=0,
+                              planned=3, excluded=True) == cov.CHAPTER_NOT_SCHEDULED
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
@@ -231,6 +238,60 @@ def test_an_unscheduled_chapter_is_never_overdue(client, cleanup):
     assert ch["est_periods"] is None      # None, never 0 — nothing is estimated
     assert ch["unsized_topics"] == 1
     assert ch["planned_start"] is None
+
+
+def test_a_chapter_marked_not_planned_leaves_the_denominator(client, cleanup):
+    """The founder's call, 2026-08-08. A chapter the school has decided is out of
+    scope stops counting — in the numerator AND the denominator. Leaving it in
+    is what made a school that teaches 24 of its 30 chapters read as permanently
+    20% short, which is rule 2 inverted: a gap in the *record* rendered as a
+    failure by a *person*.
+
+    It must also stay VISIBLE with its real topic count, or the decision could
+    never be seen or reversed from the row that made it."""
+    s = _setup(client, cleanup)
+    _chapter(client, s["h"], s["cs"]["id"], "Fractions",
+             [("Adding", 3), ("Multiplying", 2)])
+    dropped = _chapter(client, s["h"], s["cs"]["id"], "Optional unit",
+                       [("Extra", 2), ("More", 2)])
+    # `coverage_pct` is the PLANNED basis (`syllabus_board.py:227`), so it is
+    # None until there is a plan to be a fraction of. Draft one over all four
+    # topics — which is exactly the case that matters: the excluded chapter has
+    # plan entries, and must still leave the denominator.
+    client.post(f"/api/v1/planner/plan/{s['cs']['id']}/draft", headers=s["h"])
+    units = client.get(f"/api/v1/planner/syllabus?class_subject_id={s['cs']['id']}",
+                       headers=s["h"]).json()
+    for t in units[0]["topics"]:
+        client.post("/api/v1/classroom/lesson-logs", headers=s["th"], json={
+            "class_subject_id": s["cs"]["id"], "topic_id": t["id"],
+            "coverage": "full"})
+
+    subject = _board(client, s["h"], year_id=s["year"]["id"])["classes"][0]["subjects"][0]
+    assert subject["coverage_pct"] == 50.0     # 2 taught of 4 topics
+
+    r = client.patch(f"/api/v1/planner/syllabus/units/{dropped['id']}",
+                     headers=s["h"], json={"not_planned": True})
+    assert r.status_code == 200, r.text
+
+    board = _board(client, s["h"], year_id=s["year"]["id"])
+    subject = board["classes"][0]["subjects"][0]
+    # 2 of 2 — the dropped chapter left BOTH sides of the fraction, so finishing
+    # what the school actually planned reads as finished.
+    assert subject["coverage_pct"] == 100.0
+
+    by_title = {c["title"]: c for c in _chapters(board)}
+    out = by_title["Optional unit"]
+    assert out["not_planned"] is True
+    assert out["status"] == cov.CHAPTER_NOT_SCHEDULED
+    assert out["overdue"] is False
+    assert out["topics_total"] == 2            # still shown, still reversible
+    assert by_title["Fractions"]["status"] == cov.CHAPTER_COMPLETED
+
+    # And back: the flag is a decision corrected in place, not a one-way door.
+    client.patch(f"/api/v1/planner/syllabus/units/{dropped['id']}",
+                 headers=s["h"], json={"not_planned": False})
+    subject = _board(client, s["h"], year_id=s["year"]["id"])["classes"][0]["subjects"][0]
+    assert subject["coverage_pct"] == 50.0
 
 
 def test_chapter_only_school_does_not_get_a_pointless_expander(client, cleanup):

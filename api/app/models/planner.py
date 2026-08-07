@@ -7,7 +7,16 @@ from baseline + effective periods — never stored as mutated plan rows.
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,6 +61,17 @@ class SyllabusUnit(Base, UUIDPKMixin, CreatedAtMixin):
     # in place, like a homework verdict or an attendance exception.
     difficulty: Mapped[str | None] = mapped_column(Text, nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The school saying "this chapter is not in scope this year" — a DECISION,
+    # unlike the four statuses beside it, which are all derived from logs and
+    # the plan. So it is stored, and it does two things: forces the chapter's
+    # status to `not_scheduled`, and drops its topics out of the coverage
+    # numerator AND denominator (`services/coverage.py::_topics`, the same shape
+    # pre-tracking chapters already use). Without it an out-of-scope chapter
+    # reads as work the school failed to teach, which is rule 2 exactly:
+    # not-captured is a word, never a zero and never red.
+    not_planned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false")
 
     topics: Mapped[list["SyllabusTopic"]] = relationship(
         back_populates="unit", cascade="all, delete-orphan", order_by="SyllabusTopic.position",

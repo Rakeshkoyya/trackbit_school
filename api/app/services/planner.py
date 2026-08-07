@@ -985,6 +985,12 @@ class PlannerService:
 
         out: list[TopicProgressRow] = []
         for unit in units:
+            # Out of scope this year: not listed as work, here or in Lucy. The
+            # coverage figures drop it in `services/coverage.py::_assemble`;
+            # this is the same decision for the one list that does not go
+            # through that reader.
+            if unit.not_planned:
+                continue
             for topic in sorted(unit.topics, key=lambda t: t.position):
                 seen = coverages.get(topic.id, set())
                 status = "done" if "full" in seen else "in_progress" if seen else "pending"
