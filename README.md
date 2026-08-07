@@ -30,14 +30,27 @@ test_doc/  a generator for mock setup data (see test_doc/new_org/README.md)
 
 ### The database
 
-We use a **managed Postgres (Aiven)**. You do not install or run Postgres — you
-connect to the shared one. Two URLs, and the split is load-bearing:
+You run **Postgres locally** (installed directly — there is no container). The
+Aiven instance the project used to share has been retired for development: its
+app role did not own `organizations`, so `alembic upgrade` failed there and the
+test suite had never actually run — which is how three real bugs reached main.
+
+`api/.env` **switches between LOCAL and PROD and says which mode it is in** —
+look for the `# --- ACTIVE: ...` banner before running anything. Three URLs, and
+the split is load-bearing:
 
 - `DATABASE_URL` → a **restricted** role (`NOBYPASSRLS`). The app uses this, so
   Row-Level Security actually applies.
 - `ADMIN_DATABASE_URL` → the schema owner. **Alembic only.**
+- `TEST_DATABASE_URL` → a **separate local database** (`trackbit_school_test`).
+  It stays local in *both* modes.
 
 Pointing the app at the admin URL would silently disable every RLS policy. Don't.
+
+> ⚠️ `.env` currently ships in **`ACTIVE: PRODUCTION`** mode, so every click in
+> the app writes to the real database and `alembic upgrade head` migrates
+> production with no confirmation. Never run `scripts.seed` in this mode, and
+> keep `ENABLE_SCHEDULER=false`. See `CLAUDE.md` → "Database" for the full rules.
 
 ---
 
@@ -98,29 +111,45 @@ http://localhost:3000 — all demo passwords are `demo1234`:
 | `ramesh@demo.trackbit.app` | teacher | My Day |
 | `anil@demo.trackbit.app` | teacher | My Day |
 
-There are two roles: **admin** (runs the school) and **teacher**. Teachers never see
-fees. Parents have no login at all — guardians only receive outbound notifications.
+There are two staff roles: **admin** (runs the school) and **teacher**. Teachers
+never see fees.
+
+**Parents have their own read-only portal** at `/parent` — not a membership.
+A guardian signs in with the school code, then class → section → child → the
+child's date of birth (phone-OTP is the recovery path). The demo school's code
+is `DEMO123`. Everything a parent sees goes through a curated allowlist, so
+bands, skills, raw observations and check flags never reach them.
+
+The **platform operator** (`super@trackbit.app`) creates schools and lands on
+`/platform` — schools do not self-onboard.
 
 ---
 
 ## ⚠️ Read this before you run the tests
 
-The test suite needs a real Postgres and **currently runs against the shared
-development database** — the same one the seed and your running app use.
+The test suite needs a real Postgres, and it **creates and hard-deletes
+organisations**. It runs against `TEST_DATABASE_URL` — a separate local
+database, never the one your app is pointed at.
 
-`TEST_DATABASE_URL` exists in `config.py` but **nothing reads it**; `pytest` connects
-via `DATABASE_URL`. The suite **creates and hard-deletes organisations**.
+`conftest.py` honours `TEST_DATABASE_URL` and **refuses to start** if it
+resolves to the same host+database as `DATABASE_URL` (escape hatch:
+`ALLOW_TESTS_ON_DATABASE_URL=1`). Both engines, including the privileged cleanup
+engine that reads `ADMIN_DATABASE_URL`, are redirected at the test database.
 
-So:
+That guard is real, but it is not a licence to be careless:
 
-- **Coordinate before running `uv run pytest`.** If a teammate is mid-demo on the
-  shared dev DB, your test run can delete data out from under them.
-- **Never point `DATABASE_URL` at production and run the suite.** There is no safety
-  net today. Wiring `conftest.py` to honour `TEST_DATABASE_URL` is a known TODO and
-  must land before a production database exists.
-- The Aiven instance caps `max_connections` at **20**. Don't run the API server and
-  the full suite at the same time, and kill stale idle sessions if you hit
-  "too many connections".
+- **It cannot know that some *other* remote URL is precious.** It compares
+  against `DATABASE_URL` only. Never edit `TEST_DATABASE_URL` to point at
+  anything you would mind losing — and note that `.env` currently ships in
+  PRODUCTION mode, so `DATABASE_URL` *is* the production database.
+- **Never point it at a superuser.** A superuser bypasses RLS even with
+  `FORCE ROW LEVEL SECURITY`, so `test_rls.py` fails for reasons that have
+  nothing to do with your code. The restricted role needs
+  `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public` plus
+  matching `ALTER DEFAULT PRIVILEGES`, so tables from future migrations work
+  without re-granting.
+- Bring the test database up to head before running:
+  `ALEMBIC_DATABASE_URL="postgresql+psycopg2://postgres:PASSWORD@localhost:5432/trackbit_school_test" uv run alembic upgrade head`
 
 ---
 
@@ -169,9 +198,14 @@ made. See `test_doc/new_org/README.md` for `--seed` and `--messy`.
 
 ## Where the rules are
 
-- **`CLAUDE.md`** — the six architectural laws and five product principles. Read it
-  before writing backend code; they are load-bearing, not slogans.
+- **`CLAUDE.md`** — the six architectural laws and five product principles, the
+  database safety rules, and the `core/` vocabulary you must import rather than
+  re-derive. Read it before writing backend code; they are load-bearing, not slogans.
+- **`docs/architecture/FEATURE-MAP.md`** — where every feature lives, which endpoints
+  serve it, and what an admin / teacher / class teacher / parent / operator can see.
 - **`docs/trackbit-school-prd-v2.md`** — the current build spec (SPRD v2).
 - **`docs/trackbit-product-architecture.md`** — the "why": principles and fences.
+- **`docs/logs/packet-log.md`** — why a design is the way it is. History, not state:
+  `Ctrl-F` the module you are touching, then stop.
 
 Conflict order: **SPRD2 > architecture doc > SPRD v1**.
