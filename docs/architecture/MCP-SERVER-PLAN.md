@@ -1,6 +1,7 @@
 # The agent tool platform — MCP server, Lucy, and the shared tool pool
 
-**Status:** design agreed, nothing built. Revision 2, 2026-08-07. Written against the
+**Status:** design agreed, nothing built. Revision 3, 2026-08-08. **New here? Read §0 —
+it is written for a cold start and assumes no prior context.** Written against the
 app as it runs (420 routes, 92 services, 42 tools, verified with
 `uv run python scripts/route_map.py` and by importing the live registry).
 
@@ -32,6 +33,94 @@ may use it), `CLAUDE.md` (the six laws, the two hard rules, the fences).
 >
 > §7 and §8's catalogues are superseded by the numbered, tickable list in
 > `MCP-TOOL-LIST.md`. §1–§3.2, §5, §6 and §9–§12 stand unchanged.
+
+---
+
+## 0. Start here — cold start for the next session
+
+Everything below this section assumes context. This section does not. Read it, then
+go to §10 Phase 1.
+
+### 0.1 State of play, 2026-08-08
+
+| | |
+|---|---|
+| Built | **Nothing.** No MCP code exists. `app/mcp/` does not exist. |
+| The seed | `api/app/services/lucy/registry.py` — **42 tools live today** (36 read, 6 write, all writes `confirm=True`). Verify by importing `REGISTRY`; do not trust this number. |
+| Decided | `D-93`…`D-101` (§1 here, and the header of `MCP-TOOL-LIST.md`) |
+| Approved to build | **151 tools** ticked in [`MCP-TOOL-LIST.md`](MCP-TOOL-LIST.md) — 106 read, 35 auto-write, 10 approval-write. 32 struck. |
+| Awaiting a tick | **12 exam-capture tools**, `MCP-TOOL-LIST.md` §8A (#184–195) |
+| New dependency | the official `mcp` Python SDK — **not yet added**. `uv add mcp`. |
+
+**`MCP-TOOL-LIST.md` is the authority on what gets built. This file is the authority on
+how.** Where they disagree, the list wins — §7 and §8 here are superseded by it.
+
+### 0.2 Four questions to put to the founder before writing code
+
+None of them block Phase 1, but Q7 blocks the exam-capture tools and Q4 changes the
+credential build.
+
+| | Question | Recommendation |
+|---|---|---|
+| **Q7** | Band assessments have **no answer-sheet capture at all** — `band_assessments.py` imports no storage and no `ScoreCapture`. (a) capture on a real exam cycle then `promote_exam_to_band_test`, or (b) add capture to `BandAssessment` itself? | **(a)** — the bridge exists at `bands.py:503`, no migration |
+| **Q4** | Fee payment recording — hold it out, or open it? | **Hold** (§9) |
+| **Q1–Q3, Q5, Q6** | §11 of this file | as stated there |
+| **—** | Tick or strike `MCP-TOOL-LIST.md` §8A's 12 tools | — |
+
+### 0.3 The first three tasks, in order
+
+1. **Phase 1 — registry domains + scope.** `ToolSpec.domain` on all 42 tools;
+   `visible_tools(m, scope, tier)` filtering **role → scope → tier**, all at schema time;
+   `list_domains` / `list_tools` / `describe_tool`; a test asserting no `tools_*` module
+   imports `sqlalchemy` or `models`. *Done when `test_lucy.py` passes unchanged and a
+   scoped call returns only that scope's tools.* Purely additive — nothing shipped
+   changes. **Start here.**
+2. **Phase 2 — credentials.** `api_tokens` + the OAuth authorization server (`D-99`).
+   *Done when a token issues, is used, shows `last_used_at`, revokes, and 401s next call.*
+3. **Phase 5 — the change-set engine.** The keystone: no write tool ships before it.
+   *Done when a 40-item `create_tasks_bulk` renders as one card, approves once, and
+   applies in one transaction.*
+
+### 0.4 Landmines live right now — check these first
+
+- 🔴 **Another packet is mid-flight in the working tree.** The setup-pack / operator
+  redesign (`services/setup_pack/`, `school_setup.py`, `schemas/setup_pack.py`, five
+  test files, `platform-api.ts`, `setup-pack-screen.tsx`, `SETUP-REDESIGN-PLAN.md`) is
+  **uncommitted** and edits `endpoints/{academics,planner,platform,timetable}.py`,
+  `core/dependencies.py` and `schemas/auth.py`. Run `git status` before anything.
+  It also **changes what "setup" means**, so `MCP-TOOL-LIST.md` §16's "structural setup
+  is not exposed" is worth re-reading against it.
+- 🔴 **`topic_progress` is still a sixth definition of "syllabus covered".** It now skips
+  `not_planned` chapters, but it still invents `done|in_progress|pending` and still has
+  no `not_scheduled` state. It is cross-stack (period card, Lucy, three TS unions, a
+  test) and `growth.py:179` duplicates the rule for the growth **and parent** reports.
+  See FEATURE-MAP §11. It does **not** block Phases 1–4 — every planning write was
+  struck — but tool #52 answers "is 7A on track?" wrongly until it is fixed.
+- 🔴 **Prod runs as `doadmin` (`rolbypassrls = true`)**, so law 2 is decorative there.
+  `scripts/provision_app_role.py` exists. **Gate the HTTP transport (Phase 3) on it**;
+  stdio-local is not exposed and is fine before it.
+- ⚠️ **`.env` is in `ACTIVE: PRODUCTION`.** Every click writes to the live database, and
+  `alembic upgrade head` migrates prod with no confirmation. Switch to LOCAL for anything
+  security-related — RLS is bypassed under `doadmin`, so `test_rls.py` cannot tell you
+  the truth there.
+- ⚠️ **Read the `mcp` SDK's own README before writing transport code.** MCP moved fast
+  and training data on it is stale — the same standing warning `web/AGENTS.md` carries
+  for Next.js.
+
+### 0.5 The four rules that make the whole thing safe
+
+If only one thing survives from this document, make it these.
+
+1. **Tools wrap services, never tables** (`D-95`). Scoping lives in the service —
+   `assert_can_take_class`, `not_your_student`, the fee fence — and a tool that calls the
+   service inherits all of it. A tool that writes SQL inherits none of it.
+2. **Every write tool ships with a negative authorization test.** An in-process service
+   call does **not** run the route's FastAPI guard, so `ToolSpec.role` is the only thing
+   between a teacher and an admin-only write. This is the single most important gate here.
+3. **Filtering happens at schema time, never by erroring.** Out-of-scope tools are
+   *absent*, not refused — cheaper, and nothing to jailbreak.
+4. **The fee and band fences are asserted by regex over the whole teacher tool surface.**
+   Extend those tests to the MCP tool list in Phase 1, *before* any widening.
 
 ---
 
