@@ -26,6 +26,11 @@ export interface Org {
   name: string;
   timezone: string;
   plan: "free" | "pro";
+  /** Set once TrackBit has handed the school over. From then on the school's
+   *  structure — year, terms, classes, subjects, who teaches what, syllabus,
+   *  timetable — is changed by us, not by the school (SETUP-REDESIGN-PLAN §6).
+   *  The setup screens read this to go read-only. */
+  handed_over_at: string | null;
 }
 
 // One org the signed-in user can switch into (includes the current one).

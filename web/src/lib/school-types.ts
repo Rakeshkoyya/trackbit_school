@@ -565,36 +565,9 @@ export interface StudentTimeline {
   late_periods: number;
 }
 
-// â”€â”€ setup wizard + plan generation (V2-P5, SPRD2 Â§5.1/Â§5.2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-export interface WizardProgress {
-  has_year: boolean;
-  terms: number;
-  has_timings: boolean;
-  classes: number;
-  subjects: number;
-  class_subjects: number;
-  syllabus_topics: number;
-  teachers: number;
-  students: number;
-  timetable_slots: number;
-  plans_total: number;
-  plans_approved: number;
-  calendar_events: number;
-  exams: number;
-  exam_portions: number;
-  /** Capture gaps that would make the generated plan wrong (shown on the last step). */
-  gaps: string[];
-}
-
-export interface WizardState {
-  steps: WizardStep[];
-  current_step: number;
-  total_steps: number;
-  status: string;
-  payload: Record<string, unknown>;
-  progress: WizardProgress;
-}
-
+// â”€â”€ plan generation (SPRD2 Â§5.2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// The ten-step wizard's own state types went with it (setup redesign P9); the
+// operator's pack screen holds no client-side step state to describe.
 export interface PlanViolation {
   code: "capacity" | "coverage" | "ordering" | "teacher_load" | "exam_coverage" | "unsized";
   message: string;
@@ -1304,13 +1277,6 @@ export interface TopicProgressRow {
   /** null = not sized yet, so the chapter is not scheduled. */
   est_periods: number | null;
   status: "done" | "in_progress" | "pending";
-}
-
-export interface WizardStep {
-  key: string;
-  title: string;
-  index: number;
-  complete: boolean;
 }
 
 // â”€â”€ post-setup read models (V2-P10) â€” derived on read, never cached â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

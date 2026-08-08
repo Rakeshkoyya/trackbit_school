@@ -37,7 +37,6 @@ import { HomeworkOverviewBlock, OVERVIEW_WINDOW_DAYS } from "@/components/insigh
 import { SyllabusPulseBlock } from "@/components/insights/syllabus";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { ReasonSheet, type ReasonTarget } from "@/components/insights/reason-sheet";
-import { SetupGate } from "@/components/school/setup-gate";
 import { DayNotice } from "@/components/school/day-notice";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -446,8 +445,6 @@ function DashboardInner() {
 
   return (
     <div>
-      <SetupGate />
-
       {/* V1-7, re-sited by the founder (2026-08-05): the day's notice leads the
           screen and is dismissible, because it is the one block here nobody has
           to act on. It was a section below the board with a "Coming up" list of

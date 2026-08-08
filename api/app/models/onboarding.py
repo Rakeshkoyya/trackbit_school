@@ -1,10 +1,20 @@
-"""Setup wizard state (V2-M1, SPRD2 §4.4, §5.1).
+"""⚠️ RETIRED — the ten-step setup wizard it tracked is gone.
 
-One resumable row per org. The wizard WRITES THROUGH to the real tables at each
-confirmed step (no parallel store) — `payload` holds only per-step answers /
-extractions kept for resume convenience (e.g. the year_id it created). Progress is
-otherwise derived from the real data, so the wizard is always truthful after a
-logout or a manual edit made outside it.
+Setup is now one uploaded workbook on the operator's screen
+(`SETUP-REDESIGN-PLAN`, `services/setup_pack/`), which needs no resume state:
+the pack IS the state, and re-uploading a corrected one is the resume.
+`services/wizard.py`, its endpoints and its schemas were deleted; nothing reads
+this model any more.
+
+**The table is still here on purpose.** Prod migrates *before* code deploys, so
+dropping `onboarding_state` in the same change would leave the still-running old
+build reading a table that no longer exists. Drop it in a follow-up migration
+once this release is out — the ordinary two-step for a destructive schema change,
+not an oversight.
+
+Original intent, for anyone reading the table: one resumable row per org; the
+wizard wrote through to the real tables at each confirmed step and kept only
+per-step answers here, so progress was always derived from real data.
 """
 
 import uuid

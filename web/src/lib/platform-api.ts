@@ -61,6 +61,66 @@ export interface Readiness {
   checks: ReadinessCheck[];
 }
 
+// ── the setup pack (SETUP-REDESIGN-PLAN §5) ────────────────────────────────
+// One workbook carries a whole school. The operator downloads it blank, the
+// school fills it in, the operator reviews and imports. Only `import` writes.
+export type FindingSeverity = "blocker" | "warning" | "note";
+
+export interface PackFinding {
+  sheet: string;
+  severity: FindingSeverity;
+  message: string;
+  fix: string;
+  /** 1-based row in the sheet the school must open. Null for whole-sheet findings. */
+  row: number | null;
+  rule: string;
+}
+
+export interface PackSheetSummary {
+  key: string;
+  title: string;
+  present: boolean;
+  rows: number;
+  blocked_rows: number;
+}
+
+export interface PackReview {
+  /** Ready to IMPORT. Readiness to hand over is a different question, answered
+   *  by the readiness report after the data is in. */
+  ready: boolean;
+  findings: PackFinding[];
+  summaries: PackSheetSummary[];
+  blockers: number;
+  warnings: number;
+  notes: number;
+  total_rows: number;
+  missing_sheets: string[];
+  extra_sheets: string[];
+}
+
+export interface PackSheetResult {
+  key: string;
+  title: string;
+  created: number;
+  updated: number;
+  skipped: number;
+  notes: string[];
+}
+
+/** A staff login, shown ONCE — the password is hashed on the way in. */
+export interface PackCredential {
+  name: string;
+  username: string;
+  password: string;
+}
+
+export interface PackImport {
+  imported: boolean;
+  review: PackReview;
+  sheets: PackSheetResult[];
+  credentials: PackCredential[];
+}
+
 export const platformApi = {
   orgs: () => api.get<PlatformOrg[]>("/platform/orgs"),
   createSchool: (payload: CreateSchoolPayload) =>
@@ -69,4 +129,36 @@ export const platformApi = {
   readiness: (orgId: string) => api.get<Readiness>(`/platform/orgs/${orgId}/readiness`),
   markHandedOver: (orgId: string) =>
     api.post<Readiness>(`/platform/orgs/${orgId}/handover`),
+
+  // ── the setup pack ───────────────────────────────────────────────────────
+  downloadSetupPack: (orgId: string, schoolName: string) =>
+    api.download(`/platform/orgs/${orgId}/setup/template`,
+      `TrackBit-Setup-Pack-${schoolName.replace(/[^\w -]/g, "").trim()
+        .replace(/\s+/g, "-") || "School"}.xlsx`),
+
+  /** The handover sheet the school keeps: who signs in where, the school code,
+   *  and what they change themselves versus what they ask us for. Carries no
+   *  passwords — those are hashed and cannot be read back. */
+  downloadWelcomeSheet: (orgId: string, schoolName: string) =>
+    api.download(`/platform/orgs/${orgId}/setup/welcome`,
+      `TrackBit-Welcome-${schoolName.replace(/[^\w -]/g, "").trim()
+        .replace(/\s+/g, "-") || "School"}.xlsx`),
+
+  /** Reads the filled pack and reports what is wrong. Writes NOTHING, so the
+   *  operator can send it back to the school and try again as often as needed. */
+  reviewSetupPack: (orgId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<PackReview>(`/platform/orgs/${orgId}/setup/review`, form);
+  },
+
+  /** Builds the school, in one transaction. Refuses on any blocker and returns
+   *  the report instead. `replaceSyllabus` is off by default: a later upload
+   *  ADDS chapters rather than destroying ones already being taught. */
+  importSetupPack: (orgId: string, file: File, replaceSyllabus = false) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("replace_syllabus", String(replaceSyllabus));
+    return api.upload<PackImport>(`/platform/orgs/${orgId}/setup/import`, form);
+  },
 };

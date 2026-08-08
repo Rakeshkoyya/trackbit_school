@@ -23,6 +23,7 @@ from app.schemas.calendar import (
     ExamPortionIn,
     ExamPortionOut,
 )
+from app.services.term_sync import EXAM_BLOCK, sync_terms_from_exams
 
 # Default Indian-school working week: Mon–Sat (Python weekday ints, Mon=0).
 DEFAULT_WORKING_WEEKDAYS = [0, 1, 2, 3, 4, 5]
@@ -278,6 +279,11 @@ class CalendarService:
         )
         self.db.add(event)
         self.db.flush()
+        # Terms follow the exam calendar (founder, 2026-08-08): a term ends on
+        # its exam's last day. Same transaction, so the exam and its term move
+        # together or not at all.
+        if event.type == EXAM_BLOCK:
+            sync_terms_from_exams(self.db, m.org_id, event.academic_year_id)
         return CalendarEventOut.model_validate(event)
 
     def create_events(self, m: CurrentMember, bodies: list[CalendarEventCreate],
@@ -293,7 +299,11 @@ class CalendarService:
         )
         if event is None:
             raise NotFoundError("Event")
+        was_exam, year_id = event.type == EXAM_BLOCK, event.academic_year_id
         self.db.delete(event)
+        self.db.flush()
+        if was_exam:
+            sync_terms_from_exams(self.db, m.org_id, year_id)
 
     def summary(self, m: CurrentMember, year_id: uuid.UUID) -> CalendarSummary:
         year = self._year(m.org_id, year_id)

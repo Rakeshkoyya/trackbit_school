@@ -358,21 +358,7 @@ def test_syllabus_grid_without_a_topic_column_falls_back_to_text(client, cleanup
     assert body["units"][0]["title"] == "Food"
 
 
-# ── wizard ───────────────────────────────────────────────────────────────────
-def test_wizard_steps_are_derived_from_real_data(client, cleanup):
-    h, year = _setup(client, cleanup)
-    state = client.get("/api/v1/wizard/state", headers=h).json()
-    assert state["total_steps"] == 10
-    keys = [s["key"] for s in state["steps"]]
-    assert keys == ["year", "timings", "classes", "subjects", "staff", "syllabus",
-                    "calendar", "students", "timetable", "generate"]
-    by_key = {s["key"]: s["complete"] for s in state["steps"]}
-    assert by_key["year"] is True and by_key["classes"] is False
-
-    _class_subject(client, h, year)
-    state2 = client.get("/api/v1/wizard/state", headers=h).json()
-    by_key2 = {s["key"]: s["complete"] for s in state2["steps"]}
-    assert by_key2["classes"] is True and by_key2["subjects"] is True
-    assert by_key2["syllabus"] is False
-    # The class-subject exists but no teacher does, so the staff step is not done.
-    assert by_key2["staff"] is False
+# The wizard's step-derivation test lived here. The wizard is retired
+# (SETUP-REDESIGN-PLAN §9) — setup is one uploaded workbook now, and what it
+# builds is asserted by tests/test_setup_pack_commit.py and, for the operator's
+# screen, tests/test_setup_pack_api.py.

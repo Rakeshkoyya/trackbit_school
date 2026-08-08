@@ -15,20 +15,26 @@ you nothing:
   I2  Every class-subject has exactly one teacher, and no teacher's weekly load
       exceeds one human's week (minus headroom), so the timetable is solvable and
       no teacher is double-booked.
-  I3  Every topic is sized (no blank Periods cell), so the wizard's final step can
-      approve and LOCK every plan — an unsized topic is refused by `approve`.
+  I3  Every topic is sized (no blank Periods cell), so every plan can be approved
+      and LOCKED — an unsized topic is refused by `approve`.
   I4  Each class-subject's syllabus fits comfortably inside the periods the year
       actually offers, so the exam-fit panel reads "perfect"/"spare time".
 
-Output (all written next to this script; stale files are cleared first):
-  teachers_staff.xlsx          -> Setup wizard, Teachers step
-  students_roster.xlsx         -> Setup wizard, Students step
-  syllabus_<class>_<subject>.xlsx  (one per class-subject) -> Syllabus step
-  SETUP.md                     -> the step-by-step walkthrough for THIS run's school
+Output (written next to this script; stale files are cleared first):
+  TrackBit-Setup-Pack-<school>.xlsx  -> Platform → the school → Setup → Upload
+  README.md                          -> the walkthrough for THIS run's school
 
-The three sheets match the importers' expected headers exactly (roster_import.py,
-staff_import.py, syllabus_import.py); the `x9` suffix in an Assignments cell is how a
-staff sheet carries a subject's weekly period budget.
+**One workbook, not twenty-two.** This used to emit a roster, a staff sheet and one
+syllabus file per class-subject, because the old importers took them one at a time —
+a four-class school produced twenty-two files and a twelve-class school would have
+produced ninety-six. Setup is now a single pack the operator uploads, and its sheets
+are generated against `app/services/setup_pack/specs.py`: School · Terms · Classes ·
+Staff · Teaching Assignments · Syllabus · Students.
+
+`--messy` adds rows built to fail, so the validator's blocker surfaces get exercised:
+an unknown class, a subject nobody teaches, a duplicate admission number, two nameless
+rows — plus one unsized chapter, which stays a NOTE, because a school that has planned
+only half its year is still allowed to go live.
 """
 
 from __future__ import annotations
@@ -476,64 +482,181 @@ def invent_school(rng: random.Random) -> School:
 # Writing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def sheet(path: str, header: list[str], rows: list[list]) -> None:
-    wb = Workbook()
-    ws = wb.active
-    ws.append(header)
-    for r in rows:
-        ws.append(r)
-    wb.save(HERE / path)
-    print(f"  wrote {path} ({len(rows)} rows)")
+def _dmy(d: date) -> str:
+    """Day-first, the way the pack and every Indian register write it."""
+    return d.strftime("%d/%m/%Y")
+
+
+def _dob_for(rng: random.Random, class_name: str) -> str:
+    """A plausible birthday for a child in this class.
+
+    The old generator had no date-of-birth column at all, so every school it
+    produced handed over with "N parents cannot log in" — the readiness report's
+    loudest warning, on synthetic data, every run. A date of birth is the
+    parent's portal password, so a pack without one cannot exercise the portal.
+    """
+    grade = int("".join(ch for ch in class_name if ch.isdigit()) or 6)
+    born = date(2026 - (grade + 5), rng.randint(1, 12), rng.randint(1, 28))
+    return _dmy(born)
 
 
 def clear_stale() -> None:
-    """The class/subject set changes every run — old files would linger and mislead."""
+    """The class/subject set changes every run — old files would linger and mislead.
+
+    A pack open in Excel cannot be deleted on Windows, and that is the normal
+    case: you look at last run's pack, then generate the next one. Losing the
+    whole run to a file lock is a worse outcome than one stale file, so say which
+    ones survived and carry on.
+    """
+    locked: list[str] = []
     for f in HERE.glob("*.xlsx"):
-        f.unlink()
-    (HERE / "SETUP.md").unlink(missing_ok=True)
+        try:
+            f.unlink()
+        except PermissionError:
+            locked.append(f.name)
+    try:
+        (HERE / "SETUP.md").unlink(missing_ok=True)
+    except PermissionError:
+        locked.append("SETUP.md")
+    if locked:
+        print("  ! still open elsewhere, not replaced: " + ", ".join(locked))
+        print("    close them in Excel if you want them cleared.")
+
+
+def _class_teachers(school: School) -> dict[str, str]:
+    """One teacher per class — whoever takes the most periods there. A class with
+    no class teacher has no owner for its absence follow-ups, which the readiness
+    report calls out, so the generated school should not have that hole."""
+    best: dict[str, tuple[int, str]] = {}
+    for teacher in school.teachers:
+        for a in teacher.assignments:
+            if a.periods > best.get(a.class_name, (0, ""))[0]:
+                best[a.class_name] = (a.periods, teacher.name)
+    return {cname: name for cname, (_p, name) in best.items()}
 
 
 def write_pack(school: School, messy: bool = False) -> None:
-    staff_rows = [
-        [t.name, t.email, t.mobile,
-         "; ".join(f"{a.class_name} {a.subject} x{a.periods}" for a in t.assignments)]
-        for t in school.teachers
+    """One workbook, the shape `app/services/setup_pack/specs.py` defines.
+
+    This used to write twenty-two files — a roster, a staff sheet and one
+    syllabus file per class-subject — because that is what the old importers
+    took, one at a time. A twelve-class school would have produced ninety-six.
+    """
+    rng = random.Random(school.name)
+    homerooms = _class_teachers(school)
+    weeks = {"5": "Mon-Fri", "6": "Mon-Sat", "7": "Mon-Sun"}
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    def add(title: str, header: list[str], rows: list[list]) -> None:
+        ws = wb.create_sheet(title)
+        ws.append(header)
+        for r in rows:
+            ws.append(r)
+        print(f"  {title}: {len(rows)} rows")
+
+    add("School", ["Field", "Value"], [
+        ["School name", school.name],
+        ["Academic year", school.year_label],
+        ["Year starts", _dmy(school.year_start)],
+        ["Year ends", _dmy(school.year_end)],
+        ["Working days", weeks.get(str(school.working_days), "Mon-Sat")],
+        ["Periods per day", school.periods_per_day],
+        ["First period starts", "08:30"],
+        ["Period length (minutes)", 40],
+        ["Lunch after period", max(1, school.periods_per_day // 2)],
+        ["Lunch length (minutes)", 30],
+        ["Parent portal", "Yes"],
+    ])
+
+    # A term IS its exam: give the exam window and the term is the teaching that
+    # leads up to it. Term 1 ends when the half-yearly ends; Term 2 with the annual.
+    add("Terms", ["Term", "Exam", "Exam starts", "Exam ends"], [
+        ["Term 1", "Half-yearly",
+         _dmy(school.term1_end - timedelta(days=5)), _dmy(school.term1_end)],
+        ["Term 2", "Annual",
+         _dmy(school.year_end - timedelta(days=5)), _dmy(school.year_end)],
+    ])
+
+    add("Classes", ["Class", "Section", "Class teacher"],
+        [[cname, "", homerooms.get(cname, "")] for cname in school.classes])
+
+    staff = [[t.name, "", t.email, t.mobile, "", "Teacher"] for t in school.teachers]
+    assignments = [
+        [a.class_name, "", a.subject, t.name, a.periods]
+        for t in school.teachers for a in t.assignments
     ]
-    students = [list(r) for r in school.students]
+
+    # One row per CHAPTER (founder, 2026-08-08). The sheet carries chapter and
+    # est. periods and nothing else, so a chapter's estimate is the sum of the
+    # work inside it rather than a row per topic.
+    syllabus: list[list] = []
+    for (cname, subject), chapters in school.syllabus.items():
+        for n, (ch, topics, term) in enumerate(chapters, start=1):
+            syllabus.append([cname, "", subject, term, n, ch,
+                             sum(p for _t, p in topics)])
+
+    students = [
+        [r[0], r[1], r[2], r[3], r[4] or "", _dob_for(rng, str(r[3])),
+         r[5], r[6], r[7], r[8], r[9]]
+        for r in school.students
+    ]
 
     if messy:
-        # Rows engineered to FAIL, so the importers' errors/skipped/unresolved
-        # surfaces get exercised. Never present in the default (clean) pack.
-        staff_rows.append(["Bad Assignment Teacher", "bad.teacher@example.com", "9899900001",
-                           "99 Astrophysics x5; Nonsense Row"])  # -> unresolved
-        staff_rows.append(["", "no.name@example.com", "9899900002", ""])  # -> error: no name
+        # Rows engineered to FAIL, so the validator's blocker surfaces get
+        # exercised. Never present in the default (clean) pack.
+        first_class = school.classes[0]
+        assignments.append(["99", "", "Astrophysics", "Nobody At All", 5])
+        staff.append(["", "", "no.name@example.com", "9899900002", "", "Teacher"])
+        syllabus.append([first_class, "", "Astrophysics", "Term 1", 1,
+                         "Chapter nobody teaches", "", 3])
+        # A blank Periods cell means "not sized yet" — a NOTE, never a blocker.
+        syllabus.append([first_class, "", school.subjects[0], "Term 2", 99,
+                         "Unsized Chapter", "", None])
         dupe = students[0][1]
-        students.append(["Duplicate Admission", dupe, "99", school.classes[0], None,
-                         "Day Scholar", "Mr X", "9800000001", "Mrs X", "9800000002"])  # -> skipped
-        students.append(["", "NG_NO_NAME", "98", school.classes[0], None, "Day Scholar",
-                         "Mr Y", "9800000003", "Mrs Y", "9800000004"])  # -> error: no name
-        students.append(["No Admission No", "", "97", school.classes[0], None, "Day Scholar",
-                         "Mr Z", "9800000005", "Mrs Z", "9800000006"])  # -> error: no adm no
+        students.append(["Duplicate Admission", dupe, "99", first_class, "",
+                         "01/01/2015", "Day Scholar", "Mr X", "9800000001",
+                         "Mrs X", "9800000002"])
+        students.append(["", "NG_NO_NAME", "98", first_class, "", "01/01/2015",
+                         "Day Scholar", "Mr Y", "9800000003", "Mrs Y", "9800000004"])
+        students.append(["No Admission No", "", "97", first_class, "", "01/01/2015",
+                         "Day Scholar", "Mr Z", "9800000005", "Mrs Z", "9800000006"])
 
-    sheet("teachers_staff.xlsx",
-          ["Teacher Name", "Email", "Mobile", "Assignments"], staff_rows)
-    sheet("students_roster.xlsx",
-          ["Student Name", "Admission No", "Roll No", "Class", "Section", "Category",
-           "Father's Name", "Father's Mobile", "Mother's Name", "Mother's Mobile"],
-          students)
+    add("Staff", ["Name", "Employee ID", "Email", "Phone", "Date of birth", "Role"],
+        staff)
+    add("Teaching Assignments",
+        ["Class", "Section", "Subject", "Teacher", "Periods per week"], assignments)
+    add("Syllabus",
+        ["Class", "Section", "Subject", "Term", "Ch #", "Chapter",
+         "Est. periods"], syllabus)
+    add("Students",
+        ["Student name", "Admission no", "Roll no", "Class", "Section",
+         "Date of birth", "Category", "Father name", "Father phone",
+         "Mother name", "Mother phone"], students)
 
-    for (cname, subject), chapters in school.syllabus.items():
-        body: list[list] = []
-        for ch, topics, term in chapters:
-            for i, (t, p) in enumerate(topics):
-                # Chapter/Term only on the first row: merged cells export as blanks,
-                # and the importer carries the previous value forward.
-                body.append([ch if i == 0 else None, t, p, term if i == 0 else None])
-        if messy and (cname, subject) == next(iter(school.syllabus)):
-            # A blank Periods cell = "not sized yet" — approve() must REFUSE to lock it.
-            body.append(["Unsized Chapter", "Topic with no period estimate", None, "Term 2"])
-        sheet(f"syllabus_{cname}_{slug(subject)}.xlsx",
-              ["Chapter", "Topic", "Periods", "Term"], body)
+    # Four instalments a year, due one per quarter. The due DATE is the whole
+    # point: `core/collection.py` buckets a quarter by due-date window, not by
+    # instalment number — juniors paying in 2 and seniors in 4 would otherwise
+    # make "instalment 1" a different quarter per class. A pack with structures
+    # but no dated instalments leaves the admin's fee screen empty.
+    fees: list[list] = []
+    span = (school.year_end - school.year_start).days
+    for cname in school.classes:
+        grade = int("".join(ch for ch in cname if ch.isdigit()) or 6)
+        total = 24000 + (grade - 5) * 3000
+        share = total // 4
+        for n in range(4):
+            due = school.year_start + timedelta(days=int(span * n / 4) + 14)
+            fees.append([cname, "", total, n + 1, f"Quarter {n + 1}",
+                         _dmy(due), share])
+    add("Fees",
+        ["Class", "Category", "Total amount", "Installment no",
+         "Installment name", "Due date", "Amount"], fees)
+
+    name = f"TrackBit-Setup-Pack-{slug(school.name)}.xlsx"
+    wb.save(HERE / name)
+    print(f"  wrote {name}")
 
 
 def write_readme(school: School, seed: int) -> None:
@@ -543,6 +666,7 @@ def write_readme(school: School, seed: int) -> None:
     multi = [t for t in school.teachers if len(t.subjects) > 1]
     busiest = max(school.teachers, key=lambda t: t.load)
 
+    pack_name = f"TrackBit-Setup-Pack-{slug(school.name)}.xlsx"
     lines = [
         f"# Setup pack - {school.name}",
         "",
@@ -553,10 +677,11 @@ def write_readme(school: School, seed: int) -> None:
         f"cd api && uv run python ../test_doc/new_org/generate.py --seed {seed}",
         "```",
         "",
-        "Every row here is valid — imports should land **100%**, and the wizard's final",
-        f"step should lock all **{n_cs} plans**.",
+        "Every row here is valid — the review should read **ready to import** with no",
+        f"blockers, and all **{n_cs} plans** should lock afterwards.",
         "",
         "> Want to test the *failure* surfaces instead? Add `--messy` to inject rows built",
+        "> (see 'Upload the pack' below for exactly what the review then reports).",
         "> to break: an unresolvable class-subject, a duplicate admission no, a row with no",
         "> name, and an unsized topic. Imports will then report errors / skipped /",
         "> unresolved, and `approve` will refuse to lock the unsized chapter.",
@@ -604,69 +729,37 @@ def write_readme(school: School, seed: int) -> None:
         "",
         "## Step-by-step",
         "",
-        "### 1. Academic year",
-        f"Label **{school.year_label}**, from **{school.year_start}** to **{school.year_end}**.",
-        "Add both terms (the syllabus files reference them by name — spell them exactly):",
-        f"- **Term 1** — {school.year_start} → {school.term1_end}",
-        f"- **Term 2** — {school.term1_end + timedelta(days=1)} → {school.year_end}",
+        "Setup is one workbook now, and only the operator runs it",
+        "(`SETUP-REDESIGN-PLAN`). The ten-step wizard is gone.",
         "",
-        "### 2. School timings",
-        f"Working days **{days}**, **{school.periods_per_day} periods/day**.",
-        f"*This fixes each class's weekly capacity at {cap} — the staff file's `x` numbers",
-        "are built to sum to exactly that.*",
+        "### 1. Create the school",
+        "**Platform → New school**. Name it whatever you like — the pack overwrites",
+        f"the name with **{school.name}** on import.",
         "",
-        "### 3. Classes",
-        f"Add **{'**, **'.join(school.classes)}**. Leave the section field **blank**",
-        "(one section per grade, so no A/B duplication).",
+        "### 2. Open its setup screen",
+        "**Platform → the school’s card → Setup**.",
         "",
-        "### 4. Subjects",
-        f"Add all {len(school.subjects)}: **{', '.join(school.subjects)}**",
-        "(spell them exactly — the staff file's assignments resolve by name).",
+        "### 3. Upload the pack",
+        f"Choose **`{pack_name}`**. The review runs immediately and writes nothing.",
         "",
-        "### 5. Teachers & assignments",
-        f"Import **`teachers_staff.xlsx`** → {len(school.teachers)} accounts, "
-        f"{n_cs} assignments, zero errors.",
-        "- ⚠️ **Write down the generated passwords** shown after import — you'll want them",
-        "  to log in as a teacher later (e.g. to see My Day).",
-        f"- Each class's panel should now read **\"{cap} of {cap} periods/week allocated\"**.",
-    ]
-    if multi:
-        m = multi[0]
-        lines.append(f"- {m.name} should show on {' and '.join(m.subjects)}.")
-
-    lines += [
+        "Expect **ready to import**, with these notes and no blockers:",
+        f"- {len(school.students)} students, {n_cs} class-subjects, every chapter sized",
+        "  (invariant I3), so nothing reads *not sized yet*;",
+        f"- every class allocated **{cap} of {cap} periods a week** (I1), so no",
+        "  over-capacity warning;",
+        f"- no teacher past {cap - LOAD_HEADROOM} periods (I2), so nobody is overloaded.",
         "",
-        "### 6. Syllabus",
-        f"{n_cs} imports — one file per class per subject. Pick the class, pick the subject,",
-        "import its file, review the draft (chapters split into Term 1/Term 2, every topic",
-        "sized), then *Save to this subject*. The filename says exactly where each file goes:",
-        "**`syllabus_<class>_<subject>.xlsx`**.",
+        "Run it again with `--messy` to see the other side: six blockers — an unknown",
+        "class, a subject nobody teaches, a duplicate admission number, two nameless",
+        "rows — plus one unsized chapter, which stays a **note**, because a school",
+        "that has planned only half its year is still allowed to go live.",
         "",
-        "*Note:* the \"Copy from…\" control is for true sibling **sections** (6-A → 6-B).",
-        "Don't use it across grades — each grade has its own files.",
+        "### 4. Import, then check readiness",
+        "**Import everything** builds the school in one transaction. Copy the staff",
+        "logins it shows — they are hashed on the way in and cannot be read back.",
         "",
-        "### 7. Calendar, holidays & exams",
-        "Paint the exam windows and a holiday week on the calendar, then set **exam portions**",
-        "per class (e.g. \"up to\" the last Term-1 chapter of each subject).",
-        "",
-        "**Watch the Exam fit panel**: every subject should read *perfect* or *spare time*.",
-        "Now delete a term exam and repaint it 6–8 weeks earlier — verdicts flip toward",
-        "*manageable / won't fit*. Repaint it back when done.",
-        "",
-        "### 8. Students",
-        f"Import **`students_roster.xlsx`** → **created {len(school.students)}, skipped 0,",
-        "errors 0**. Check the Students page: filter by class, click a row → **Edit details**.",
-        "",
-        "### 9. Timetable",
-        "Tap **\"Generate the whole school's timetable\"** → preview should say",
-        f"**{cap * len(school.classes)} periods across {len(school.classes)} classes**, every",
-        "subject placed cleanly, no teacher double-booked. Apply, then spot-check a class grid.",
-        "",
-        "### 10. Generate & lock",
-        "- The gap report should be **empty**. To see the blocking work, delete one subject's",
-        "  syllabus first and come back — generation is blocked with a named gap. Restore it.",
-        f"- **Generate every plan** → all {n_cs} come back clean (fits, in order, before exams).",
-        f"- **Approve & lock {n_cs} plans** → done.",
+        "Then **Readiness & handover**: every check should read ok. Students have",
+        "dates of birth, so no *parents cannot log in* warning.",
         "",
         "---",
         "",
@@ -679,18 +772,22 @@ def write_readme(school: School, seed: int) -> None:
         "   that cell is now green (actual).",
         "4. **Plan → Classes**: every subject **on track** — none `unallocated` / `not sized`.",
         "5. **Students**: filter, search, edit — open a student for their timeline.",
+        "6. **Hand it over**, then try to add a class as the school’s own admin:",
+        "   it is refused. Structure is ours once a school is live.",
         "",
         "## Files",
         "",
         "| File | Where | Expect |",
         "|---|---|---|",
-        f"| `teachers_staff.xlsx` | Wizard → Teachers | {len(school.teachers)} created · "
-        f"{n_cs} assignments · {cap}/{cap} per class |",
-        f"| `students_roster.xlsx` | Wizard → Students | {len(school.students)} created, 0 errors |",
-        f"| `syllabus_<class>_<subject>.xlsx` ({n_cs} files) | Syllabus → matching class+subject | "
-        "termed, every topic sized |",
+        f"| `{pack_name}` | Platform → school → Setup | {len(school.teachers)} staff · "
+        f"{len(school.classes)} classes · {n_cs} class-subjects · "
+        f"{len(school.students)} students |",
         "",
     ]
+    if multi:
+        m = multi[0]
+        lines.append(f"- {m.name} should show on {' and '.join(m.subjects)}.")
+
     (HERE / "README.md").write_text("\n".join(lines), encoding="utf-8")
     print("  wrote README.md")
 

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AlertTriangle, Building2, CheckCircle2, ClipboardCheck, Copy, LogIn, Plus } from "lucide-react";
+import { AlertTriangle, Building2, CheckCircle2, ClipboardCheck, Copy, FileSpreadsheet, LogIn, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -25,10 +25,11 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function OrgCard({ org, onEnter, onReadiness, entering }: {
+function OrgCard({ org, onEnter, onReadiness, onSetup, entering }: {
   org: PlatformOrg;
   onEnter: (id: string) => void;
   onReadiness: (org: PlatformOrg) => void;
+  onSetup: (id: string) => void;
   entering: boolean;
 }) {
   return (
@@ -50,6 +51,12 @@ function OrgCard({ org, onEnter, onReadiness, entering }: {
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
+        {/* Setup is the operator's job, not the school's: one workbook in,
+            one school out (SETUP-REDESIGN-PLAN §5). */}
+        <Button variant="ghost" size="sm" onClick={() => onSetup(org.id)}>
+          <FileSpreadsheet className="mr-1.5 h-4 w-4" />
+          Setup
+        </Button>
         <Button variant="ghost" size="sm" onClick={() => onReadiness(org)}>
           <ClipboardCheck className="mr-1.5 h-4 w-4" />
           Readiness
@@ -226,7 +233,9 @@ export function PlatformScreen() {
         <div className="space-y-3">
           {orgs.map((org) => (
             <OrgCard key={org.id} org={org} onEnter={(id) => enter.mutate(id)}
-              onReadiness={setReadinessFor} entering={enter.isPending} />
+              onReadiness={setReadinessFor}
+              onSetup={(id) => router.push(`/platform/orgs/${id}/setup`)}
+              entering={enter.isPending} />
           ))}
         </div>
       )}

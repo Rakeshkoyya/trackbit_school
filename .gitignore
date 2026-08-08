@@ -30,6 +30,11 @@ web/out/
 test_doc/new_org/*.xlsx
 test_doc/new_org/SETUP.md
 
+# Reference workbooks that shaped the setup pack (SETUP-REDESIGN-PLAN §3). One of
+# them is a real school's real working tracker, so none of it belongs on a remote:
+# the blank and filled example packs are regenerable from `build_pack()` anyway.
+docs/reference/
+
 # Editor / OS
 .DS_Store
 .idea/

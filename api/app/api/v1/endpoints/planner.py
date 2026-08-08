@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_academic, require_admin, require_coordinator_up
+from app.core.dependencies import (
+    require_academic,
+    require_admin,
+    require_coordinator_up,
+    require_operator,
+)
 from app.schemas.common import MessageResponse
 from app.schemas.ingest import (
     SyllabusAnalyzeOut,
@@ -122,48 +127,48 @@ def get_syllabus(class_subject_id: uuid.UUID, m: CurrentMember = Depends(require
 
 
 @router.post("/syllabus/units", response_model=UnitOut)
-def add_unit(body: UnitCreate, m: CurrentMember = Depends(require_coordinator_up),
+def add_unit(body: UnitCreate, m: CurrentMember = Depends(require_operator),
              db: Session = Depends(get_db)):
     return PlannerService(db).add_unit(m, body.class_subject_id, body.title, body.term_id)
 
 
 @router.post("/syllabus/topics", response_model=TopicOut)
-def add_topic(body: TopicCreate, m: CurrentMember = Depends(require_coordinator_up),
+def add_topic(body: TopicCreate, m: CurrentMember = Depends(require_operator),
               db: Session = Depends(get_db)):
     return PlannerService(db).add_topic(m, body.unit_id, body.title, body.est_periods)
 
 
 @router.put("/syllabus/topics/{topic_id}/estimate", response_model=TopicOut)
 def set_topic_estimate(topic_id: uuid.UUID, body: TopicEstimateIn,
-                       m: CurrentMember = Depends(require_coordinator_up),
+                       m: CurrentMember = Depends(require_operator),
                        db: Session = Depends(get_db)):
     """Size a chapter when its term begins — the whole point of term-wise planning."""
     return PlannerService(db).set_topic_estimate(m, topic_id, body.est_periods)
 
 
 @router.delete("/syllabus/units/{unit_id}", response_model=MessageResponse)
-def delete_unit(unit_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+def delete_unit(unit_id: uuid.UUID, m: CurrentMember = Depends(require_operator),
                 db: Session = Depends(get_db)):
     PlannerService(db).delete_unit(m, unit_id)
     return MessageResponse(message="Chapter removed.")
 
 
 @router.delete("/syllabus/topics/{topic_id}", response_model=MessageResponse)
-def delete_topic(topic_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+def delete_topic(topic_id: uuid.UUID, m: CurrentMember = Depends(require_operator),
                  db: Session = Depends(get_db)):
     PlannerService(db).delete_topic(m, topic_id)
     return MessageResponse(message="Topic removed.")
 
 
 @router.post("/syllabus/split", response_model=SplitOut)
-def split_syllabus(body: SplitIn, _: CurrentMember = Depends(require_coordinator_up),
+def split_syllabus(body: SplitIn, _: CurrentMember = Depends(require_operator),
                    db: Session = Depends(get_db)):
     return SplitOut(units=PlannerService(db).split_text(body.text))
 
 
 # ── syllabus document import (V2-P7, SPRD2 §5.1) ─────────────────────────────
 @router.get("/syllabus/import/template")
-def syllabus_import_template(_: CurrentMember = Depends(require_coordinator_up)):
+def syllabus_import_template(_: CurrentMember = Depends(require_operator)):
     """V1-2 §6 ②: blank syllabus template (one sheet per class-subject),
     generated from the importer's SPECS — blank Periods = not sized, never 1."""
     return Response(
@@ -174,7 +179,7 @@ def syllabus_import_template(_: CurrentMember = Depends(require_coordinator_up))
 
 @router.post("/syllabus/import/analyze", response_model=SyllabusAnalyzeOut)
 async def syllabus_import_analyze(file: UploadFile = File(...),
-                                  _: CurrentMember = Depends(require_coordinator_up)):
+                                  _: CurrentMember = Depends(require_operator)):
     """xlsx/csv grid, a typed-out list, or a PDF/photo of a printed syllabus (read by
     the multimodal model). All three come back as the same editable draft."""
     return analyze_file(await file.read(), file.filename or "syllabus.xlsx")
@@ -182,14 +187,14 @@ async def syllabus_import_analyze(file: UploadFile = File(...),
 
 @router.post("/syllabus/import/text", response_model=SyllabusAnalyzeOut)
 def syllabus_import_text(body: SyllabusTextIn,
-                         _: CurrentMember = Depends(require_coordinator_up)):
+                         _: CurrentMember = Depends(require_operator)):
     """Paste path. Same draft shape as the file path, so the UI has one review screen."""
     return analyze_text(body.text)
 
 
 @router.post("/syllabus/import/commit", response_model=SyllabusCommitOut)
 def syllabus_import_commit(body: SyllabusCommitIn,
-                           m: CurrentMember = Depends(require_coordinator_up),
+                           m: CurrentMember = Depends(require_operator),
                            db: Session = Depends(get_db)):
     return SyllabusImporter(db).commit(
         m, class_subject_id=body.class_subject_id,
@@ -228,7 +233,7 @@ def week_schedule(class_id: uuid.UUID, week_start: date | None = None,
 
 @router.post("/plan/{cs_id}/draft", response_model=PlanOut)
 def draft_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
-               m: CurrentMember = Depends(require_coordinator_up),
+               m: CurrentMember = Depends(require_operator),
                db: Session = Depends(get_db)):
     """`term_id` scopes the draft to one term; omit it to plan the whole year."""
     return PlannerService(db).draft_plan(m, cs_id, term_id)
@@ -267,7 +272,7 @@ def reschedule_plan(cs_id: uuid.UUID, body: RescheduleIn,
 
 @router.post("/plan/{cs_id}/extend", response_model=PlanOut)
 def extend_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
-                m: CurrentMember = Depends(require_coordinator_up),
+                m: CurrentMember = Depends(require_operator),
                 db: Session = Depends(get_db)):
     """Schedule newly sized chapters after the existing (possibly locked) entries —
     the partial-plan growth path. Never reshuffles what is already planned (P2)."""
@@ -276,7 +281,7 @@ def extend_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
 
 @router.post("/plan/{cs_id}/generate", response_model=PlanGenerateOut)
 def generate_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
-                  m: CurrentMember = Depends(require_coordinator_up),
+                  m: CurrentMember = Depends(require_operator),
                   db: Session = Depends(get_db)):
     """Proposer + deterministic validators (V2-M2 §5.2). Over-capacity is reported.
     `term_id` scopes generation to one term, leaving other terms' baselines alone."""
@@ -285,7 +290,7 @@ def generate_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
 
 @router.post("/plan/{cs_id}/approve", response_model=PlanOut)
 def approve_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
-                 m: CurrentMember = Depends(require_admin),
+                 m: CurrentMember = Depends(require_operator),
                  db: Session = Depends(get_db)):
     """Lock a baseline (P2). `term_id` locks just that term; omit it to lock the year."""
     return PlannerService(db).approve_plan(m, cs_id, term_id)
@@ -293,7 +298,7 @@ def approve_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
 
 @router.post("/plan/{cs_id}/unapprove", response_model=PlanOut)
 def unapprove_plan(cs_id: uuid.UUID, term_id: uuid.UUID | None = None,
-                   m: CurrentMember = Depends(require_admin),
+                   m: CurrentMember = Depends(require_operator),
                    db: Session = Depends(get_db)):
     """Unlock a baseline so it can be re-planned. Appends a compensating row to
     `plan_approvals` — the approval history is never rewritten (law 3)."""

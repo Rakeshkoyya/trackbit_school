@@ -230,11 +230,6 @@ export const schoolApi = {
   classOverview: (classId: string) =>
     api.get<import("@/lib/school-types").ClassOverview>(`/overview/classes/${classId}`),
 
-  // setup wizard (V2-P5, SPRD2 §5.1)
-  wizardState: () => api.get<import("@/lib/school-types").WizardState>("/wizard/state"),
-  wizardAdvance: (b: { to_step: number; payload?: Record<string, unknown> }) =>
-    api.post<import("@/lib/school-types").WizardState>("/wizard/advance", b),
-  wizardComplete: () => api.post<import("@/lib/school-types").WizardState>("/wizard/complete"),
   forecast: (classId: string) =>
     api.get<import("@/lib/school-types").Forecast[]>(`/planner/plan/forecast${qs({ class_id: classId })}`),
 

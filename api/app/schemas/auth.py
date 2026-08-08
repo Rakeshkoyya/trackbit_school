@@ -1,7 +1,7 @@
 """Auth request/response schemas."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -84,6 +84,11 @@ class OrgOut(BaseModel):
     name: str
     timezone: str
     plan: str
+    # SETUP-REDESIGN-PLAN §6: once we have handed the school over, its structure
+    # is ours to change (`require_operator`). The UI reads this to render the
+    # setup screens read-only rather than offering buttons that 403 — a disabled
+    # affordance that explains itself beats a permission error.
+    handed_over_at: datetime | None = None
 
 
 class OrgMembershipOut(BaseModel):

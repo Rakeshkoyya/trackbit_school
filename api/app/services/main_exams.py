@@ -60,6 +60,7 @@ from app.schemas.main_exams import (
 )
 from app.services.periods import visible_class_ids
 from app.services.school_clock import today_in
+from app.services.term_sync import sync_terms_from_exams
 
 EXAM_BLOCK = "exam_block"
 
@@ -385,6 +386,10 @@ class MainExamService:
             blocks_periods=body.blocks_periods, notes=body.notes)
         self.db.add(ev)
         self.db.flush()
+        # Terms follow the exam calendar (founder, 2026-08-08): a term ends on
+        # its exam's last day. Same transaction, so the exam and its term move
+        # together or not at all.
+        sync_terms_from_exams(self.db, m.org_id, year.id)
         return self._row(m, ev)
 
     def update(self, m: CurrentMember, event_id: uuid.UUID,
@@ -405,6 +410,9 @@ class MainExamService:
         ev.blocks_periods = body.blocks_periods
         ev.notes = body.notes
         self.db.flush()
+        # Moving an exam moves its term with it — that is the whole point of
+        # them being one thing (founder, 2026-08-08).
+        sync_terms_from_exams(self.db, m.org_id, ev.academic_year_id)
         return self._row(m, ev)
 
     def delete(self, m: CurrentMember, event_id: uuid.UUID) -> None:
@@ -425,8 +433,10 @@ class MainExamService:
                 f"{n} {_plural(n, 'paper has', 'papers have')} already been "
                 "recorded under this exam. Remove those first.",
                 code="exam_has_marks")
+        year_id = ev.academic_year_id
         self.db.delete(ev)
         self.db.flush()
+        sync_terms_from_exams(self.db, m.org_id, year_id)
 
     @staticmethod
     def _assert_dates(body: MainExamIn, year: AcademicYear | None) -> None:

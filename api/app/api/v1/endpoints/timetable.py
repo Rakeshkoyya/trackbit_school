@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_academic, require_admin
+from app.core.dependencies import require_academic, require_admin, require_operator
 from app.schemas.timetable import (
     Clash,
     DraftOut,
@@ -39,13 +39,13 @@ def get_grid(class_id: uuid.UUID, on_date: date | None = None,
 
 
 @router.put("/slot", response_model=GridOut)
-def set_slot(body: SlotIn, m: CurrentMember = Depends(require_admin),
+def set_slot(body: SlotIn, m: CurrentMember = Depends(require_operator),
              db: Session = Depends(get_db)):
     return TimetableService(db).set_slot(m, body)
 
 
 @router.post("/slot/clear", response_model=GridOut)
-def clear_slot(body: SlotClearIn, m: CurrentMember = Depends(require_admin),
+def clear_slot(body: SlotClearIn, m: CurrentMember = Depends(require_operator),
                db: Session = Depends(get_db)):
     return TimetableService(db).clear_slot(m, body)
 
@@ -75,7 +75,7 @@ def get_period_config(year_id: uuid.UUID, m: CurrentMember = Depends(require_aca
 
 
 @router.put("/period-config", response_model=PeriodConfigOut)
-def set_period_config(body: PeriodConfigIn, m: CurrentMember = Depends(require_admin),
+def set_period_config(body: PeriodConfigIn, m: CurrentMember = Depends(require_operator),
                       db: Session = Depends(get_db)):
     return TimetableService(db).set_period_config(m, body)
 
@@ -85,7 +85,7 @@ def set_period_config(body: PeriodConfigIn, m: CurrentMember = Depends(require_a
 async def import_analyze(
     class_id: uuid.UUID = Query(...),
     file: UploadFile | None = File(default=None),
-    m: CurrentMember = Depends(require_admin),
+    m: CurrentMember = Depends(require_operator),
     db: Session = Depends(get_db),
 ):
     data = await file.read() if file is not None else None
@@ -93,14 +93,14 @@ async def import_analyze(
 
 
 @router.post("/import/commit", response_model=GridOut)
-def import_commit(body: ImportCommitIn, m: CurrentMember = Depends(require_admin),
+def import_commit(body: ImportCommitIn, m: CurrentMember = Depends(require_operator),
                   db: Session = Depends(get_db)):
     return TimetableService(db).import_commit(m, body)
 
 
 # ── whole-school generation (deterministic) ───────────────────────────────────
 @router.post("/generate", response_model=OrgGenerateOut)
-def generate_year_grid(body: OrgGenerateIn, m: CurrentMember = Depends(require_admin),
+def generate_year_grid(body: OrgGenerateIn, m: CurrentMember = Depends(require_operator),
                        db: Session = Depends(get_db)):
     """Fill every class of the year at once (teacher-clash-aware, honours
     periods_per_week). Preview by default; `apply=true` replaces the live grid."""
@@ -109,6 +109,6 @@ def generate_year_grid(body: OrgGenerateIn, m: CurrentMember = Depends(require_a
 
 # ── assisted draft (flag-gated) ───────────────────────────────────────────────
 @router.post("/draft", response_model=DraftOut)
-def draft(class_id: uuid.UUID = Query(...), m: CurrentMember = Depends(require_admin),
+def draft(class_id: uuid.UUID = Query(...), m: CurrentMember = Depends(require_operator),
           db: Session = Depends(get_db)):
     return TimetableService(db).assisted_draft(m, class_id)

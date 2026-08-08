@@ -553,7 +553,13 @@ function SimpleListCard({
 
 function AcademicsInner() {
   const { me } = useAuth();
-  const canEdit = me?.org_role === "admin";
+  // SETUP-REDESIGN-PLAN §6: structure is ours to change once the school is live.
+  // The operator keeps editing (they are super-admin); the school reads.
+  // Everything stays VISIBLE — D-2 is that the admin sees all the data, and
+  // only the write affordance goes.
+  const handedOver = Boolean(me?.org?.handed_over_at);
+  const frozen = handedOver && !me?.is_super_admin;
+  const canEdit = me?.org_role === "admin" && !frozen;
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -563,6 +569,14 @@ function AcademicsInner() {
         />
         <YearSwitcher />
       </div>
+      {frozen ? (
+        <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+          This is your school&apos;s structure, and TrackBit maintains it. Tell us
+          what needs to change — a new class, a subject, a teacher&apos;s
+          allocation — and we will make it. Adding students and staff, and
+          everything you do day to day, is unchanged.
+        </div>
+      ) : null}
       <div className="grid gap-4">
         <AssignmentsCard canEdit={canEdit} />
         <div className="grid gap-4 lg:grid-cols-2">

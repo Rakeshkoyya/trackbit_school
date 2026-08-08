@@ -50,7 +50,6 @@ export function ExamPortions({
       schoolApi.setExamPortion({ exam_event_id: exam!.id, ...b }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["exam-portions"] });
-      qc.invalidateQueries({ queryKey: ["wizard"] });
       qc.invalidateQueries({ queryKey: ["exam-fit"] });
       toast.success("Portion set");
     },
@@ -64,7 +63,6 @@ export function ExamPortions({
     mutationFn: (portionId: string) => schoolApi.deleteExamPortion(portionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["exam-portions"] });
-      qc.invalidateQueries({ queryKey: ["wizard"] });
       qc.invalidateQueries({ queryKey: ["exam-fit"] });
       toast.success("Portion cleared");
     },

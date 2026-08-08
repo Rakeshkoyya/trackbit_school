@@ -57,7 +57,6 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
     onSuccess: (r) => {
       invalidate();
       qc.invalidateQueries({ queryKey: ["syllabus"] });
-      qc.invalidateQueries({ queryKey: ["wizard"] });
       toast.success(
         r.subjects_added || r.units_copied
           ? `Copied ${r.subjects_added} subject(s) · ${r.units_copied} chapters`

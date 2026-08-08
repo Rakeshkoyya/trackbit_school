@@ -6,7 +6,8 @@ school handed over, and only then gives the school admin their credentials.
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -28,11 +29,13 @@ from app.schemas.platform import (
     PlatformOrgOut,
     ReadinessOut,
 )
+from app.schemas.setup_pack import PackImportOut, PackReviewOut
 from app.services import observance_import
 from app.services.observance_import import ObservanceImportService
 from app.services.observances import ObservanceService
 from app.services.platform import PlatformService
 from app.services.readiness import ReadinessService
+from app.services.school_setup import SchoolSetupService
 
 router = APIRouter()
 
@@ -64,6 +67,78 @@ def enter_org(
     db: Session = Depends(get_db),
 ) -> SessionResponse:
     return SessionResponse(**PlatformService(db).enter_org(member, org_id))
+
+
+# ── the setup pack (SETUP-REDESIGN-PLAN §5) ──────────────────────────────────
+# One school, one workbook, one screen. These three plus the two below are the
+# whole operator flow: template → review → import → readiness → handover.
+@router.get("/orgs/{org_id}/setup/template")
+def setup_template(
+    org_id: uuid.UUID,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> Response:
+    """The blank pack, pre-filled with what the operator already typed when
+    creating the school. This is the file the school fills in."""
+    content, filename = SchoolSetupService(db).template(org_id)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.post("/orgs/{org_id}/setup/review", response_model=PackReviewOut)
+@limiter.limit("30/minute")
+async def setup_review(
+    request: Request,
+    org_id: uuid.UUID,
+    file: UploadFile = File(...),
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> PackReviewOut:
+    """Read the filled pack and report everything wrong with it. **Writes
+    nothing** — so the operator can send it back to the school and re-upload as
+    many times as it takes."""
+    return SchoolSetupService(db).review(org_id, await file.read())
+
+
+@router.post("/orgs/{org_id}/setup/import", response_model=PackImportOut)
+@limiter.limit("10/minute")
+async def setup_import(
+    request: Request,
+    org_id: uuid.UUID,
+    file: UploadFile = File(...),
+    replace_syllabus: bool = Form(False),
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> PackImportOut:
+    """Build the school, in one transaction.
+
+    Re-validates first and refuses on any blocker — `imported=False` with the
+    report attached, rather than a half-built school. `replace_syllabus` is off
+    by default (D-4): a second upload ADDS Term 3 to what is already there, and
+    destroying chapters teachers have logged against must be asked for.
+    """
+    return SchoolSetupService(db).import_pack(
+        member, org_id, await file.read(), replace_syllabus=replace_syllabus)
+
+
+@router.get("/orgs/{org_id}/setup/welcome")
+def setup_welcome(
+    org_id: uuid.UUID,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> Response:
+    """The handover sheet (§7, G8) — who signs in where, the school code, and
+    the line between what the school changes and what it asks us for.
+
+    No passwords: they are hashed and cannot be read back, so the sheet says how
+    to reset one rather than pretending to carry it."""
+    content, filename = SchoolSetupService(db).welcome(org_id)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # ── the readiness report (V1-2, §6 ⑤) ────────────────────────────────────────
