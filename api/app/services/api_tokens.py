@@ -38,7 +38,7 @@ from app.core.features import Feature, has_feature
 from app.core.security import generate_raw_token, hash_token
 from app.models import ApiToken, Membership, Organization, User
 from app.services.lucy import domains
-from app.services.lucy.registry import visible_tools
+from app.services.lucy.registry import REGISTRY, visible_tools
 
 # How long a `last_used_at` write is skipped for. Same reasoning as
 # `_touch_last_active`: an UPDATE on every authenticated call is write
@@ -89,6 +89,14 @@ class ApiTokenService:
                 f"Unknown toolset(s): {', '.join(sorted(unknown))}.")
         for name in requested:
             if name in domains.ALWAYS_ON:
+                continue
+            # "Empty for everyone" is not the same as "above your authority".
+            # A toolset whose tools have not been built yet (`events` today)
+            # holds nothing for an admin either, and refusing it told her she
+            # lacked a permission when the truth was that the shelf is bare.
+            # Granting one is harmless — it resolves to no tools — and it stops
+            # this breaking again the day those tools land.
+            if not any(s.domain == name for s in REGISTRY.values()):
                 continue
             reachable = [s for s in visible_tools(m, scope={name})
                          if s.domain == name]
