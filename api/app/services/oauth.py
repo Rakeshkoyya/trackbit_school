@@ -217,13 +217,14 @@ class OAuthService:
                              "PKCE with code_challenge_method=S256 is required.")
         if not code_challenge:
             raise OAuthError("invalid_request", "code_challenge is required.")
-        if scope:
-            unknown = (set(scope.split()) - set(client.scopes or [])
-                       - {"offline_access"})
-            if unknown:
-                raise OAuthError(
-                    "invalid_scope",
-                    f"Not granted to this connector: {', '.join(sorted(unknown))}")
+        # Deliberately no `invalid_scope` check. RFC 6749 3.3 lets the server
+        # narrow a requested scope and report what it actually granted, and
+        # narrowing is the only workable behaviour here: Claude requests every
+        # scope our authorization-server metadata advertises, which is always a
+        # superset of any one connector's grant. Rejecting the excess made every
+        # partially-scoped connector fail at the authorize step. `issue_code`
+        # intersects with the client's own scopes, and the token response
+        # carries the granted `scope` back so the client is never misled.
         return client
 
     def issue_code(self, m: CurrentMember, client: OAuthClient, *,
@@ -235,6 +236,10 @@ class OAuthService:
         ApiTokenService(self.db)._assert_may_issue(m)
         requested = [s for s in (scope or "").split() if s != "offline_access"]
         granted = sorted(set(requested or list(client.scopes)) & set(client.scopes))
+        # A request naming only scopes this connector lacks is not a request for
+        # nothing — fall back to what the admin actually granted it.
+        if not granted:
+            granted = sorted(client.scopes)
         raw = secrets.token_urlsafe(32)
         self.db.add(OAuthGrant(
             org_id=m.org_id,
@@ -401,6 +406,10 @@ class OAuthService:
         reflects the member's real authority, not the client's wish list."""
         requested = [s for s in (scope or "").split() if s != "offline_access"]
         granted = sorted(set(requested or list(client.scopes)) & set(client.scopes))
+        # A request naming only scopes this connector lacks is not a request for
+        # nothing — fall back to what the admin actually granted it.
+        if not granted:
+            granted = sorted(client.scopes)
         specs = visible_tools(m, scope=set(granted) or None, transport="mcp")
         return {
             "client_name": client.name,
