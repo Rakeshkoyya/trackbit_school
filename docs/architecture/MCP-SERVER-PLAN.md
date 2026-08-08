@@ -45,8 +45,8 @@ go to §10 Phase 1.
 
 | | |
 |---|---|
-| Built | **Nothing.** No MCP code exists. `app/mcp/` does not exist. |
-| The seed | `api/app/services/lucy/registry.py` — **42 tools live today** (36 read, 6 write, all writes `confirm=True`). Verify by importing `REGISTRY`; do not trust this number. |
+| Built | **Phase 1, and Phase 2's PAT half** (2026-08-08). The registry carries domains and role→transport→scope→tier filtering, the three discovery tools and the manual generator; `api_tokens` + `agent_access` exist, and `GET /agent/me` authenticates a connector. **No transport yet — `app/mcp/` does not exist — and no OAuth.** |
+| The seed | `api/app/services/lucy/registry.py` — **45 tools live today** (39 read, 6 write, all writes `confirm=True`); 42 predate Phase 1, which added `list_domains`, `list_tools` and `describe_tool`. Verify by importing `REGISTRY`; do not trust this number. |
 | Decided | `D-93`…`D-101` (§1 here, and the header of `MCP-TOOL-LIST.md`) |
 | Approved to build | **151 tools** ticked in [`MCP-TOOL-LIST.md`](MCP-TOOL-LIST.md) — 106 read, 35 auto-write, 10 approval-write. 32 struck. |
 | Awaiting a tick | **12 exam-capture tools**, `MCP-TOOL-LIST.md` §8A (#184–195) |
@@ -55,31 +55,33 @@ go to §10 Phase 1.
 **`MCP-TOOL-LIST.md` is the authority on what gets built. This file is the authority on
 how.** Where they disagree, the list wins — §7 and §8 here are superseded by it.
 
-### 0.2 Four questions to put to the founder before writing code
+### 0.2 What the founder has decided, and what is still open
 
-None of them block Phase 1, but Q7 blocks the exam-capture tools and Q4 changes the
-credential build.
+**Answered 2026-08-08** — recorded as `D-102`–`D-105` in `MCP-TOOL-LIST.md`'s header:
 
-| | Question | Recommendation |
-|---|---|---|
-| **Q7** | Band assessments have **no answer-sheet capture at all** — `band_assessments.py` imports no storage and no `ScoreCapture`. (a) capture on a real exam cycle then `promote_exam_to_band_test`, or (b) add capture to `BandAssessment` itself? | **(a)** — the bridge exists at `bands.py:503`, no migration |
-| **Q4** | Fee payment recording — hold it out, or open it? | **Hold** (§9) |
-| **Q1–Q3, Q5, Q6** | §11 of this file | as stated there |
-| **—** | Tick or strike `MCP-TOOL-LIST.md` §8A's 12 tools | — |
+| | Answer |
+|---|---|
+| **Q1 + Q2** | `agent_access` is `off` for a new org, `admins` once live; **a teacher may hold her own connector**, scoped to her own authority. Shapes Phase 2. |
+| **Q7 + §8A** | All 12 exam-capture tools approved, and Q7 answered **(b)** — capture on `BandAssessment` itself. **Its own packet; it has a migration.** |
+| **Q8** | A strike removes a tool from **MCP only**, not the product. Built in Phase 1. |
+| **prod** | Build against production deliberately (`D-105`) — ⚠️ so **no RLS behaviour can be verified there**. |
+
+**Still open: Q3, Q4, Q5, Q6** (§11). None blocks Phase 2. **Q3 (change-set TTL and size
+cap) and Q5 (re-auth for high-blast-radius approvals) must be settled before Phase 5.**
 
 ### 0.3 The first three tasks, in order
 
-1. **Phase 1 — registry domains + scope.** `ToolSpec.domain` on all 42 tools;
-   `visible_tools(m, scope, tier)` filtering **role → scope → tier**, all at schema time;
-   `list_domains` / `list_tools` / `describe_tool`; a test asserting no `tools_*` module
-   imports `sqlalchemy` or `models`. *Done when `test_lucy.py` passes unchanged and a
-   scoped call returns only that scope's tools.* Purely additive — nothing shipped
-   changes. **Start here.**
-2. **Phase 2 — credentials.** `api_tokens` + the OAuth authorization server (`D-99`).
-   *Done when a token issues, is used, shows `last_used_at`, revokes, and 401s next call.*
-3. **Phase 5 — the change-set engine.** The keystone: no write tool ships before it.
+1. ~~**Phase 1 — registry domains + scope.**~~ ✅ **Done 2026-08-08.** See §10 Phase 1
+   for what landed and the two things it deliberately left as seams.
+2. ~~**Phase 2 — PAT credentials.**~~ ✅ **Done 2026-08-08** — `api_tokens`,
+   `agent_access`, issue/list/revoke, and `GET /agent/me`. **OAuth 2.1 (`D-99`) is
+   still outstanding** and is the primary connector story; §4.3's verification against
+   Anthropic's current connector docs has not been done. ⚠️ **Prod is not migrated.**
+3. **Phase 3 — transport.** `app/mcp/`, stdio first, then streamable HTTP at `/mcp`.
+   **Read the `mcp` SDK's own README** — training data on MCP is stale.
+4. **Phase 5 — the change-set engine.** The keystone: no write tool ships before it.
    *Done when a 40-item `create_tasks_bulk` renders as one card, approves once, and
-   applies in one transaction.*
+   applies in one transaction.* Needs **Q3 and Q5** answered first.
 
 ### 0.4 Landmines live right now — check these first
 
@@ -662,22 +664,114 @@ Short list, hard reasons. Everything not here is in.
 
 **0.3** is the last v1 release item and independently worth doing.
 
-### Phase 1 — Registry: domains, scope, discovery
+### Phase 1 — Registry: domains, scope, discovery ✅ **built 2026-08-08**
 
-`ToolSpec.domain` on all 42 · `visible_tools(m, scope, tier)` · `list_domains` /
-`list_tools` / `describe_tool` · the `school://manual` generator · a test asserting no
-`tools_*` module imports `sqlalchemy` or `models`.
+| Landed | Where |
+|---|---|
+| The 13 toolsets as a declared vocabulary, with `ALWAYS_ON` and `DEFAULT_SCOPE` | `services/lucy/domains.py` *(new)* |
+| `ToolSpec.domain`, **required** by the `tool()` decorator and validated at registration | `services/lucy/registry.py` |
+| All 42 pre-existing tools stamped with the domain `MCP-TOOL-LIST.md` assigns them | `tools_read/write/insights.py` |
+| `visible_tools(m, *, scope, tier)` filtering **role → scope → tier**, all at schema time | `registry.py` |
+| `ToolScope` + a contextvar published by `execute()`, so a discovery tool answers for *this* caller | `registry.py` |
+| `list_domains` / `list_tools` / `describe_tool` | `services/lucy/tools_meta.py` *(new)* |
+| The `school://manual` generator | `services/lucy/manual.py` *(new)* |
+| 17 unit tests, no DB — including the `D-95` import guard | `tests/test_tool_registry.py` *(new)* |
 
-**Done when:** Lucy still passes `test_lucy.py` unchanged, a scoped call returns only that
-scope's tools, and the manual generates from the registry. **Small–Medium.**
+**Verified:** `test_lucy.py`, `test_widget_catalog.py` and `test_dashboard_v1_12.py` all
+pass **unchanged**; `ruff` clean. Lucy calls `visible_tools(m)` positionally and so stays
+unscoped, which is correct until Phase 11.
 
-### Phase 2 — Credentials
+**Two things were deliberately left as seams, not built:**
 
-`api_tokens` migration · shared resolver (§4.1) reusing `get_current_member`'s checks ·
-issue / list / revoke under `/org/api-tokens` · the `agent_access` org setting.
+- **`TIER_DOMAINS` is empty.** The filter is real and ordered third; the *mapping* is a
+  pricing decision nobody has taken — `core/plans.py` is still the inherited Free/Pro
+  model (FEATURE-MAP §9.6). Populating that dict is the whole of the tool-filtering half
+  of the package-tiers packet.
+- **The `D-95` guard allows `from sqlalchemy.orm import Session`** and nothing else from
+  sqlalchemy. Every handler annotates `db: Session`; the guard bans the query
+  constructors (`select`, `func`, `text`, `insert`, `update`, `delete`, …) and any
+  `app.models` import, which is what "never touches a table" actually means.
 
-**Done when:** a token is issued, used, shows `last_used_at`, revokes, and 401s on the
-next call; a teacher cannot issue a token exceeding her own authority. **Medium.**
+> ⚠️ **One question this phase surfaced and could not answer** — see §11 `Q8`: three tools
+> that exist in Lucy today (`assign_homework`, `confirm_check`, `add_plan_comment`) are
+> **struck** in `MCP-TOOL-LIST.md`. They are still registered and still Lucy's, because
+> `D-93` says one pool; but whether the strike means "not over MCP" or "gone from the
+> product" decides whether the registry needs a per-transport flag.
+
+### Phase 2 — Credentials · **PAT half built 2026-08-08; OAuth still to do**
+
+| Landed | Where |
+|---|---|
+| `api_tokens` + `organizations.agent_access`, with `org_isolation` RLS on the new table | migration `c6d7e8f9a0b1` |
+| The model | `models/api_token.py` *(new)* |
+| Issue / list / revoke / **resolve**, with the "never exceeds its issuer" rule | `services/api_tokens.py` *(new)* |
+| `AgentPrincipal` + `get_agent_principal` — a **second door** that accepts only `tbk_*`, never a JWT | `core/dependencies.py` |
+| `POST`/`GET` `/org/api-tokens`, `DELETE /org/api-tokens/{id}`, and `GET /agent/me` | `endpoints/agent.py` *(new)* |
+| `agent_access` on the existing `PATCH /org/settings` (`D-103`) | `schemas/org.py`, `services/org.py` |
+| 15 tests, mostly negative | `tests/test_api_tokens.py` *(new)* |
+
+**Done-when met:** a token issues, is used, records `last_used_at`, revokes, and 401s on
+the next call; and a teacher cannot issue a token exceeding her own authority — asking for
+`fees` or `insights` is **refused**, not silently emptied.
+
+Three behaviours worth knowing because they are not obvious from the plan:
+
+- **`GET /agent/me`** is the token's own identity endpoint — the "test connection" round
+  trip §6 asks for, and the first thing on the agent side that works. It reports the tools
+  the credential *actually resolves*, not what was requested at issue time, so a role
+  change shows up there first.
+- **Setting `agent_access` to `off` kills tokens already issued**, not just new ones.
+- **Every refusal is the same `AuthError`** — revoked, expired and never-existed are
+  indistinguishable to the caller.
+
+**OAuth 2.1 (`D-99`) shipped 2026-08-08**, and with it Phase 3's transport.
+
+### Phase 2b — OAuth 2.1 ✅ **built 2026-08-08**
+
+| Landed | Where |
+|---|---|
+| `oauth_clients` + `oauth_grants`, and five OAuth columns on `api_tokens` | migration `d7e8f9a0b1c2` |
+| The authorization server: authorize, consent, token, refresh-with-rotation, revoke | `services/oauth.py`, `endpoints/oauth.py` *(new)* |
+| Discovery: RFC 9728 protected-resource + RFC 8414 AS metadata, at the app **root** | `app/mcp/server.py` |
+| Connections screen + consent screen | `web/src/app/(app)/settings/connections`, `.../oauth/consent` |
+
+**An OAuth access token *is* an `api_tokens` row.** That is the load-bearing decision:
+`ApiTokenService.resolve()` stays the single resolver, so revocation, membership liveness
+and the `agent_access` kill switch cover connector tokens without being reimplemented.
+
+### Phase 3 — Transport ✅ **built 2026-08-08**
+
+`app/mcp/` — Streamable HTTP at `/mcp`, POST/GET/DELETE. `initialize`,
+`notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`,
+`resources/read`. Tools come from the registry filtered by the credential's scope, and the
+manual is served as `school://manual`.
+
+> ⚠️ **HTTP transport was gated on 0.3 (the prod app-role swap), which has NOT happened.**
+> Production still runs as `doadmin` with `rolbypassrls = true`, so RLS is decorative
+> there — app-layer `org_id` scoping is the only tenant guard in the one environment that
+> matters. Shipped ahead of that gate on the founder's explicit instruction (`D-105`); the
+> swap remains the last release item.
+
+**§4.3's verification was done** — against Anthropic's live connector docs, not memory.
+The contract that actually matters:
+
+| | Verified value |
+|---|---|
+| Claude's redirect URI | `https://claude.ai/api/mcp/auth_callback` |
+| Claude Code | loopback, **port-agnostic** match on `localhost`/`127.0.0.1` |
+| Discovery | **401** + `WWW-Authenticate: Bearer resource_metadata="…"` — ignored on a 200 |
+| PRM `resource` | must equal the URL the user typed into Claude, path included |
+| Token endpoint | must accept `application/x-www-form-urlencoded` (JSON-only ⇒ 415) |
+| Refresh failure | must return `invalid_grant`, not a custom code |
+| Latency budget | 10s discovery/token, 30s refresh |
+| Anthropic egress | `160.79.104.0/21` |
+
+**Not built: Dynamic Client Registration.** Custom connectors use pre-registered client
+credentials generated in Settings → Connections — the documented non-DCR path, which also
+avoids registering a fresh client on every connection. A *directory* listing would need
+DCR or CIMD.
+
+✅ **Production is migrated** to `d7e8f9a0b1c2` (verified by querying the tables).
 
 ### Phase 3 — Transport
 
@@ -735,14 +829,21 @@ Priority depends entirely on §4.3's verification.
 
 ## 11. Still open
 
+**Answered 2026-08-08: Q1, Q2, Q7, Q8.** Recorded as `D-102`–`D-105` in the header of
+[`MCP-TOOL-LIST.md`](MCP-TOOL-LIST.md). **Q3, Q4, Q5, Q6 remain open** — none of them
+blocks Phase 2, and Q3/Q5 must be settled before Phase 5.
+
 | # | Question | My recommendation |
 |---|---|---|
-| **Q1** | Default `agent_access` for a school — `off`, `admins`, or `all_staff`? | **`admins`** once a school is live; `off` for a brand-new org until setup is done. |
-| **Q2** | Does a teacher get her own connector, or is MCP an admin feature? | **Yes, scoped to her own authority.** The capture scenarios (log a week of lessons from her notes) are the strongest teacher value, and her tools are already the narrow ones. |
+| ~~**Q1**~~ | Default `agent_access` for a school | ✅ **Decided (`D-103`): `off` for a brand-new org, `admins` once it is live.** |
+| ~~**Q2**~~ | Does a teacher get her own connector? | ✅ **Decided (`D-103`): yes, scoped to her own authority and never exceeding it.** |
 | **Q3** | Change-set TTL and size cap? | **7 days, 200 items.** Past that it is an import, and imports have their own surface. |
 | **Q4** | Fee payment recording — hold the line or open it? | **Hold.** Configuration in, money movement out (§9). If overruled, it needs a second confirmation by a *different* admin, and that is a bigger build than the tool. |
 | **Q5** | Should approving a change set require re-authentication for high-blast-radius items (`activate_year`, `unlock_exam`, role-adjacent writes)? | **Yes, for a named list of ~6 tools.** Cheap to build, and it is the difference between an approval and a reflex. |
 | **Q6** | Does the audit log surface to the school, or stay internal? | **Surface it** (§6 Activity). A principal who can see what the agent did will trust it with more. |
+| ~~**Q8**~~ *(raised by Phase 1)* | Does a strike remove a tool from the product, or only from MCP? | ✅ **Decided (`D-102`): only from MCP, and built** — `ToolSpec.transports` plus a `transport` filter. The three stay Lucy's. |
+| ~~**Q7**~~ | Band-assessment answer-sheet capture — (a) the existing bridge, or (b) capture on `BandAssessment` itself? | ✅ **Decided (`D-104`): (b)**, overruling the recommendation of (a). (b) is the only option that covers `rating` and `other` assessments, which never become an exam cycle. **Its own packet — it has a migration.** |
+| **Q9** *(new, raised by Phase 2)* | §4.1 lists `token_version` among the checks `resolve()` should repeat, and **it is not implemented** — see the deviation note in `services/api_tokens.py`. Should bumping `token_version` ("sign everyone out") also kill agent connectors? | **Probably yes, but it is a decision, not a default.** A connector embeds nothing, so it already tracks a role change live — a demoted admin loses her admin tools on the next call, which is the important direction and works today. What is missing is the *other* direction: "sign everyone out" currently leaves connectors alive. Only `revoke`, removing the membership, or `agent_access = off` stop them. Fixing it is one column plus a migration. |
 
 ---
 

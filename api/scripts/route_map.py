@@ -32,6 +32,9 @@ GUARDS = {
     "get_current_parent",
     "get_current_principal",
     "get_current_user",
+    # An agent connector acting with a member's authority (`D-97`). A separate
+    # door: it accepts only an opaque `tbk_*` token, never a JWT.
+    "get_agent_principal",
 }
 
 

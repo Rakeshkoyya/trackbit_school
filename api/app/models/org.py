@@ -55,6 +55,12 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     # V1-2 (§6 ⑤): set when the operator marks the school handed over.
     handed_over_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # `D-103`: who may issue an agent connector (an MCP / Lucy machine
+    # credential). `off` for a brand-new org — a school still being set up has
+    # nothing to connect to yet — then `admins` once it is live. `all_staff`
+    # lets a teacher issue her own, always scoped to her own authority.
+    agent_access: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="off")
     plan: Mapped[str] = mapped_column(Text, nullable=False, server_default="free")
     # Subscription lifecycle (plan P4-BE-01). 'none' on Free; 'active'/'grace' on
     # Pro. Grace = a payment failed but we don't downgrade for 7 days, and we

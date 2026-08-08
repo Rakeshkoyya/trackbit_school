@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     academics,
+    agent,
     assessments,
     attendance,
     auth,
@@ -23,6 +24,7 @@ from app.api.v1.endpoints import (
     marketing,
     me,
     my_class,
+    oauth,
     ops,
     org,
     overview,
@@ -37,12 +39,19 @@ from app.api.v1.endpoints import (
     students,
     tasks,
     timetable,
-    wizard,
 )
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(org.router, prefix="/org", tags=["org"])
+# Agent connectors: the human half issues credentials from Setup → Connections,
+# the agent half authenticates with the credential itself (D-97).
+api_router.include_router(agent.router, prefix="/org", tags=["agent"])
+api_router.include_router(agent.agent_router, prefix="/agent", tags=["agent"])
+# OAuth connector management — the Connections screen drives these with a
+# normal staff JWT. The OAuth protocol endpoints themselves live at the app
+# root (see main.py), because the advertised issuer is the bare origin.
+api_router.include_router(oauth.router, prefix="/org", tags=["agent"])
 api_router.include_router(platform.router, prefix="/platform", tags=["platform"])
 api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
 api_router.include_router(marketing.router, prefix="/marketing", tags=["marketing"])
@@ -56,7 +65,6 @@ api_router.include_router(ops.router, prefix="/ops", tags=["ops"])
 api_router.include_router(academics.router, prefix="/academics", tags=["academics"])
 api_router.include_router(planner.router, prefix="/planner", tags=["planner"])
 api_router.include_router(timetable.router, prefix="/timetable", tags=["timetable"])
-api_router.include_router(wizard.router, prefix="/wizard", tags=["wizard"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
 # V1-3 — the class teacher's area (D-03)
 api_router.include_router(my_class.router, prefix="/my-class", tags=["my-class"])

@@ -8,8 +8,9 @@ stated roadmap). Three rules keep it safe:
   service method with the real `CurrentMember`, so org scoping (law 1),
   teacher scoping (`not_your_student`, `not_your_class`) and the fee fence
   (admin-only) hold exactly as they do in the REST API.
-- **Role filtering happens at schema time.** A teacher's model never even sees
-  the admin-only tools — cheaper than erroring, and nothing to jailbreak.
+- **Filtering happens at schema time, never by erroring.** A teacher's model
+  never even sees the admin-only tools; an out-of-scope tool is *absent*, not
+  refused. Cheaper than erroring, and there is nothing to jailbreak.
 - **Business errors go back to the model, not up the stack.** An `AppError`
   becomes a tool-result payload the model can read and correct course on; only
   genuine bugs propagate.
@@ -23,6 +24,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -33,8 +35,13 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.context import CurrentMember
 from app.core.exceptions import AppError
+from app.services.lucy.domains import DOMAIN_NAMES, resolve_scope
 
 logger = logging.getLogger(__name__)
+
+# The two transports over this one pool (`D-93`): Lucy's chat, and the MCP
+# server. A tool is written for neither in particular.
+TRANSPORTS: tuple[str, ...] = ("lucy", "mcp")
 
 # Rows the MODEL sees per list — the full data always reaches the widget layer.
 DEFAULT_ROW_CAP = 50
@@ -48,6 +55,12 @@ class ToolSpec:
     description: str
     params_schema: dict[str, Any]  # pure JSON Schema (object)
     handler: Callable[..., Any]  # (m, db, **params) -> Pydantic model | list | dict
+    domain: str = ""  # one of domains.DOMAIN_NAMES — `tool()` requires it
+    # Which transports may expose this tool (`D-102`). One pool, two transports
+    # (`D-93`) — but the approved MCP list struck three tools that are shipped,
+    # working Lucy features. This is how a tool is Lucy's and not the
+    # connector's without deleting it from the product.
+    transports: tuple[str, ...] = TRANSPORTS
     role: str = "academic"  # "academic" (any member) | "admin"
     kind: str = "read"  # "read" | "write"
     confirm: bool = False  # write tools: propose-then-confirm
@@ -82,11 +95,27 @@ REGISTRY: dict[str, ToolSpec] = {}
 
 
 def tool(name: str, description: str, params: dict[str, Any] | None = None, *,
-         role: str = "academic", kind: str = "read", confirm: bool = False,
-         row_cap: int = DEFAULT_ROW_CAP, widgets: tuple[str, ...] = ("table",),
+         domain: str, transports: tuple[str, ...] = TRANSPORTS,
+         role: str = "academic", kind: str = "read",
+         confirm: bool = False, row_cap: int = DEFAULT_ROW_CAP,
+         widgets: tuple[str, ...] = ("table",),
          default_widget: str | None = None) -> Callable:
     """Register a handler as an agent tool. `params` maps arg name → property
-    schema; mark required ones with `"required": True` inside the property."""
+    schema; mark required ones with `"required": True` inside the property.
+
+    `domain` is required rather than defaulted: a tool with no toolset would be
+    unreachable through any scoped credential, and a default would hide that
+    at registration time instead of failing here.
+    """
+    if domain not in DOMAIN_NAMES:
+        raise ValueError(
+            f"tool {name!r}: unknown domain {domain!r} — "
+            f"expected one of {', '.join(sorted(DOMAIN_NAMES))}")
+    unknown_transports = set(transports) - set(TRANSPORTS)
+    if unknown_transports or not transports:
+        raise ValueError(
+            f"tool {name!r}: transports must be a non-empty subset of "
+            f"{TRANSPORTS}, got {transports!r}")
 
     props: dict[str, Any] = {}
     required: list[str] = []
@@ -102,20 +131,75 @@ def tool(name: str, description: str, params: dict[str, Any] | None = None, *,
     def deco(fn: Callable) -> Callable:
         REGISTRY[name] = ToolSpec(
             name=name, description=description, params_schema=schema, handler=fn,
-            role=role, kind=kind, confirm=confirm, row_cap=row_cap,
-            widgets=widgets, default_widget=default_widget or widgets[0])
+            domain=domain, transports=transports, role=role, kind=kind,
+            confirm=confirm, row_cap=row_cap, widgets=widgets,
+            default_widget=default_widget or widgets[0])
         return fn
 
     return deco
 
 
-def visible_tools(m: CurrentMember) -> list[ToolSpec]:
-    """The tools this member's model is allowed to see (stable order)."""
-    return [spec for _, spec in sorted(REGISTRY.items())
-            if spec.role != "admin" or m.is_admin]
+# ---------------------------------------------------------------------------
+# Package tiers — the seam, not the policy.
+#
+# FEATURE-MAP §9.6: when basic/gold/platinum arrive, a tool behind a tier the
+# school has not bought must be filtered out of the schema "like the role
+# filter, not by erroring". The filter belongs here; the *mapping* is a pricing
+# decision that has not been taken — `core/plans.py` is still the inherited
+# Free/Pro model and knows nothing about any school feature.
+#
+# Empty therefore means "no tier gates any domain yet", which is the truth.
+# Populating this dict is the whole of the tool-filtering half of that packet.
+TIER_DOMAINS: dict[str, frozenset[str]] = {}
 
 
-def to_openai_tools(m: CurrentMember) -> list[dict[str, Any]]:
+def domains_for_tier(tier: str | None) -> frozenset[str] | None:
+    """Which toolsets a plan tier includes. `None` = no gating (today, always)."""
+    if tier is None:
+        return None
+    return TIER_DOMAINS.get(tier)
+
+
+def visible_tools(m: CurrentMember, *, scope: set[str] | frozenset[str] | None = None,
+                  tier: str | None = None,
+                  transport: str | None = None) -> list[ToolSpec]:
+    """The tools this caller's model is allowed to see (stable order).
+
+    Four filters, applied in order — **role, transport, scope, tier** — and all
+    four make a tool *absent* rather than refusing it later:
+
+    - `role`      — what this member may do at all. A teacher never sees an
+                    admin tool, which is how the fee fence (rule 1) holds.
+    - `transport` — which product surface is asking. `D-102`: three shipped
+                    Lucy tools are struck from the approved MCP list, so they
+                    are Lucy's and not the connector's.
+    - `scope`     — the toolsets this credential was granted. Always a subset
+                    of what the member could do by hand: a connector can be
+                    narrower than its issuer, never wider.
+    - `tier`      — what the school's package includes. A seam today; see
+                    `TIER_DOMAINS`.
+
+    Every argument defaults to "no filter", which is what Lucy passes today.
+    """
+    allowed = resolve_scope(scope)
+    by_tier = domains_for_tier(tier)
+    out = []
+    for _, spec in sorted(REGISTRY.items()):
+        if spec.role == "admin" and not m.is_admin:
+            continue
+        if transport is not None and transport not in spec.transports:
+            continue
+        if allowed is not None and spec.domain not in allowed:
+            continue
+        if by_tier is not None and spec.domain not in by_tier:
+            continue
+        out.append(spec)
+    return out
+
+
+def to_openai_tools(m: CurrentMember, *, scope: set[str] | frozenset[str] | None = None,
+                    tier: str | None = None,
+                    transport: str | None = None) -> list[dict[str, Any]]:
     return [{
         "type": "function",
         "function": {
@@ -123,7 +207,30 @@ def to_openai_tools(m: CurrentMember) -> list[dict[str, Any]]:
             "description": spec.description,
             "parameters": spec.params_schema,
         },
-    } for spec in visible_tools(m)]
+    } for spec in visible_tools(m, scope=scope, tier=tier, transport=transport)]
+
+
+# ---------------------------------------------------------------------------
+# The active scope, so a discovery tool can describe the caller's own surface.
+
+@dataclass(frozen=True)
+class ToolScope:
+    """What the current caller's credential enables. The discovery tools
+    (`list_domains`, `list_tools`, `describe_tool`) have to answer for the
+    connector actually asking, not for everything the registry holds — so the
+    scope travels with the call rather than being re-derived from the member."""
+
+    domains: frozenset[str] | None = None  # None = unscoped
+    tier: str | None = None
+
+
+_NO_SCOPE = ToolScope()
+_CURRENT_SCOPE: ContextVar[ToolScope] = ContextVar("lucy_tool_scope",
+                                                   default=_NO_SCOPE)
+
+
+def current_scope() -> ToolScope:
+    return _CURRENT_SCOPE.get()
 
 
 # ---------------------------------------------------------------------------
@@ -213,13 +320,22 @@ def build_model_view(data: Any, cap: int) -> str:
 
 
 def execute(spec: ToolSpec, m: CurrentMember, db: Session,
-            raw_params: dict[str, Any]) -> ToolExecution:
+            raw_params: dict[str, Any], *,
+            scope: set[str] | frozenset[str] | None = None,
+            tier: str | None = None) -> ToolExecution:
     """Run a tool with the member's real authority. Business errors come back
-    as data (the model reads them and corrects course); bugs propagate."""
+    as data (the model reads them and corrects course); bugs propagate.
+
+    `scope`/`tier` are published for the duration of the call so the discovery
+    tools can describe this caller's surface. They are **not** a second access
+    check — a tool outside the scope is never dispatched here, because it was
+    never in the schema the model was given.
+    """
     try:
         params = parse_params(spec, raw_params)
     except ValueError as exc:
         return ToolExecution(ok=False, error_code="bad_params", error_message=str(exc))
+    token = _CURRENT_SCOPE.set(ToolScope(domains=resolve_scope(scope), tier=tier))
     try:
         out = spec.handler(m, db, **params)
     except AppError as exc:
@@ -236,6 +352,8 @@ def execute(spec: ToolSpec, m: CurrentMember, db: Session,
         logger.exception("lucy tool %s crashed", spec.name)
         return ToolExecution(ok=False, error_code="tool_failed",
                              error_message="The tool hit an internal error.")
+    finally:
+        _CURRENT_SCOPE.reset(token)
     data = to_jsonable(out)
     return ToolExecution(ok=True, result=ToolResult(
         data=data,

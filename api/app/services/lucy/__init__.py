@@ -6,6 +6,7 @@ MCP server can expose the exact same tools."""
 
 from app.services.lucy import (
     tools_insights,  # noqa: F401  (DASH3 board tools)
+    tools_meta,  # noqa: F401  (list_domains / list_tools / describe_tool)
     tools_read,  # noqa: F401  (registers read tools)
 )
 

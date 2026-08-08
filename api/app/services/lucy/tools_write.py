@@ -45,7 +45,8 @@ _SUMMARY = {"type": "string",
 
 @tool("list_task_boards",
       "The task boards this user can see (id + name). Needed before create_task.",
-      widgets=("table",))
+      widgets=("table",),
+      domain="tasks")
 def list_task_boards(m: CurrentMember, db: Session):
     data = BoardService(db).list_boards(m).model_dump(mode="json")
     return [{"id": b.get("id"), "name": b.get("name"), "mine": mine}
@@ -63,7 +64,8 @@ def list_task_boards(m: CurrentMember, db: Session):
               "due_date": _DATE,
               "priority": {"type": "integer", "description": "0 none … 3 high"},
               "summary": _SUMMARY},
-      kind="write", confirm=True)
+      kind="write", confirm=True,
+      domain="tasks")
 def create_task(m: CurrentMember, db: Session, board_id: uuid.UUID, title: str,
                 description: str | None = None, due_date: date | None = None,
                 priority: int = 0):
@@ -91,7 +93,8 @@ def create_task(m: CurrentMember, db: Session, board_id: uuid.UUID, title: str,
                       "late_minutes": {"type": "integer"}},
                       "required": ["student_id", "status"]}},
               "summary": _SUMMARY},
-      kind="write", confirm=True)
+      kind="write", confirm=True,
+      domain="attendance")
 def mark_attendance(m: CurrentMember, db: Session, class_id: uuid.UUID,
                     period_no: int, exceptions: list,
                     on_date: date | None = None):
@@ -110,7 +113,8 @@ def mark_attendance(m: CurrentMember, db: Session, class_id: uuid.UUID,
               "period_no": {"type": "integer"},
               "on_date": _DATE,
               "summary": _SUMMARY},
-      kind="write", confirm=True)
+      kind="write", confirm=True,
+      domain="capture")
 def log_lesson(m: CurrentMember, db: Session, class_subject_id: uuid.UUID,
                note: str | None = None, topic_id: uuid.UUID | None = None,
                coverage: str = "full", period_no: int | None = None,
@@ -129,7 +133,11 @@ def log_lesson(m: CurrentMember, db: Session, class_subject_id: uuid.UUID,
               "due_date": _DATE,
               "student_id": {**_UUID, "description": "one student only; omit for whole class"},
               "summary": _SUMMARY},
-      kind="write", confirm=True)
+      kind="write", confirm=True,
+      # Struck from the approved MCP list (#44): logging homework notifies
+      # guardians the instant it lands (P3) and there is no unsend. It stays a
+      # Lucy tool, where a confirm card sits in front of it — `D-102`.
+      domain="capture", transports=("lucy",))
 def assign_homework(m: CurrentMember, db: Session, class_subject_id: uuid.UUID,
                     text: str, due_date: date | None = None,
                     student_id: uuid.UUID | None = None):
@@ -145,7 +153,10 @@ def assign_homework(m: CurrentMember, db: Session, class_subject_id: uuid.UUID,
               "text": {"type": "string", "required": True},
               "topic_id": {**_UUID, "description": "anchor to one topic"},
               "summary": _SUMMARY},
-      kind="write", confirm=True)
+      kind="write", confirm=True,
+      # Struck from the approved MCP list (#63) — every planning write was.
+      # Stays Lucy's: it asks for a chapter to be resized, it does not move one.
+      domain="planning", transports=("lucy",))
 def add_plan_comment(m: CurrentMember, db: Session, class_subject_id: uuid.UUID,
                      text: str, topic_id: uuid.UUID | None = None):
     return PlannerService(db).add_comment(
@@ -165,7 +176,10 @@ def add_plan_comment(m: CurrentMember, db: Session, class_subject_id: uuid.UUID,
                       "note": {"type": "string"}},
                       "required": ["student_id", "status"]}},
               "summary": _SUMMARY},
-      kind="write", confirm=True)
+      kind="write", confirm=True,
+      # Struck from the approved MCP list (#47). Confirming a daily check is
+      # device-level capture — the teacher is standing there. Stays Lucy's.
+      domain="capture", transports=("lucy",))
 def confirm_check(m: CurrentMember, db: Session, check_id: uuid.UUID,
                   exceptions: list | None = None):
     return RecommendationsService(db).confirm(

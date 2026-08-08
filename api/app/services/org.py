@@ -63,6 +63,7 @@ class OrgService:
             attendance_mode=org.attendance_mode,
             min_attendance_pct=org.min_attendance_pct,
             homework_gap_days=org.homework_gap_days,
+            agent_access=org.agent_access,
             training_data_opt_in=org.training_data_opt_in,
             work_categories=[WorkCategoryOut(**c) for c in org_categories(org)],
             limits=PlanLimitsOut(
@@ -84,7 +85,7 @@ class OrgService:
         if req.report_card_hour is not None:
             org.report_card_hour = req.report_card_hour
         for field in ("address", "state", "board", "phone", "attendance_mode",
-                      "min_attendance_pct", "homework_gap_days",
+                      "min_attendance_pct", "homework_gap_days", "agent_access",
                       "training_data_opt_in"):
             value = getattr(req, field)
             if value is not None:

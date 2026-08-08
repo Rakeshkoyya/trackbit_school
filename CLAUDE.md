@@ -311,20 +311,39 @@ daily report generation · per-student homework · **Lucy** · the **parent port
 
 ## Current state and what is next
 
-Schema head is `a4b5c6d7e8f9`. **Verify with `uv run alembic current` rather than trusting this
-line** — it is a cache, and this file has cached a wrong revision before.
+Schema head is `d7e8f9a0b1c2` (oauth_clients + oauth_grants, 2026-08-08). **Verify with
+`uv run alembic current` rather than trusting this line** — it is a cache, and this file has
+cached a wrong revision before. As of 2026-08-08 `d7e8f9a0b1c2` is applied to **production
+and the local test DB**, verified by querying the tables rather than the version row.
+Its parent `c6d7e8f9a0b1` (api_tokens) is also applied to both.
+Prod was migrated the moment the running app hit `column organizations.agent_access does
+not exist`; the column is additive with a server default, so the four existing orgs took
+`agent_access='off'`. ⚠️ The local **dev** database has not been checked — run
+`alembic current` against it before assuming.
 
-Two things are queued and neither is built yet:
+Two things are queued. The first is **under way**; the second is not started:
 
-- **An MCP server.** `services/lucy/registry.py` is explicitly its seed: 42 tools (36 read, 6
-  write, every write confirm-gated), transport-agnostic by design. See
-  [`FEATURE-MAP.md` §8](docs/architecture/FEATURE-MAP.md) for the surface and the deliberate gap,
-  and [`MCP-SERVER-PLAN.md`](docs/architecture/MCP-SERVER-PLAN.md) for the agreed design:
-  **one shared tool pool serving both Lucy and MCP** (`D-93`/`D-94`), tools that call
-  services and never the DB (`D-95`), a read **and** write surface (`D-96`), PAT
-  credentials with in-app connection screens (`D-97`), and scoped toolsets to keep ~170
-  tools navigable (`D-98`). The keystone is the **change set** — propose many, approve
-  once — and no write ships before it.
+- **The agent tool platform (MCP + Lucy).** `services/lucy/registry.py` is the one shared
+  pool serving both (`D-93`/`D-94`). **Phase 1 shipped 2026-08-08:** every tool carries a
+  `domain` (one of 13 toolsets, `services/lucy/domains.py`); `visible_tools()` filters
+  **role → transport → scope → tier**, all at schema time and never by erroring;
+  `tools_meta.py` holds the three navigation tools; `manual.py` generates
+  `school://manual` from the registry. **45 tools live.**
+  **Phase 2's PAT half shipped the same day:** `api_tokens` +
+  `organizations.agent_access` (migration `c6d7e8f9a0b1`), `services/api_tokens.py`, a
+  second auth door (`get_agent_principal` — accepts only `tbk_*`, never a JWT), and
+  `/org/api-tokens` + `GET /agent/me` in `endpoints/agent.py`.
+  **Still missing: the MCP transport (`app/mcp/` does not exist) and OAuth 2.1 (`D-99`).**
+  - **What may be built is [`MCP-TOOL-LIST.md`](docs/architecture/MCP-TOOL-LIST.md)** —
+    163 approved, 32 struck. ⚠️ Build nothing not ticked there (`D-101`), and where it
+    disagrees with the plan doc, **the list wins**.
+  - The design is [`MCP-SERVER-PLAN.md`](docs/architecture/MCP-SERVER-PLAN.md); **read its
+    §0**, written for a cold start. **Next is Phase 2, credentials.**
+  - Two rules override convenience while building: tools call **services, never tables**
+    (`D-95`, asserted by `tests/test_tool_registry.py`), and **every write tool ships
+    with a negative authorization test** — an in-process service call does not run the
+    route's FastAPI guard, so `ToolSpec.role` is the only thing between a teacher and an
+    admin-only write. The keystone is the **change set** (Phase 5): no write ships first.
 - **Package tiers (basic/gold/platinum).** ⚠️ `core/plans.py` today is a **Free/Pro** model
   inherited from the task-management seed; its limits are boards, members, attachments and
   critical alarms, and it knows nothing about any school feature. `organizations.plan` carries a

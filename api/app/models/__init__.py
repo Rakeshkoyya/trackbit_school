@@ -9,6 +9,7 @@ from app.models.academics import (
     Term,
 )
 from app.models.analytics import AnalyticsEvent
+from app.models.api_token import ApiToken
 from app.models.assessments import (
     AssessmentCycle,
     AssessmentScore,
@@ -59,6 +60,7 @@ from app.models.lucy import (
 )
 from app.models.marketing import DemoRequest, DemoRequestNote
 from app.models.notification import DeviceToken, Notification
+from app.models.oauth import OAuthClient, OAuthGrant
 from app.models.observances import (
     DECISION_ACTIONS,
     OBSERVANCE_KINDS,
@@ -108,6 +110,7 @@ __all__ = [
     "AssessmentScore",
     "Attachment",
     "AttendanceException",
+    "ApiToken",
     "AuthToken",
     "BandAssessment",
     "BandAssessmentResult",
@@ -161,6 +164,8 @@ __all__ = [
     "OBSERVANCE_TIERS",
     "GuardianMessage",
     "Observance",
+    "OAuthClient",
+    "OAuthGrant",
     "OnboardingState",
     "Organization",
     "OtpCode",

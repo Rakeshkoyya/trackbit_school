@@ -1,12 +1,15 @@
 # The tool list — for approval
 
-**Status:** awaiting founder approval. Nothing on this list is built.
+**Status:** **approved** — 163 tools (151 on 2026-08-07, plus §8A's 12 on 2026-08-08).
 Companion to [`MCP-SERVER-PLAN.md`](MCP-SERVER-PLAN.md), which carries the architecture;
 this file carries **the list**. Written 2026-08-07.
 
-**How to use this.** Tick what goes in, strike what does not. Only ticked tools get
-built. §16 lists what I deliberately kept *off* the list, so the approval is informed
-rather than a rubber stamp — overrule anything there and it moves up.
+**Built so far:** the three navigation tools (#10–12) landed with Phase 1 on 2026-08-08,
+alongside the toolset/scope machinery this whole list depends on. The registry holds
+**45** tools. Everything else here is still to build.
+
+**How to use this now that it is approved:** it is the build checklist. A tool not ticked
+here does not get written (`D-101`); adding one is a decision, not a backlog item.
 
 ---
 
@@ -17,6 +20,10 @@ rather than a rubber stamp — overrule anything there and it moves up.
 | **D-99** | **Connector auth is OAuth** — URL + Client ID + Client Secret, because that is what claude.ai and most agent clients require. The API becomes an OAuth 2.1 authorization server; the connection screen issues the client credentials. A header PAT stays alongside for Claude Code / Cursor and for testing. Supersedes `MCP-SERVER-PLAN.md` §4. |
 | **D-100** | **Approval by exception, not by default.** Routine, correctable edits apply immediately. Only two narrow categories ask first (§2). Dangerous operations are not exposed at all, rather than gated. Supersedes `MCP-SERVER-PLAN.md` §3.3's "every write is `confirm=True`". |
 | **D-101** | **The list is fixed by approval.** Only tools ticked here are implemented. Adding one later is a decision, not a backlog item. |
+| **D-102** | **A strike removes a tool from MCP, not from the product.** `assign_homework`, `confirm_check` and `add_plan_comment` are shipped Lucy features that this list strikes. One pool (`D-93`) means the answer is a filter, not a deletion: `ToolSpec.transports` names which surfaces may expose a tool, and `visible_tools(..., transport="mcp")` drops the three. *Built in Phase 1, 2026-08-08.* |
+| **D-103** | **Agent access: `off` for a new school, `admins` once it is live, and a teacher may hold her own connector** scoped to her own authority — never exceeding it. Answers `Q1` and `Q2`; shapes the Phase 2 credential screen. |
+| **D-104** | **`§8A` is approved — all 12 tools — and `Q7` is answered `(b)`: band assessments get their own answer-sheet capture**, rather than routing through an exam cycle and `promote_exam_to_band_test`. This needs a migration (`band_assessment_pages`, or `ScoreCapture` with a nullable `cycle_id`), service work and a screen, so **it is its own packet** and does not ride along with the transport. |
+| **D-105** | **Build against production, deliberately.** The founder has reaffirmed that prod is pre-launch and holds no client data. ⚠️ Standing consequence: `doadmin` has `rolbypassrls = true`, so **no RLS behaviour can be verified there** — anything security-shaped must still be reasoned about on the local DB, and `TEST_DATABASE_URL` never moves. |
 
 ---
 
@@ -215,9 +222,12 @@ mis-parsed spreadsheet from rewriting a term.
 
 ---
 
-## 8A. `exams` — answer-sheet capture *(added 2026-08-07, awaiting approval)*
+## 8A. `exams` — answer-sheet capture *(approved 2026-08-08, `D-104`)*
 
-> Numbered 184+ so nothing above renumbers. **Tick these like the rest.**
+> Numbered 184+ so nothing above renumbers. **All 12 approved.** `Q7` answered
+> **(b)** — see the note under Q7 below: band assessments get capture of their own,
+> which makes #195 a convenience rather than the mechanism, and makes this section
+> **its own packet with a migration in it**, not part of the transport work.
 
 ### What the code actually does — read before ticking
 
@@ -250,36 +260,42 @@ the MCP channel.
 
 **Reads**
 
-- [ ] 184. **`list_exam_captures`** — captures for a cycle or class: status, page count, when. *NEW*
-- [ ] 185. **`get_exam_capture`** — one capture in full: pages with URLs, the parsed review grid, the roster it matches against, parse errors. *NEW*
-- [ ] 186. **`get_student_paper`** — 🔴 the child's **own marked script** for one exam (`S-119`). Already surfaced as `paper_url` on report cards via `ScoreCapturePage.student_id` — this is the tool that answers "show me her actual paper" in a parent meeting. *NEW*
-- [ ] 187. **`preview_band_promotion`** — what promoting a locked exam to a band test would move, per child, **before** it commits (`Q-81`). *NEW*
+- [x] 184. **`list_exam_captures`** — captures for a cycle or class: status, page count, when. *NEW*
+- [x] 185. **`get_exam_capture`** — one capture in full: pages with URLs, the parsed review grid, the roster it matches against, parse errors. *NEW*
+- [x] 186. **`get_student_paper`** — 🔴 the child's **own marked script** for one exam (`S-119`). Already surfaced as `paper_url` on report cards via `ScoreCapturePage.student_id` — this is the tool that answers "show me her actual paper" in a parent meeting. *NEW*
+- [x] 187. **`preview_band_promotion`** — what promoting a locked exam to a band test would move, per child, **before** it commits (`Q-81`). *NEW*
 
 **Writes**
 
-- [ ] 188. **`create_exam_capture`** — open a capture for cycle × class × subject, or a *draft* (papers first, the exam created from what the parse reads). `mode`: `scripts` | `marksheet`. **A** · *NEW*
-- [ ] 189. **`get_capture_upload_url`** — a presigned PUT for one page; the client uploads the photo or PDF directly to storage, never through the MCP channel. **A** · *NEW*
-- [ ] 190. **`attach_capture_page`** — register an uploaded page against the capture. Images and PDFs, 25 MB each. **A** · *NEW*
-- [ ] 191. **`parse_capture`** — transcribe the pages and match students, producing the review grid. Writes nothing to `assessment_scores`. **A** · *NEW*
-- [ ] 192. **`set_page_student`** — attach a page to the child whose paper it is. **A** · *NEW*
-- [ ] 193. **`confirm_capture`** — 🔴 **B**. Writes the reviewed rows as real scores through `AssessmentService.save_scores`. The mark is the record — same tier as #89. Per-paper `remark` rides on this call; there is no separate remark endpoint. *NEW*
-- [ ] 194. **`discard_capture`** — abandon a capture; the pages stay as evidence. **A** · *NEW*
-- [ ] 195. **`promote_exam_to_band_test`** — 🔴 **B**. Commits the preview: appends `StudentBand` rows. `student_bands` is append-only, so a mistaken re-band is permanent in a child's record, and a child slipping B → C is the most consequential thing the bands module does. *NEW*
+- [x] 188. **`create_exam_capture`** — open a capture for cycle × class × subject, or a *draft* (papers first, the exam created from what the parse reads). `mode`: `scripts` | `marksheet`. **A** · *NEW*
+- [x] 189. **`get_capture_upload_url`** — a presigned PUT for one page; the client uploads the photo or PDF directly to storage, never through the MCP channel. **A** · *NEW*
+- [x] 190. **`attach_capture_page`** — register an uploaded page against the capture. Images and PDFs, 25 MB each. **A** · *NEW*
+- [x] 191. **`parse_capture`** — transcribe the pages and match students, producing the review grid. Writes nothing to `assessment_scores`. **A** · *NEW*
+- [x] 192. **`set_page_student`** — attach a page to the child whose paper it is. **A** · *NEW*
+- [x] 193. **`confirm_capture`** — 🔴 **B**. Writes the reviewed rows as real scores through `AssessmentService.save_scores`. The mark is the record — same tier as #89. Per-paper `remark` rides on this call; there is no separate remark endpoint. *NEW*
+- [x] 194. **`discard_capture`** — abandon a capture; the pages stay as evidence. **A** · *NEW*
+- [x] 195. **`promote_exam_to_band_test`** — 🔴 **B**. Commits the preview: appends `StudentBand` rows. `student_bands` is append-only, so a mistaken re-band is permanent in a child's record, and a child slipping B → C is the most consequential thing the bands module does. *NEW*
 
-### Q7 — the one decision this needs
+### Q7 — answered 2026-08-08: **(b)** (`D-104`)
 
-Band assessments have no answer-sheet capture at all. Two ways to give you what you
-asked for:
+Band assessments have no answer-sheet capture at all. The founder chose **(b): add
+capture to `BandAssessment` itself** — a migration (`band_assessment_pages`, or reusing
+`ScoreCapture` with a nullable `cycle_id`), service work, and a screen.
 
-- **(a) Use the bridge that exists.** Capture the paper on a real exam cycle (#188–#193),
-  then `promote_exam_to_band_test` (#195). No migration, no new tables, and the band
-  tier is derived from a mark that has a photographed script behind it. **Recommended.**
-- **(b) Add capture to `BandAssessment` itself** — a migration (`band_assessment_pages`,
-  or reusing `ScoreCapture` with a nullable `cycle_id`), service work, and a screen. Only
-  worth it if C-band teachers assess in ways that never become an exam cycle — which is
-  exactly what `rating` and `other` assessments are.
+The reasoning that supports it: `core/band_assessment.py` keeps `marks` | `rating` |
+`other` as three kinds of statement that never pool, and a `rating` or `other` assessment
+**never becomes an exam cycle** — so under (a) those two kinds could never carry evidence
+at all. (b) is the only option that covers all three.
 
-**Pick (a) or (b).** (a) ships with this list; (b) is its own packet.
+**Consequences, which are real:**
+
+- This is **its own packet**, with a migration in it. It does **not** ride along with the
+  transport work, and nothing in Phases 1–5 waits for it.
+- `promote_exam_to_band_test` (#195) stays on the list, but it becomes a *convenience*
+  for the case where a band tier really did come from a class test — no longer the only
+  route to evidence.
+- The rejected option (a) is recorded here on purpose: if the packet turns out larger
+  than it looks, (a) is the fallback that ships something, for `marks` assessments only.
 
 ---
 
@@ -485,13 +501,18 @@ Machine-verified against this file's numbered items on 2026-08-07 — not estima
 
 | | Reads | Writes **A** | Writes **B** | Total |
 |---|---:|---:|---:|---:|
-| **✅ Approved** | 106 | 35 | 10 | **151** |
-| ⬜ Pending — §8A exam capture | 4 | 6 | 2 | **12** |
+| **✅ Approved** | 110 | 41 | 12 | **163** |
 | ❌ Struck | 3 | 20 | 9 | **32** |
 | | | | | **195** |
 
-Of the 151 approved, **42 exist today** (verified by importing `REGISTRY`), so **109 to
-build** — plus 12 more if §8A is approved.
+§8A's 12 moved from pending to approved on 2026-08-08 (`D-104`).
+
+Of the 163 approved, **45 exist today** (verified by importing `REGISTRY`) — the 42 that
+predate this work, plus the three navigation tools built in Phase 1. So **118 to build**.
+
+⚠️ Three of those 45 (`assign_homework`, `confirm_check`, `add_plan_comment`) are
+**struck** here and live only on Lucy's transport (`D-102`). They count towards the
+registry, not towards the MCP surface: an MCP client sees **42** of the 45 today.
 
 **What the strikes did.** All of `planning`'s writes, all of `events`, all of `fees`'
 writes, `create_main_exam`, `regenerate_daily_report`, and six `capture` writes
@@ -516,10 +537,15 @@ the append-only decisions and the school-wide ones.
 
 ## 18. Next step
 
-1. You tick, strike, or overrule — including anything in §16.
-2. The ticked list becomes `D-102`, and this file becomes the build checklist.
-3. Then: `MCP-SERVER-PLAN.md` §10 Phase 0 (fix `get_topic_progress`), Phase 1 (domains and
-   scope on the registry), Phase 2 (OAuth + PAT), Phase 3 (transport), Phase 4 (screens),
-   then the tools, domain by domain.
+Approved, so this file is now the build checklist.
 
-**Nothing gets built until this list is approved** (`D-101`).
+1. ~~Phase 1 — domains and scope on the registry~~ ✅ **done 2026-08-08**, which also
+   shipped #10–12.
+2. **Phase 2 — credentials.** OAuth 2.1 (`D-99`) + the header PAT, and the `agent_access`
+   org setting per `D-103`.
+3. Phase 3 transport → Phase 4 screens → **Phase 5 the change-set engine, which no write
+   tool ships before** → then the tools, domain by domain.
+
+Two things run on their own track and block nothing here: **`§8A` band capture**
+(`D-104`, has a migration) and **the `topic_progress` fix** (Phase 0.1, cross-stack —
+until it lands, tool #52 answers "is 7A on track?" wrongly).

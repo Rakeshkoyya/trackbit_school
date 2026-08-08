@@ -43,7 +43,8 @@ _DATE = {"type": "string", "format": "date",
       "Academic years (with terms), classes and subjects of the school, with their ids. "
       "Call this FIRST whenever you need a class_id, subject_id, year_id or term_id — "
       "never guess ids.",
-      widgets=("table", "markdown"))
+      widgets=("table", "markdown"),
+      domain="core")
 def get_school_structure(m: CurrentMember, db: Session):
     svc = AcademicService(db)
     years = [y.model_dump(mode="json") for y in svc.list_years(m)]
@@ -66,7 +67,8 @@ def get_school_structure(m: CurrentMember, db: Session):
 @tool("get_class_subjects",
       "The subject allocations of one class: class_subject_id, subject and teacher for "
       "each subject taught in that class. Needed before topic-progress or plan lookups.",
-      params={"class_id": {**_UUID, "required": True}})
+      params={"class_id": {**_UUID, "required": True}},
+      domain="core")
 def get_class_subjects(m: CurrentMember, db: Session, class_id: uuid.UUID):
     return AcademicService(db).list_class_subjects(m, class_id)
 
@@ -77,7 +79,8 @@ def get_class_subjects(m: CurrentMember, db: Session, class_id: uuid.UUID):
       "named before calling a per-student tool.",
       params={"query": {"type": "string", "description": "part of a name or admission no"},
               "class_id": _UUID},
-      widgets=("table",))
+      widgets=("table",),
+      domain="core")
 def search_students(m: CurrentMember, db: Session,
                     query: str | None = None, class_id: uuid.UUID | None = None):
     return StudentService(db).list_students(m, class_id=class_id, query=query)
@@ -86,7 +89,8 @@ def search_students(m: CurrentMember, db: Session,
 @tool("get_student",
       "One student's profile: personal details, class, category, status and guardians.",
       params={"student_id": {**_UUID, "required": True}},
-      widgets=("student_card", "table"))
+      widgets=("student_card", "table"),
+      domain="core")
 def get_student(m: CurrentMember, db: Session, student_id: uuid.UUID):
     return StudentService(db).get_student(m, student_id)
 
@@ -98,14 +102,16 @@ def get_student(m: CurrentMember, db: Session, student_id: uuid.UUID):
       "missing teachers or syllabus, timetable coverage, plan approval and worst "
       "syllabus forecast. The go-to for 'how is the school doing'.",
       params={"year_id": _UUID}, role="admin",
-      widgets=("table", "stat_group"))
+      widgets=("table", "stat_group"),
+      domain="insights")
 def get_school_overview(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None):
     return OverviewService(db).school_overview(m, year_id)
 
 
 @tool("get_teacher_load",
       "Every teacher's weekly load: periods per week, classes and subjects taught.",
-      role="admin", widgets=("table", "bar_chart"))
+      role="admin", widgets=("table", "bar_chart"),
+      domain="insights")
 def get_teacher_load(m: CurrentMember, db: Session):
     return OverviewService(db).teacher_load(m)
 
@@ -116,7 +122,8 @@ def get_teacher_load(m: CurrentMember, db: Session):
       "problems). Best single source for 'what needs attention right now'.",
       params={"year_id": _UUID}, role="admin",
       widgets=("alert_list", "stat_group", "rag_board", "area_chart", "meter"),
-      default_widget="alert_list")
+      default_widget="alert_list",
+      domain="insights")
 def get_dashboard(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None):
     return DashboardService(db).overview(m, year_id)
 
@@ -126,7 +133,8 @@ def get_dashboard(m: CurrentMember, db: Session, year_id: uuid.UUID | None = Non
       "highlighted risks, ambiguities and wins. This is the day already written up — "
       "prefer it for 'summarize today/yesterday'.",
       params={"on_date": _DATE}, role="admin",
-      widgets=("report_card",), default_widget="report_card")
+      widgets=("report_card",), default_widget="report_card",
+      domain="insights")
 def get_daily_report(m: CurrentMember, db: Session, on_date: date | None = None):
     return DailyReportService(db).get_or_create(m, on_date)
 
@@ -135,7 +143,8 @@ def get_daily_report(m: CurrentMember, db: Session, on_date: date | None = None)
       "Which class-subjects have a lesson log today (per teacher). Use for 'who has "
       "not logged yet'.",
       params={"on_date": _DATE}, role="admin",
-      widgets=("table", "progress"))
+      widgets=("table", "progress"),
+      domain="capture")
 def get_compliance(m: CurrentMember, db: Session, on_date: date | None = None):
     return ClassroomService(db).compliance(m, on_date)
 
@@ -158,7 +167,8 @@ def get_compliance(m: CurrentMember, db: Session, on_date: date | None = None):
                                          "omit for the current one"}},
       role="admin",
       widgets=("stat_group", "table", "bar_chart", "meter"),
-      default_widget="stat_group")
+      default_widget="stat_group",
+      domain="fees")
 def get_fee_collection(m: CurrentMember, db: Session, year_id: uuid.UUID | None = None,
                        quarter: str | None = None):
     # V1-12: this is the SAME computation `/fees` renders (`S-152`). It used to
@@ -180,7 +190,8 @@ def get_fee_collection(m: CurrentMember, db: Session, year_id: uuid.UUID | None 
       params={"class_id": {**_UUID, "required": True},
               "period_no": {"type": "integer", "required": True},
               "on_date": _DATE},
-      widgets=("roster_grid", "stat_group", "table"), default_widget="roster_grid")
+      widgets=("roster_grid", "stat_group", "table"), default_widget="roster_grid",
+      domain="attendance")
 def get_attendance_roster(m: CurrentMember, db: Session, class_id: uuid.UUID,
                           period_no: int, on_date: date | None = None):
     return AttendanceService(db).roster(m, class_id, period_no, on_date)
@@ -191,7 +202,8 @@ def get_attendance_roster(m: CurrentMember, db: Session, class_id: uuid.UUID,
       "taken and the present/absent/late counts. Good for 'class 6 attendance today' "
       "before drilling into one period.",
       params={"class_id": {**_UUID, "required": True}, "on_date": _DATE},
-      widgets=("table", "stat_group"))
+      widgets=("table", "stat_group"),
+      domain="attendance")
 def get_attendance_day(m: CurrentMember, db: Session, class_id: uuid.UUID,
                        on_date: date | None = None):
     states = AttendanceService(db).period_states(m.org_id, [class_id],
@@ -209,7 +221,8 @@ def get_attendance_day(m: CurrentMember, db: Session, class_id: uuid.UUID,
       "can read only students they teach. THE tool for 'how is <student> doing'.",
       params={"student_id": {**_UUID, "required": True}},
       widgets=("stat_group", "drilldown", "table", "line_chart"),
-      default_widget="stat_group")
+      default_widget="stat_group",
+      domain="students")
 def get_student_growth(m: CurrentMember, db: Session, student_id: uuid.UUID):
     return GrowthService(db).growth(m, student_id)
 
@@ -218,7 +231,8 @@ def get_student_growth(m: CurrentMember, db: Session, student_id: uuid.UUID):
       "What one student did on a date, period by period: subject, presence, topic "
       "logged, homework, checks and hostel sessions. Absent periods appear as gaps.",
       params={"student_id": {**_UUID, "required": True}, "on_date": _DATE},
-      widgets=("timeline", "table"), default_widget="timeline")
+      widgets=("timeline", "table"), default_widget="timeline",
+      domain="students")
 def get_student_timeline(m: CurrentMember, db: Session, student_id: uuid.UUID,
                          on_date: date | None = None):
     return StudentTimelineService(db).timeline(m, student_id, on_date)
@@ -230,7 +244,8 @@ def get_student_timeline(m: CurrentMember, db: Session, student_id: uuid.UUID,
       "Per-subject average-% trend across assessment cycles for one class, with weak "
       "subjects flagged. Renders naturally as a line chart.",
       params={"class_id": {**_UUID, "required": True}},
-      widgets=("line_chart", "table"), default_widget="line_chart")
+      widgets=("line_chart", "table"), default_widget="line_chart",
+      domain="exams")
 def get_assessment_trends(m: CurrentMember, db: Session, class_id: uuid.UUID):
     return AssessmentService(db).trends(m, class_id)
 
@@ -238,7 +253,8 @@ def get_assessment_trends(m: CurrentMember, db: Session, class_id: uuid.UUID):
 @tool("get_weak_subjects",
       "Org-wide list of subjects trending weak (declining or low averages) across "
       "classes.",
-      widgets=("table", "alert_list"))
+      widgets=("table", "alert_list"),
+      domain="exams")
 def get_weak_subjects(m: CurrentMember, db: Session):
     return AssessmentService(db).weak_subjects(m)
 
@@ -252,7 +268,8 @@ def get_weak_subjects(m: CurrentMember, db: Session):
       params={"class_id": {**_UUID, "required": True},
               "subject_id": {**_UUID, "required": True},
               "term_id": _UUID},
-      widgets=("table", "donut"))
+      widgets=("table", "donut"),
+      domain="bands")
 def get_band_board(m: CurrentMember, db: Session, class_id: uuid.UUID,
                    subject_id: uuid.UUID, term_id: uuid.UUID | None = None):
     # V1-9 (`D-75`): `subject_id` is required, not optional. A board without a
@@ -264,7 +281,8 @@ def get_band_board(m: CurrentMember, db: Session, class_id: uuid.UUID,
       "One student's band tier changes over time, per subject (append-only "
       "history). Staff-only.",
       params={"student_id": {**_UUID, "required": True}},
-      widgets=("table", "timeline"))
+      widgets=("table", "timeline"),
+      domain="bands")
 def get_band_history(m: CurrentMember, db: Session, student_id: uuid.UUID):
     return AssessmentService(db).band_history(m, student_id)
 
@@ -273,7 +291,8 @@ def get_band_history(m: CurrentMember, db: Session, student_id: uuid.UUID):
       "One student's per-skill scores across assessment cycles (e.g. Reading, "
       "Problem solving).",
       params={"student_id": {**_UUID, "required": True}},
-      widgets=("radar", "bar_chart", "table"), default_widget="radar")
+      widgets=("radar", "bar_chart", "table"), default_widget="radar",
+      domain="exams")
 def get_skill_profile(m: CurrentMember, db: Session, student_id: uuid.UUID):
     return AssessmentService(db).skill_profile(m, student_id)
 
@@ -282,7 +301,8 @@ def get_skill_profile(m: CurrentMember, db: Session, student_id: uuid.UUID):
       "Per-cycle average % by subject for one class — the class's academic heatmap "
       "across tests.",
       params={"class_id": {**_UUID, "required": True}},
-      widgets=("table", "bar_chart"))
+      widgets=("table", "bar_chart"),
+      domain="exams")
 def get_class_analysis(m: CurrentMember, db: Session, class_id: uuid.UUID):
     return AssessmentService(db).class_analysis(m, class_id)
 
@@ -293,7 +313,8 @@ def get_class_analysis(m: CurrentMember, db: Session, class_id: uuid.UUID):
       "their taught classes. Optionally filter to one class.",
       params={"class_id": _UUID,
               "limit": {"type": "integer", "description": "max rows, default 30"}},
-      widgets=("table",))
+      widgets=("table",),
+      domain="exams")
 def get_exam_feed(m: CurrentMember, db: Session,
                   class_id: uuid.UUID | None = None, limit: int = 30):
     return ExamService(db).feed(m, class_id, limit)
@@ -303,7 +324,8 @@ def get_exam_feed(m: CurrentMember, db: Session,
       "One exam's full result sheet: every student's score and %, plus exam meta.",
       params={"cycle_id": {**_UUID, "required": True,
                            "description": "the exam id from get_exam_feed"}},
-      widgets=("table", "stat_group", "bar_chart"))
+      widgets=("table", "stat_group", "bar_chart"),
+      domain="exams")
 def get_exam_detail(m: CurrentMember, db: Session, cycle_id: uuid.UUID):
     return ExamService(db).detail(m, cycle_id)
 
@@ -314,7 +336,8 @@ def get_exam_detail(m: CurrentMember, db: Session, cycle_id: uuid.UUID):
       "Syllabus RAG forecast for every subject of a class: green/amber/red status, "
       "baseline vs projected finish, weeks behind. 'Is class 7 on track?' lives here.",
       params={"class_id": {**_UUID, "required": True}},
-      widgets=("rag_board", "table"), default_widget="rag_board")
+      widgets=("rag_board", "table"), default_widget="rag_board",
+      domain="planning")
 def get_plan_forecast(m: CurrentMember, db: Session, class_id: uuid.UUID):
     return PlannerService(db).forecast(m, class_id)
 
@@ -323,7 +346,8 @@ def get_plan_forecast(m: CurrentMember, db: Session, class_id: uuid.UUID):
       "Whether each subject's plan finishes its exam portions before each exam of "
       "the class (exam-readiness view).",
       params={"class_id": {**_UUID, "required": True}},
-      widgets=("rag_board", "table"))
+      widgets=("rag_board", "table"),
+      domain="planning")
 def get_exam_fit(m: CurrentMember, db: Session, class_id: uuid.UUID):
     return PlannerService(db).exam_fit(m, class_id)
 
@@ -332,7 +356,8 @@ def get_exam_fit(m: CurrentMember, db: Session, class_id: uuid.UUID):
       "Chapter/topic-level progress for ONE class-subject: each topic's planned "
       "week vs taught date. Needs a class_subject_id from get_class_subjects.",
       params={"class_subject_id": {**_UUID, "required": True}},
-      widgets=("progress", "table"), default_widget="progress")
+      widgets=("progress", "table"), default_widget="progress",
+      domain="planning")
 def get_topic_progress(m: CurrentMember, db: Session, class_subject_id: uuid.UUID):
     return PlannerService(db).topic_progress(m, class_subject_id)
 
@@ -343,7 +368,8 @@ def get_topic_progress(m: CurrentMember, db: Session, class_subject_id: uuid.UUI
       "The calling teacher's own day: their periods with attendance/log state, plus "
       "pending homework checks. For teachers asking 'what's left today'.",
       params={"on_date": _DATE},
-      widgets=("timeline", "table"), default_widget="timeline")
+      widgets=("timeline", "table"), default_widget="timeline",
+      domain="capture")
 def get_my_day(m: CurrentMember, db: Session, on_date: date | None = None):
     return ClassroomService(db).my_day(m, on_date)
 
@@ -352,6 +378,7 @@ def get_my_day(m: CurrentMember, db: Session, on_date: date | None = None):
       "Hostel/activity session records for a date: attendance counts, homework-done "
       "counts and media evidence per session meeting.",
       params={"on_date": _DATE},
-      widgets=("table", "stat_group"))
+      widgets=("table", "stat_group"),
+      domain="sessions")
 def get_session_records(m: CurrentMember, db: Session, on_date: date | None = None):
     return SessionService(db).records(m, on_date)

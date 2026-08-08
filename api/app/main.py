@@ -49,6 +49,18 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
+    # --- The agent surface, mounted at the ROOT, not under /api/v1 -------
+    # RFC 9728/8414 require the metadata at `/.well-known/...` on the origin,
+    # and the issuer those documents advertise is the bare origin — so the
+    # OAuth and MCP endpoints have to live beside /health rather than under the
+    # versioned prefix. Claude reads that metadata to find them (`D-99`).
+    from app.api.v1.endpoints.oauth import root_router as oauth_root_router
+    from app.mcp import mcp_router, well_known_router
+
+    app.include_router(well_known_router, tags=["mcp"])
+    app.include_router(oauth_root_router, tags=["mcp"])
+    app.include_router(mcp_router, tags=["mcp"])
+
     # Local-disk attachment serving (dev/stub mode). In production, R2 serves
     # objects directly and this mount is skipped.
     if not settings.storage_configured:
