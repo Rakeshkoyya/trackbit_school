@@ -1105,6 +1105,33 @@
   position: absolute;
 }
 
+/* The calculator's tier toggle — which plan are we costing? */
+.mk-calc-plans {
+  display: flex;
+  gap: 8px;
+  margin: 20px 0 4px;
+}
+
+.mk-calc-plans button {
+  background: transparent;
+  border: 1px solid var(--mk-rule-2);
+  border-radius: 999px;
+  color: var(--mk-chalk-2);
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 6px 14px;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.mk-calc-plans button:hover {
+  color: var(--mk-chalk);
+}
+
+.mk-calc-plans button.is-on {
+  border-color: var(--mk-live);
+  color: var(--mk-live);
+}
+
 /* Calculator */
 .mk-calc {
   padding: 34px 30px 36px;

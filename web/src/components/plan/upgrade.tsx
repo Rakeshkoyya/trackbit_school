@@ -32,6 +32,7 @@ import { ApiError } from "@/lib/api-client";
 import { appApi } from "@/lib/app-api";
 import { formatPaise, tierLabelFor } from "@/lib/features";
 import { useFeature } from "@/lib/use-feature";
+import { cn } from "@/lib/utils";
 import type { OrgPlan, TierQuote } from "@/lib/types";
 
 /** What each locked surface is called, in the school's language rather than
@@ -285,19 +286,26 @@ export function UpgradeGate({
   const allowed = useFeature(feature);
   const [open, setOpen] = useState(false);
   if (allowed) return <>{children}</>;
+  const label = `${tierLabelFor(feature)} unlocks this`;
   return (
     <>
-      <span className={className}>
+      {/* The real control renders inert underneath and the intercepting button
+          is a SIBLING laid over it, not a parent: what we wrap is usually
+          itself a <button>, and a button inside a button is invalid HTML that
+          React will warn about and screen readers cannot make sense of.
+          Overlaying also keeps the control's exact size and place in the row. */}
+      <span className={cn("relative inline-flex", className)}>
+        <span className="pointer-events-none opacity-60" aria-hidden>
+          {children}
+        </span>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          title={`${tierLabelFor(feature)} unlocks this`}
-          className="relative inline-flex cursor-pointer items-center opacity-60 hover:opacity-90"
+          title={label}
+          aria-label={label}
+          className="absolute inset-0 z-10 flex cursor-pointer items-center justify-end rounded-md pr-1 hover:bg-muted/30"
         >
-          {/* The real control renders inert underneath, so the button keeps its
-              exact size and place in the layout. */}
-          <span className="pointer-events-none">{children}</span>
-          <Lock className="ml-1.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Lock className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
       </span>
       <UpgradeDialog feature={feature} open={open} onOpenChange={setOpen} />
