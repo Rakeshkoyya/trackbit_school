@@ -32,6 +32,10 @@ export interface Org {
   name: string;
   timezone: string;
   plan: PlanTier;
+  /** Every feature this school's package includes, computed server-side from
+   *  `core/features.py`. Read it through `useFeature()` — never branch on
+   *  `plan` in a component, or the tier map ends up living in two places. */
+  features: string[];
   /** Set once TrackBit has handed the school over. From then on the school's
    *  structure — year, terms, classes, subjects, who teaches what, syllabus,
    *  timetable — is changed by us, not by the school (SETUP-REDESIGN-PLAN §6).
@@ -382,6 +386,91 @@ export interface OrgSettings {
    *  tier map — one computation, many renderings. */
   features: string[];
   usage: OrgUsage;
+}
+
+// ---- Package tiers (D-106) ----
+/** One tier, priced for THIS school. `monthly_paise` is `unit × students`,
+ *  computed server-side — the wall renders the working, never a bare total. */
+export interface TierQuote {
+  plan: PlanTier;
+  label: string;
+  unit_paise_per_student: number;
+  students: number;
+  monthly_paise: number;
+  features: string[];
+  is_current: boolean;
+  is_upgrade: boolean;
+}
+
+export interface PlanQuote {
+  current_plan: PlanTier;
+  students: number;
+  currency: string;
+  tiers: TierQuote[];
+}
+
+export interface UpgradeRequest {
+  id: string;
+  org_id: string;
+  requested_plan: PlanTier;
+  feature_id: string | null;
+  message: string | null;
+  status: "new" | "contacted" | "won" | "lost";
+  created_at: string;
+  requested_by_name: string | null;
+  org_name?: string | null;
+  current_plan?: PlanTier | null;
+  students?: number | null;
+  monthly_paise?: number | null;
+}
+
+/** A tier's list price. Operator-editable without a deploy (`D-106`). */
+export interface PlanPrice {
+  plan: PlanTier;
+  amount_paise_per_student: number;
+  currency: string;
+  effective_from: string;
+}
+
+/** One plan assignment. Append-only — undo is a compensating row, never an
+ *  edit. The amounts are SNAPSHOTS: a later list-price change never moves what
+ *  this school was sold. */
+export interface PlanChange {
+  id: string;
+  from_plan: PlanTier | null;
+  to_plan: PlanTier;
+  reason: string | null;
+  student_count_at_change: number | null;
+  unit_amount_snapshot: number | null;
+  monthly_amount_snapshot: number | null;
+  effective_from: string;
+  expires_at: string | null;
+  created_at: string;
+  changed_by_name: string | null;
+}
+
+/** The operator's working note on a live negotiation. Platform-only — the
+ *  school this is about can never read it. */
+export interface UpgradeRequestNote {
+  id: string;
+  note: string | null;
+  status_from: string | null;
+  status_to: string | null;
+  created_at: string;
+  author_name: string | null;
+}
+
+export interface UpgradeRequestDetail {
+  request: UpgradeRequest;
+  notes: UpgradeRequestNote[];
+}
+
+export interface OrgPlan {
+  quote: PlanQuote;
+  open_request: UpgradeRequest | null;
+  /** False for a teacher (`D-110`) — the wall then says "contact your admin"
+   *  and offers no form, rather than a button that 403s. */
+  can_request: boolean;
 }
 
 export interface Invoice {

@@ -15,7 +15,9 @@ import type {
   MyTasks,
   NudgeResult,
   OrgDashboard,
+  OrgPlan,
   OrgSettings,
+  UpgradeRequest,
   RecurrenceRule,
   RecurringHistory,
   RecurringTemplate,
@@ -128,6 +130,15 @@ export const appApi = {
     form.append("file", file);
     return api.upload<Attachment>(`/tasks/${taskId}/photos`, form);
   },
+
+  // Package tiers (`D-106`). Ungated on the server: a school can always see
+  // what it is on and what the next tier would cost it.
+  plan: () => api.get<OrgPlan>("/org/plan"),
+  /** Ask to be moved up a tier. Admin only (`D-110`) — a teacher gets a 403
+   *  carrying `admin_only`, which the wall renders as "contact your admin".
+   *  Idempotent while a request is open: asking twice is the same ask. */
+  requestUpgrade: (body: { plan: string; feature_id?: string | null; message?: string | null }) =>
+    api.post<UpgradeRequest>("/org/plan/request", body),
 
   // Org settings + billing (S9)
   settings: () => api.get<OrgSettings>("/org/settings"),

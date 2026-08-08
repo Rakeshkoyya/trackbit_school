@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_academic, require_admin
+from app.core.dependencies import feature_gate, require_academic, require_admin
+from app.core.features import Feature
 from app.schemas.insights import (
     ActionIn,
     ActionOut,
@@ -49,6 +50,22 @@ from app.services.insights.syllabus import SyllabusInsights
 from app.services.insights.tasks import TaskInsights
 from app.services.insights.workload import WorkloadInsights
 from app.services.staff_record import StaffRecordService
+
+# Package tiers, per route (`D-106`). The admin board is the one screen that
+# spans every tier, so it cannot be gated at the router:
+#
+#   the DIAGNOSIS is free — the red row, the named child, the reason;
+#   the DISPATCH is paid — `D-111`'s action rail, which creates Tasks.
+#
+# Attendance, presence and syllabus stay free because their capture does
+# (`D-107`). Everything else follows the module it reports on, so a school never
+# sees a board for something it has not bought.
+_ACTIONS = [Depends(feature_gate(Feature.INSIGHTS_ACTIONS))]
+_STAFF = [Depends(feature_gate(Feature.STAFF_ROSTER))]
+_EXAMS = [Depends(feature_gate(Feature.EXAMS_BOARD))]
+_TASKS = [Depends(feature_gate(Feature.TASKS_BOARDS))]
+_HOMEWORK = [Depends(feature_gate(Feature.HOMEWORK_DESK))]
+_COMMS = [Depends(feature_gate(Feature.COMMS_GUARDIAN))]
 
 router = APIRouter()
 
@@ -111,7 +128,7 @@ def presence_month(year_id: uuid.UUID | None = None,
     return PresenceService(db).month(m, year_id, days)
 
 
-@router.get("/attendance/reach", response_model=ReachBoard)
+@router.get("/attendance/reach", response_model=ReachBoard, dependencies=_COMMS)
 def attendance_reach(on_date: date | None = None,
                      m: CurrentMember = Depends(require_admin),
                      db: Session = Depends(get_db)):
@@ -124,14 +141,15 @@ def attendance_reach(on_date: date | None = None,
 
 
 # ── M3 staff (presence · leave · live board · load) ──────────────────────────
-@router.get("/staff", response_model=StaffBoard)
+@router.get("/staff", response_model=StaffBoard, dependencies=_STAFF)
 def staff_board(week_start: date | None = None,
                 m: CurrentMember = Depends(require_admin),
                 db: Session = Depends(get_db)):
     return WorkloadInsights(db).staff_board(m, week_start)
 
 
-@router.get("/staff/{member_id}/impact", response_model=StaffImpact)
+@router.get("/staff/{member_id}/impact", response_model=StaffImpact,
+            dependencies=_STAFF)
 def staff_impact(member_id: uuid.UUID, on_date: date | None = None,
                  m: CurrentMember = Depends(require_admin),
                  db: Session = Depends(get_db)):
@@ -166,7 +184,7 @@ def syllabus_pulse(year_id: uuid.UUID | None = None,
 
 
 # ── M4 homework ──────────────────────────────────────────────────────────────
-@router.get("/homework", response_model=HomeworkBoard)
+@router.get("/homework", response_model=HomeworkBoard, dependencies=_HOMEWORK)
 def homework_board(window_days: int = Query(14, ge=1, le=400),
                    m: CurrentMember = Depends(require_admin),
                    db: Session = Depends(get_db)):
@@ -174,7 +192,7 @@ def homework_board(window_days: int = Query(14, ge=1, le=400),
 
 
 # ── M5 tasks + duties ────────────────────────────────────────────────────────
-@router.get("/tasks", response_model=TaskBoardOut)
+@router.get("/tasks", response_model=TaskBoardOut, dependencies=_TASKS)
 def tasks_board(window_days: int = Query(14, ge=1, le=60),
                 m: CurrentMember = Depends(require_admin),
                 db: Session = Depends(get_db)):
@@ -182,7 +200,7 @@ def tasks_board(window_days: int = Query(14, ge=1, le=60),
 
 
 # ── M6 exams ─────────────────────────────────────────────────────────────────
-@router.get("/exams", response_model=ExamsBoard)
+@router.get("/exams", response_model=ExamsBoard, dependencies=_EXAMS)
 def exams_board(year_id: uuid.UUID | None = None, type: str | None = None,
                 scale: str | None = None,
                 m: CurrentMember = Depends(require_admin),
@@ -194,13 +212,14 @@ def exams_board(year_id: uuid.UUID | None = None, type: str | None = None,
 
 
 # ── the action rail ──────────────────────────────────────────────────────────
-@router.post("/actions/{kind}", response_model=ActionOut)
+@router.post("/actions/{kind}", response_model=ActionOut, dependencies=_ACTIONS)
 def run_action(kind: str, body: ActionIn, m: CurrentMember = Depends(require_admin),
                db: Session = Depends(get_db)):
     return ActionService(db).run(m, kind, body)
 
 
-@router.get("/actions/history", response_model=list[FollowupRow])
+@router.get("/actions/history", response_model=list[FollowupRow],
+            dependencies=_ACTIONS)
 def action_history(subject_type: str | None = None, subject_id: uuid.UUID | None = None,
                    limit: int = Query(50, ge=1, le=200),
                    m: CurrentMember = Depends(require_admin),
@@ -208,7 +227,8 @@ def action_history(subject_type: str | None = None, subject_id: uuid.UUID | None
     return ActionService(db).history(m, subject_type, subject_id, limit)
 
 
-@router.post("/substitutions/{substitution_id}/cancel", response_model=SubstitutionOut)
+@router.post("/substitutions/{substitution_id}/cancel", response_model=SubstitutionOut,
+             dependencies=_STAFF)
 def cancel_substitution(substitution_id: uuid.UUID,
                         m: CurrentMember = Depends(require_admin),
                         db: Session = Depends(get_db)):
@@ -217,7 +237,8 @@ def cancel_substitution(substitution_id: uuid.UUID,
     return SubstitutionService(db).cancel(m, substitution_id)
 
 
-@router.get("/substitutions", response_model=list[SubstitutionOut])
+@router.get("/substitutions", response_model=list[SubstitutionOut],
+            dependencies=_STAFF)
 def list_substitutions(on_date: date | None = None,
                        m: CurrentMember = Depends(require_admin),
                        db: Session = Depends(get_db)):
@@ -228,7 +249,7 @@ def list_substitutions(on_date: date | None = None,
 
 
 # ── V1-16 the day-book ───────────────────────────────────────────────────────
-@router.get("/daybook", response_model=Daybook)
+@router.get("/daybook", response_model=Daybook, dependencies=_STAFF)
 def daybook(on: date | None = None, year_id: uuid.UUID | None = None,
             m: CurrentMember = Depends(require_admin),
             db: Session = Depends(get_db)):
@@ -240,7 +261,7 @@ def daybook(on: date | None = None, year_id: uuid.UUID | None = None,
     return DaybookService(db).board(m, on, year_id)
 
 
-@router.get("/daybook/glimpse", response_model=Daybook)
+@router.get("/daybook/glimpse", response_model=Daybook, dependencies=_STAFF)
 def daybook_glimpse(on: date | None = None,
                     limit: int = Query(10, ge=1, le=60),
                     m: CurrentMember = Depends(require_admin),
@@ -251,7 +272,7 @@ def daybook_glimpse(on: date | None = None,
 
 # Declared BEFORE the `{member_id}` route: FastAPI matches in declaration order,
 # and "me" is not a UUID — the other way round it would 422 rather than resolve.
-@router.get("/staff/me/record", response_model=StaffRecord)
+@router.get("/staff/me/record", response_model=StaffRecord, dependencies=_STAFF)
 def my_record(month: str | None = None, on: date | None = None,
               m: CurrentMember = Depends(require_academic),
               db: Session = Depends(get_db)):
@@ -265,7 +286,8 @@ def my_record(month: str | None = None, on: date | None = None,
     return StaffRecordService(db).record(m, m.membership.id, month, on)
 
 
-@router.get("/staff/{member_id}/record", response_model=StaffRecord)
+@router.get("/staff/{member_id}/record", response_model=StaffRecord,
+            dependencies=_STAFF)
 def staff_record(member_id: uuid.UUID, month: str | None = None,
                  on: date | None = None,
                  m: CurrentMember = Depends(require_academic),

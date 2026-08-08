@@ -30,14 +30,127 @@ from app.schemas.platform import (
     ReadinessOut,
 )
 from app.schemas.setup_pack import PackImportOut, PackReviewOut
+from app.schemas.tiers import (
+    AssignPlanIn,
+    PlanChangeOut,
+    PlanPriceOut,
+    SetPriceIn,
+    UpgradeRequestDetailOut,
+    UpgradeRequestNoteIn,
+    UpgradeRequestOut,
+)
 from app.services import observance_import
 from app.services.observance_import import ObservanceImportService
 from app.services.observances import ObservanceService
 from app.services.platform import PlatformService
 from app.services.readiness import ReadinessService
 from app.services.school_setup import SchoolSetupService
+from app.services.tiers import TierService
 
 router = APIRouter()
+
+
+# ── package tiers: the operator's half of the commercial loop (`D-106`) ──────
+# There is no payment gateway. The whole loop is: a school's admin hits a wall
+# and asks; the operator reads the queue, phones them, takes the money, and sets
+# the plan here by hand.
+@router.get("/plans/prices", response_model=list[PlanPriceOut])
+def list_prices(
+    _=Depends(require_super_admin), db: Session = Depends(get_db)
+) -> list[PlanPriceOut]:
+    """Today's list price per tier."""
+    return TierService(db).list_prices()
+
+
+@router.post("/plans/prices", response_model=PlanPriceOut)
+def set_price(
+    body: SetPriceIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> PlanPriceOut:
+    """Change a list price. Appends a row — never edits one.
+
+    `D-106`: "the plan number and costing might change regularly because we are
+    just launching", so this exists precisely so a price change needs no deploy.
+    Schools already on a plan keep the rate they were sold
+    (`plan_changes.unit_amount_snapshot`); only new quotes move.
+    """
+    return TierService(db).set_price(member.user.id, body)
+
+
+@router.get("/plans/expiring", response_model=list[PlatformOrgOut])
+def expiring_plans(
+    days: int = 30,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> list[PlatformOrgOut]:
+    """Schools whose hand-set plan lapses soon, soonest first.
+
+    A list the operator reads, deliberately not a job that downgrades at 3am:
+    a school arriving on Monday to a locked fee screen with no warning is the
+    failure this avoids.
+    """
+    orgs = TierService(db).expiring_soon(days)
+    by_id = {o.id: o for o in PlatformService(db).list_orgs()}
+    return [by_id[o.id] for o in orgs if o.id in by_id]
+
+
+@router.post("/orgs/{org_id}/plan", response_model=PlanChangeOut)
+def assign_plan(
+    org_id: uuid.UUID,
+    body: AssignPlanIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> PlanChangeOut:
+    """Move a school to a tier. Appends to its history (law 3) and snapshots the
+    amount, so a later price change never repricess this school."""
+    return TierService(db).assign_plan(member.user.id, org_id, body)
+
+
+@router.get("/orgs/{org_id}/plan/history", response_model=list[PlanChangeOut])
+def plan_history(
+    org_id: uuid.UUID,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> list[PlanChangeOut]:
+    """Every plan this school has been on, newest first — who moved it, when,
+    at what price, and why."""
+    return TierService(db).history(org_id)
+
+
+@router.get("/upgrades", response_model=list[UpgradeRequestOut])
+def list_upgrade_requests(
+    status: str | None = None,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> list[UpgradeRequestOut]:
+    """The queue, with the context needed to make the call: which school, which
+    plan, how many students, and what that comes to per month."""
+    return TierService(db).list_requests(status)
+
+
+@router.get("/upgrades/{request_id}", response_model=UpgradeRequestDetailOut)
+def upgrade_request_detail(
+    request_id: uuid.UUID,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UpgradeRequestDetailOut:
+    return TierService(db).request_detail(request_id)
+
+
+@router.post("/upgrades/{request_id}/notes", response_model=UpgradeRequestDetailOut)
+def add_upgrade_note(
+    request_id: uuid.UUID,
+    body: UpgradeRequestNoteIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UpgradeRequestDetailOut:
+    """Append a remark, a status move, or both (law 3 — never an edit).
+
+    These notes are ours: they are platform data with no `org_id`, so the school
+    they are about can never read them (`models/tiers.py`).
+    """
+    return TierService(db).add_note(member.user.id, request_id, body)
 
 
 @router.get("/orgs", response_model=list[PlatformOrgOut])

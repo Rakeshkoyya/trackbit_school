@@ -20,6 +20,10 @@ export default function SetupLayout({ children }: { children: React.ReactNode })
           { label: "Academics", href: "/setup" },
           { label: "Members", href: "/setup/members" },
           { label: "Settings", href: "/setup/settings" },
+          // `D-106`: where a school reads what it is on and asks to move up.
+          // Deliberately ungated — paywalling the paywall would be absurd, and
+          // every 402 toast in the app routes here.
+          { label: "Plan", href: "/setup/plan" },
           { label: "Connections", href: "/setup/connections" },
         ]}
       />

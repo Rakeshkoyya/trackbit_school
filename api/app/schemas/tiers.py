@@ -121,6 +121,18 @@ class UpgradeRequestNoteOut(BaseModel):
     author_name: str | None = None
 
 
+class OrgPlanOut(BaseModel):
+    """Everything the school's own plan screen and every upgrade wall need, in
+    one call: what each tier costs THIS school, whether an ask is already in
+    flight, and whether this member is allowed to make one (`D-110`)."""
+
+    quote: PlanQuoteOut
+    open_request: UpgradeRequestOut | None = None
+    #: False for a teacher — the wall then says "contact your admin" and offers
+    #: no form at all, rather than a button that 403s.
+    can_request: bool = False
+
+
 class UpgradeRequestDetailOut(BaseModel):
     request: UpgradeRequestOut
     #: Operator-only. Never rendered on an org-scoped surface — these are our

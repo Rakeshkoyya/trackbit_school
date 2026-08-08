@@ -111,6 +111,20 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     training_data_opt_in: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"))
 
+    @property
+    def features(self) -> list[str]:
+        """Every feature this plan includes (`core/features.py`), computed.
+
+        A property rather than a column: the tier map changes when we ship
+        something, and a stored copy would go stale silently on every school at
+        once. Reading it here means every `OrgOut` — the session, the org
+        switcher, `/auth/me` — carries the same list without anyone remembering
+        to populate it.
+        """
+        from app.core.features import features_for  # noqa: PLC0415 - cycle-safe
+
+        return sorted(str(f) for f in features_for(self.plan))
+
     __table_args__ = (
         CheckConstraint("plan IN ('free', 'pro', 'max', 'ultra')", name="plan_valid"),
         CheckConstraint("plan_source IN ('manual', 'billing')", name="plan_source_valid"),

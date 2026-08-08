@@ -31,9 +31,39 @@ current billing code can and cannot express. **Read §0 before touching anything
 >   **refuses any org whose `plan_source` is `manual`** (§1.8) — and
 >   `start_checkout` is what hands ownership to the gateway.
 >
-> **P4 (the API gate — `feature_gate` across the 36 routers, `features[]` on
-> `/auth/me`, `GET /plans`) is next.** Nothing is enforced yet: P1–P3 built the
-> vocabulary, the tables and the service, but no route refuses anything.
+> > - **P4b** — the mixed modules, gated per route: `insights` (staff, exams,
+>   tasks, homework, reach and the action rail; attendance/presence/syllabus
+>   stay free) and `students` (Directory free, Academics `pro`). MCP composes
+>   with `agent_access` inside `api_tokens.py` and `oauth.py` — the tier makes
+>   the door exist, `agent_access` opens it — and both are checked on every
+>   call, so dropping off Ultra ends live sessions rather than only blocking
+>   new ones. **176 of 443 routes are now tier-gated**; `route_map.py` prints
+>   the feature column so a hole is visible rather than assumed.
+> - **P6 (web)** — `lib/features.ts` (pure) + `lib/use-feature.ts` (hooks, split
+>   to avoid the `nav-items → auth-context` cycle); `<FeatureGate>`,
+>   `<UpgradeWall>`, `<UpgradeDialog>` and `<UpgradeGate>`; area layouts for
+>   fees/staff/timesheet/tasks/lucy/sessions; sidebar padlocks; the `/setup/plan`
+>   screen; `errors.ts` now routes its 402 toast there instead of the old dead
+>   end. `D-111`'s in-place lock is on the presence table's Remind and Follow-up
+>   controls.
+> - **P7 (backend + operator queue)** — eight super-admin routes (prices,
+>   assign, history, the queue, notes, expiring) and `/platform/upgrades`, where
+>   the operator reads who asked, which wall they hit, what it comes to, and
+>   sets the plan.
+>
+> **Still open: P5** (Lucy/MCP tool filtering — largely a no-op while tiers are
+> cumulative, since anything that can reach Lucy already has every non-Ultra
+> feature), **P8** (the marketing page still advertises the retired ₹100 flat
+> price) and **P9** (FEATURE-MAP §9 still describes the Free/Pro world).
+
+**P4 — the gate is live.** `feature_gate` sits beside the role guards in
+> `core/dependencies.py` and is applied at `include_router` level in
+> `api/v1/router.py`, so the whole tier map is one readable file. Eleven modules
+> gated: boards/tasks/recurring, staff, sessions and lucy at `max`; homework
+> analytics, assessments and main-exams and fees at `pro`; oauth at `ultra`.
+> `/auth/me`, the session and the org switcher carry `features[]`, computed from
+> an `Organization.features` property so there is one source. 31 tests in
+> `test_feature_gate.py`.
 
 ### A note for whoever builds P4
 

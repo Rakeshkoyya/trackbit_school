@@ -4,6 +4,17 @@ The roster is shared master data: reads are open to any active member (academics
 AND fees both need it), while roster edits are coordinator/director. Fee amounts
 and academic performance — the things teachers/office must not cross — live in
 their own modules, not here.
+
+**Package tiers cut this module in half** (`D-106`), along the same seam the
+founder split the screens on:
+
+- **Directory — the administration record.** Who this child is: name, guardians,
+  phone, class, category. Free, and it must stay free — attendance cannot work
+  without a roster, and `D-107` keeps every capture surface free in full.
+- **Academics — the record the school MAKES.** The timeline, growth, the report
+  card, the analysis: the record over time, which is what `pro` buys.
+
+So the gate is per-route here rather than on the router.
 """
 
 import uuid
@@ -14,7 +25,12 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import get_current_member, require_coordinator_up
+from app.core.dependencies import (
+    feature_gate,
+    get_current_member,
+    require_coordinator_up,
+)
+from app.core.features import Feature
 from app.schemas.common import MessageResponse
 from app.schemas.growth import StudentGrowthOut
 from app.schemas.report_card import ReportCard, StudentAnalysis
@@ -47,7 +63,12 @@ router = APIRouter()
 
 # Declared before `/{student_id}` on purpose — FastAPI matches in order, and a
 # path param would otherwise swallow "records" and 422 on the UUID parse.
-@router.get("/records", response_model=StudentRecordsOut)
+#: The academic record over time — `pro` (`D-106`). The Directory routes below
+#: stay free; see the module docstring for the seam.
+_ACADEMICS = [Depends(feature_gate(Feature.STUDENTS_ACADEMICS))]
+
+
+@router.get("/records", response_model=StudentRecordsOut, dependencies=_ACADEMICS)
 def student_records(class_id: uuid.UUID | None = None,
                     q: str | None = Query(default=None, max_length=80),
                     window_days: int = Query(default=30, ge=1, le=365),
@@ -63,14 +84,16 @@ def student_records(class_id: uuid.UUID | None = None,
                                             window_days=window_days)
 
 
-@router.get("/{student_id}/timeline", response_model=StudentTimelineOut)
+@router.get("/{student_id}/timeline", response_model=StudentTimelineOut,
+            dependencies=_ACADEMICS)
 def student_timeline(student_id: uuid.UUID, on_date: date | None = None,
                      m: CurrentMember = Depends(get_current_member), db: Session = Depends(get_db)):
     """§5.7 — period-by-period what the student did today (computed join, no new tables)."""
     return StudentTimelineService(db).timeline(m, student_id, on_date)
 
 
-@router.get("/{student_id}/growth", response_model=StudentGrowthOut)
+@router.get("/{student_id}/growth", response_model=StudentGrowthOut,
+            dependencies=_ACADEMICS)
 def student_growth(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_member),
                    db: Session = Depends(get_db)):
     """Chapter-level growth report with topic drill-down. Staff-only; the service
@@ -82,7 +105,8 @@ def student_growth(student_id: uuid.UUID, m: CurrentMember = Depends(get_current
 # Two levels, deliberately: the card is numbers only; the analysis is the
 # narrative over the SAME figures. Both use the growth report's access rule —
 # admin any student, a teacher only students in a class they teach.
-@router.get("/{student_id}/report-card", response_model=ReportCard)
+@router.get("/{student_id}/report-card", response_model=ReportCard,
+            dependencies=_ACADEMICS)
 def student_report_card(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_member),
                         db: Session = Depends(get_db)):
     """Level 1 — the standard report card: this child's subjects and the exams
@@ -90,7 +114,8 @@ def student_report_card(student_id: uuid.UUID, m: CurrentMember = Depends(get_cu
     return ReportCardService(db).for_student(m, student_id)
 
 
-@router.get("/{student_id}/analysis", response_model=StudentAnalysis)
+@router.get("/{student_id}/analysis", response_model=StudentAnalysis,
+            dependencies=_ACADEMICS)
 def student_analysis(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_member),
                      db: Session = Depends(get_db)):
     """Level 2 — per topic, skill abilities and a per-subject narrative written

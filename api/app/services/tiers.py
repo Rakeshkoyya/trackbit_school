@@ -267,6 +267,16 @@ class TierService:
         self.db.flush()
         return self._request_out(row, member.user.name)
 
+    def request_summary(self, row: UpgradeRequest) -> UpgradeRequestOut:
+        """One request, as the SCHOOL sees it — no operator commentary.
+
+        The note trail is deliberately absent: `upgrade_request_notes` holds our
+        working notes on a live negotiation about this very school
+        (`models/tiers.py`), and nothing org-scoped may reach it.
+        """
+        names = self._names({row.requested_by_user_id})
+        return self._request_out(row, names.get(row.requested_by_user_id))
+
     @staticmethod
     def _request_out(row: UpgradeRequest, by_name: str | None = None,
                      **extra) -> UpgradeRequestOut:

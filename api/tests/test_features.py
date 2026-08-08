@@ -24,6 +24,9 @@ from app.core.features import (
     tier_for,
 )
 
+#: The map itself is under test, so keep the real one.
+pytestmark = pytest.mark.real_tiers
+
 
 class _Org:
     """The one attribute the feature helpers actually read."""

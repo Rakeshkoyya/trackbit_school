@@ -135,6 +135,65 @@ def unique_email() -> str:
     return f"test-{uuid.uuid4().hex[:12]}@example.com"
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_tiers: run with the real package-tier map instead of the "
+        "everything-unlocked default (see `_tiers_unlimited`)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _tiers_unlimited(request):
+    """Package tiers are OFF by default in tests (`D-106`).
+
+    Most of this suite exercises tasks, fees, staff, exams, sessions, homework
+    analytics and Lucy — and **none of it is about what the school bought**.
+    Repeating a plan precondition in fifteen org fixtures would put the tier map
+    in fifteen places, which is the exact defect `core/features.py` exists to
+    prevent. So every tier includes every feature here.
+
+    The gate is asserted properly, against the real map, in the suites marked
+    `real_tiers`: `test_feature_gate.py` (does a free school get refused, and
+    does capture stay open), `test_features.py` (the map itself) and
+    `test_tiers.py` (pricing and assignment). A gate regression surfaces there,
+    which is where someone reading a failure would expect to find it.
+    """
+    from app.core import features
+
+    if "real_tiers" in request.keywords:
+        yield
+        return
+    saved = dict(features.TIER_FEATURES)
+    everything = frozenset(features.Feature)
+    features.TIER_FEATURES.update(dict.fromkeys(features.TIERS, everything))
+    try:
+        yield
+    finally:
+        features.TIER_FEATURES.clear()
+        features.TIER_FEATURES.update(saved)
+
+
+def set_org_plan(org_id, plan: str = "ultra") -> None:
+    """Put a test org on a package tier (`D-106`).
+
+    A registered org is born on `free`, and from P4 the router refuses every
+    paid module — so a suite that exercises tasks, fees, staff, exams, sessions,
+    homework analytics or Lucy must say so. `ultra` is the usual answer: it
+    means "the tier is not what this test is about".
+
+    The gate itself is asserted in `test_feature_gate.py`, deliberately
+    separately, so no other suite has to think about tiers at all.
+    """
+    db = AdminSession()
+    try:
+        org = db.get(Organization, uuid.UUID(str(org_id)))
+        org.plan = plan
+        db.commit()
+    finally:
+        db.close()
+
+
 @pytest.fixture
 def cleanup():
     """Track org/user ids created during a test and hard-delete them afterwards."""

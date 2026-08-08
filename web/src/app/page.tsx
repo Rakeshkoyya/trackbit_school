@@ -14,6 +14,7 @@ import { ParentPortal } from "@/components/marketing/parent-portal";
 import { PeriodCard } from "@/components/marketing/period-card";
 import { Pillars } from "@/components/marketing/pillars";
 import { PricingCalculator } from "@/components/marketing/pricing-calculator";
+import { PricingTiers } from "@/components/marketing/pricing-tiers";
 import { ReportWriter } from "@/components/marketing/report-writer";
 
 import "./marketing.css";
@@ -363,31 +364,26 @@ export default function LandingPage() {
       <section className="mk-section mk-shell" id="pricing">
         <div className="mk-section-head">
           <p className="mk-eyebrow">Pricing</p>
-          <h2 className="mk-h2 mk-display">One price, per student. That is the whole model.</h2>
+          <h2 className="mk-h2 mk-display">Start free. Pay for what you read.</h2>
           <p className="mk-sub">
-            There is no free tier and no trial you have to configure yourself. You pay, we build your
-            school inside TrackBit from the files you already have, and hand it over working.
+            Recording the day is free, in full and forever — attendance, homework, the lesson log,
+            the syllabus. You pay when you want the record read back to you: the trends, the boards,
+            the reports. Priced per student, per month, and we set your school up from the files you
+            already have.
           </p>
         </div>
 
+        <PricingTiers />
+
         <div className="mk-price">
           <div className="mk-price-main">
-            <p className="mk-eyebrow">The only plan</p>
-            <div className="mk-price-rate">
-              <strong>₹100</strong>
-              <span>per student, per month</span>
-            </div>
-            <p className="mk-price-min mk-mono">Minimum 500 students per school</p>
-
+            <p className="mk-eyebrow">Every plan includes</p>
             <ul className="mk-includes">
-              <li>Every module — no editions, no add-ons</li>
               <li>Setup done by us, from your files</li>
               <li>Syllabus, roster and staff import</li>
               <li>Timetable built and validated</li>
-              <li>Plans generated and approved with you</li>
               <li>Staff training and handover</li>
               <li>Unlimited teacher and admin accounts</li>
-              <li>Parent portal — a login for every parent</li>
             </ul>
           </div>
 

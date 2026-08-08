@@ -973,6 +973,48 @@
 }
 
 /* ── Pricing ─────────────────────────────────────────────────────────────── */
+/* Package tiers (`D-106`). Four cards, cheapest first, so the ladder reads left
+   to right: capture → history → operations → integration. Built from the same
+   tokens as the rest of the board so it does not read as a bolt-on. */
+.mk-tiers {
+  display: grid;
+  gap: 14px;
+  margin-top: 44px;
+}
+
+@media (min-width: 720px) {
+  .mk-tiers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1080px) {
+  .mk-tiers {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.mk-tier {
+  background: var(--mk-slate);
+  border: 1px solid var(--mk-rule-2);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  padding: 26px 22px 28px;
+}
+
+.mk-tier-line {
+  color: var(--mk-chalk-2);
+  font-size: 0.9rem;
+  margin: 6px 0 14px;
+}
+
+/* Inside a tier the list is one column — four cards side by side are already
+   narrow, and two columns of ticks in each would be unreadable. */
+.mk-tier .mk-includes {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .mk-price {
   border: 1px solid var(--mk-rule-2);
   border-radius: 8px;

@@ -95,15 +95,11 @@ def test_critical_task_is_not_gated(client, org_ctx):
 def test_org_settings_get_and_update(client, org_ctx):
     s = client.get("/api/v1/org/settings", headers=_auth(org_ctx["admin_token"])).json()
     assert s["plan"] == "free"
-    # The settings payload carries the computed feature list, not a tier name a
-    # client would have to map itself.
-    features = set(s["features"])
-    # D-107 — every capture surface is free, in full.
-    assert {"capture.attendance", "capture.homework", "capture.lesson_log"} <= features
-    # ...and nothing above free is.
-    assert "fees.collection" not in features  # pro
-    assert "tasks.boards" not in features  # max
-    assert "agent.mcp" not in features  # ultra
+    # The payload carries a computed feature list rather than a tier name the
+    # client would have to map itself. What it CONTAINS per tier is asserted in
+    # `test_feature_gate.py`, which runs against the real map — this suite runs
+    # with tiers unlocked (see `conftest._tiers_unlimited`).
+    assert isinstance(s["features"], list) and s["features"]
     assert s["usage"]["boards"] == 2  # General + Ops
 
     upd = client.patch(

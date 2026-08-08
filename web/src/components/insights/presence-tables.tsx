@@ -28,7 +28,9 @@ import { toast } from "sonner";
 
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { UpgradeGate } from "@/components/plan/upgrade";
 import { Button } from "@/components/ui/button";
+import { FEATURES } from "@/lib/features";
 import { Input } from "@/components/ui/input";
 import { Popover } from "@/components/ui/popover";
 import { appApi } from "@/lib/app-api";
@@ -324,12 +326,19 @@ function AbsenceRow({
             <Check className="h-3 w-3" /> Reminded
           </span>
         ) : (
-          <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
-            disabled={remind.isPending} onClick={() => remind.mutate()}>
-            <MessageSquare className="h-3.5 w-3.5" /> Remind
-          </Button>
+          // `D-111`: the DIAGNOSIS is free — this row, this child, this reason
+          // all render on every plan. Only the one-tap DISPATCH is paid, so the
+          // button keeps its place and opens the upgrade dialog instead.
+          <UpgradeGate feature={FEATURES.commsGuardian}>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+              disabled={remind.isPending} onClick={() => remind.mutate()}>
+              <MessageSquare className="h-3.5 w-3.5" /> Remind
+            </Button>
+          </UpgradeGate>
         )}
-        <FollowUpButton row={row} />
+        <UpgradeGate feature={FEATURES.insightsActions}>
+          <FollowUpButton row={row} />
+        </UpgradeGate>
       </div>
     </div>
   );

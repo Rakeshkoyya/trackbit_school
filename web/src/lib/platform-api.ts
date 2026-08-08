@@ -2,13 +2,20 @@
 // signed-in user has is_super_admin; everyone else gets a 403.
 
 import { api } from "@/lib/api-client";
-import type { Session } from "@/lib/types";
+import type {
+  PlanChange,
+  PlanPrice,
+  PlanTier,
+  Session,
+  UpgradeRequest,
+  UpgradeRequestDetail,
+} from "@/lib/types";
 
 export interface PlatformOrg {
   id: string;
   name: string;
   timezone: string;
-  plan: "free" | "pro";
+  plan: PlanTier;
   created_at: string;
   member_count: number;
   student_count: number;
@@ -123,6 +130,32 @@ export interface PackImport {
 
 export const platformApi = {
   orgs: () => api.get<PlatformOrg[]>("/platform/orgs"),
+
+  // ── package tiers (`D-106`) ───────────────────────────────────────────────
+  // There is no payment gateway. The operator reads the queue, phones the
+  // school, takes the money, and sets the plan by hand with `assignPlan`.
+  prices: () => api.get<PlanPrice[]>("/platform/plans/prices"),
+  /** Change a LIST price. Appends a row; schools already on a plan keep the
+   *  rate they were sold, so this never repricess anyone retroactively. */
+  setPrice: (body: { plan: string; amount_paise_per_student: number; note?: string | null }) =>
+    api.post<PlanPrice>("/platform/plans/prices", body),
+  expiringPlans: (days = 30) =>
+    api.get<PlatformOrg[]>(`/platform/plans/expiring?days=${days}`),
+
+  assignPlan: (
+    orgId: string,
+    body: { plan: string; reason?: string | null; expires_at?: string | null },
+  ) => api.post<PlanChange>(`/platform/orgs/${orgId}/plan`, body),
+  planHistory: (orgId: string) =>
+    api.get<PlanChange[]>(`/platform/orgs/${orgId}/plan/history`),
+
+  upgrades: (status?: string) =>
+    api.get<UpgradeRequest[]>(`/platform/upgrades${status ? `?status=${status}` : ""}`),
+  upgrade: (id: string) => api.get<UpgradeRequestDetail>(`/platform/upgrades/${id}`),
+  /** Append a remark, a status move, or both. Never edits an earlier row.
+   *  These notes are ours — the school can never read them. */
+  addUpgradeNote: (id: string, body: { note?: string | null; status_to?: string | null }) =>
+    api.post<UpgradeRequestDetail>(`/platform/upgrades/${id}/notes`, body),
   createSchool: (payload: CreateSchoolPayload) =>
     api.post<CreateSchoolResult>("/platform/orgs", payload),
   enterOrg: (orgId: string) => api.post<Session>(`/platform/orgs/${orgId}/enter`),

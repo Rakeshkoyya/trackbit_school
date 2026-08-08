@@ -20,9 +20,27 @@ from app.schemas.marketing import (
     DemoRequestOut,
     DemoRequestUpdate,
 )
+from app.schemas.tiers import PlanPriceOut
 from app.services.marketing import MarketingService
+from app.services.tiers import TierService
 
 router = APIRouter()
+
+
+@router.get("/plans", response_model=list[PlanPriceOut])
+def public_plan_prices(db: Session = Depends(get_db)) -> list[PlanPriceOut]:
+    """The public price list — what the marketing site quotes.
+
+    Public on purpose, and **fetched rather than typed** (`D-106`): the founder's
+    "the plan number and costing might change regularly because we are just
+    launching" is only true if changing a price needs no deploy. The site reads
+    this; the operator edits it from `/platform`.
+
+    Carries no school context — just the list price per tier, in paise per
+    student per month. What an existing school actually pays is frozen in its
+    own `plan_changes` row and never moves when this does.
+    """
+    return TierService(db).list_prices()
 
 
 @router.post("/demo-requests", response_model=DemoRequestAck)

@@ -26,14 +26,54 @@ from app.schemas.org import (
     UsernameAvailabilityResponse,
 )
 from app.schemas.report import NudgeResponse, OrgDashboardResponse
+from app.schemas.tiers import OrgPlanOut, UpgradeRequestIn, UpgradeRequestOut
 from app.services import staff_import, templates
 from app.services.member import MemberService
 from app.services.nudge import NudgeService
 from app.services.org import OrgService
 from app.services.reports import ReportService
 from app.services.staff_import import StaffImporter
+from app.services.tiers import TierService
 
 router = APIRouter()
+
+
+# ---- the school's own plan (`D-106`) ----------------------------------
+# Ungated on purpose: a school must always be able to see what it is on and what
+# the next tier costs. Paywalling the paywall would be absurd.
+@router.get("/plan", response_model=OrgPlanOut)
+def get_plan(
+    member=Depends(get_current_member), db: Session = Depends(get_db)
+) -> OrgPlanOut:
+    """What each tier costs THIS school, plus any request already in flight.
+
+    Every upgrade wall reads this, which is why the quote carries the school's
+    own student count: the wall shows its working ("₹25 × 480 students") rather
+    than a number the school has to take on faith.
+    """
+    service = TierService(db)
+    open_request = service.open_request(member.org_id)
+    return OrgPlanOut(
+        quote=service.quote(member.org),
+        open_request=service.request_summary(open_request) if open_request else None,
+        can_request=member.is_admin,
+    )
+
+
+@router.post("/plan/request", response_model=UpgradeRequestOut)
+def request_upgrade(
+    body: UpgradeRequestIn,
+    member=Depends(get_current_member),
+    db: Session = Depends(get_db),
+) -> UpgradeRequestOut:
+    """Ask to be moved up a tier. There is no gateway: this reaches the
+    operator, who phones the school and sets the plan by hand.
+
+    Deliberately NOT `require_admin`. The service raises 403 `admin_only` with
+    copy a teacher can act on, so the wall renders "contact your admin" from the
+    same response rather than a bare permission error.
+    """
+    return TierService(db).raise_request(member, body)
 
 
 # ── staff document import (V2-P7, SPRD2 §5.1) ────────────────────────────────

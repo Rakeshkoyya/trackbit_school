@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.context import CurrentMember
 from app.core.exceptions import AuthError, ForbiddenError, NotFoundError, ValidationError
+from app.core.features import Feature, has_feature
 from app.core.security import generate_raw_token, hash_token
 from app.models import ApiToken, Membership, Organization, User
 from app.services.lucy import domains
@@ -191,6 +192,14 @@ class ApiTokenService:
         # A school that switched agent access off has switched it off for the
         # tokens already issued, not just for new ones.
         if org.agent_access == "off":
+            raise AuthError("Invalid API token.", code="bad_token")
+        # `D-106`: connectors are an Ultra feature, and the two switches compose
+        # — the tier makes the door exist, `agent_access` opens it. Checked on
+        # every call rather than at issue, so a school that drops off Ultra
+        # stops answering to the tokens it already handed out. Deliberately the
+        # same opaque error: a credential holder learns nothing about the
+        # school's billing from a failed request.
+        if not has_feature(org, Feature.AGENT_MCP):
             raise AuthError("Invalid API token.", code="bad_token")
 
         self._touch(row, ip)

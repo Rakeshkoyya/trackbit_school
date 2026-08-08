@@ -84,6 +84,11 @@ class OrgOut(BaseModel):
     name: str
     timezone: str
     plan: str
+    #: What this school's package includes (`D-106`), computed server-side from
+    #: `core/features.py`. The browser reads this and never re-derives the tier
+    #: map — one computation, many renderings. Components ask for a FEATURE,
+    #: never for `plan === "max"`.
+    features: list[str] = []
     # SETUP-REDESIGN-PLAN §6: once we have handed the school over, its structure
     # is ours to change (`require_operator`). The UI reads this to render the
     # setup screens read-only rather than offering buttons that 403 — a disabled

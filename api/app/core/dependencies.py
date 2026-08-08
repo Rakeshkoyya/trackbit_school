@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.context import CurrentMember, CurrentParent
 from app.core.database import get_db
 from app.core.exceptions import AuthError, ForbiddenError
+from app.core.features import Feature, require_feature
 from app.core.security import decode_access_token
 from app.models import Guardian, Membership, Organization, Student, User
 
@@ -250,6 +251,30 @@ def require_admin(member: CurrentMember = Depends(get_current_member)) -> Curren
     if not member.is_admin:
         raise ForbiddenError("This action requires an admin.", code="admin_only")
     return member
+
+
+def feature_gate(feature: Feature):
+    """Refuse a route the school's package does not include (`D-106`).
+
+    **Composes with the role guard; it never replaces one.** A teacher on ultra
+    still never sees fees, and a band tier still never reaches a parent — the
+    tier decides what the *school* bought, the role decides who inside it may
+    look. Both run.
+
+    Applied at `include_router` level wherever a whole module is one feature, so
+    the gate is declared once in `api/v1/router.py` rather than sprinkled over
+    thirty-six endpoint files, and `scripts/route_map.py` can walk the
+    dependency tree and print which feature each route needs.
+
+    Raises 402 `plan_limit` carrying the tier that would unlock it, which the
+    client already renders as an upgrade prompt.
+    """
+
+    def _gate(member: CurrentMember = Depends(get_current_member)) -> CurrentMember:
+        require_feature(member.org, feature)
+        return member
+
+    return _gate
 
 
 def require_coordinator_up(

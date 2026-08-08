@@ -1,11 +1,12 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Lock } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { useAuth } from "@/contexts/auth-context";
+import { useFeatures } from "@/lib/use-feature";
 import { cn } from "@/lib/utils";
 import { navForRole, type NavItem } from "./nav-items";
 
@@ -68,10 +69,21 @@ function NavGroup({ item, pathname }: { item: NavItem; pathname: string }) {
   );
 }
 
+/** A padlock on an item the school's package does not include (`D-106`).
+ *
+ *  The item is NOT hidden and the link still works — founder's rule: "we show
+ *  everything on the screen like as it is now", and the block happens on
+ *  arrival, where the wall can explain itself and quote a price. A hidden item
+ *  teaches a school nothing about what it could buy. */
+function NavLock() {
+  return <Lock className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" aria-label="locked" />;
+}
+
 /** Desktop sidebar — visible on lg+. */
 export function Sidebar() {
   const pathname = usePathname();
   const { me } = useAuth();
+  const features = useFeatures();
   const items = navForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher, me?.has_band_scope);
 
   return (
@@ -96,6 +108,7 @@ export function Sidebar() {
                 >
                   <Icon className="h-5 w-5" strokeWidth={active ? 2.2 : 1.8} />
                   {item.label}
+                  {item.feature && !features.has(item.feature) ? <NavLock /> : null}
                 </Link>
               </li>
             );

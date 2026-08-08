@@ -27,6 +27,9 @@ from tests.conftest import AdminSession
 
 STUDENTS = 3
 
+#: Pricing and assignment are about the tiers themselves — use the real map.
+pytestmark = pytest.mark.real_tiers
+
 
 def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}

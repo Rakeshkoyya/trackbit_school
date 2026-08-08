@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { FEATURES } from "@/lib/features";
 import type { OrgRole } from "@/lib/types";
 
 export type NavItem = {
@@ -33,12 +34,20 @@ export type NavItem = {
   // a sidebar nobody reads. `href` stays the group's own landing page, so a
   // press on the parent is never a dead press.
   children?: NavItem[];
+  // Package tier (`D-106`). The item is NEVER hidden for want of a plan — the
+  // founder's rule is that everything stays on screen and the block happens on
+  // arrival. The sidebar renders a padlock beside it and the screen behind it
+  // is a <FeatureGate>. Absent means free.
+  feature?: string;
 };
 
 // Consolidated v2 IA (SPRD2 §3). Each item is one area; areas group their old
 // v1 screens into internal tabs (see the area layouts).
 const myDay: NavItem = { label: "My Day", href: "/my-day", icon: Sun };
-const sessions: NavItem = { label: "Sessions", href: "/sessions", icon: CalendarClock };
+const sessions: NavItem = {
+  label: "Sessions", href: "/sessions", icon: CalendarClock,
+  feature: FEATURES.sessionsHostel,
+};
 const plan: NavItem = { label: "Plan", href: "/plan", icon: CalendarRange };
 // V1-6 (`S-46`). Same area, different door: the rest of Plan is admin-shaped
 // (pick a year, pick a class, pick a subject), so a teacher lands on the list of
@@ -76,16 +85,27 @@ const students: NavItem = {
 const studentsForTeacher: NavItem = {
   label: "Students", href: "/students/academics", icon: GraduationCap,
 };
-const tasks: NavItem = { label: "Tasks", href: "/tasks", icon: CheckSquare, tour: "nav-boards" };
-const fees: NavItem = { label: "Fees", href: "/fees", icon: Wallet };
+const tasks: NavItem = {
+  label: "Tasks", href: "/tasks", icon: CheckSquare, tour: "nav-boards",
+  feature: FEATURES.tasksBoards,
+};
+const fees: NavItem = {
+  label: "Fees", href: "/fees", icon: Wallet, feature: FEATURES.feesCollection,
+};
 const dashboard: NavItem = { label: "Dashboard", href: "/dashboard", icon: BarChart3 };
 const setup: NavItem = { label: "Setup", href: "/setup", icon: Settings2, tour: "nav-members" };
-const lucy: NavItem = { label: "Lucy", href: "/lucy", icon: Sparkles };
+const lucy: NavItem = {
+  label: "Lucy", href: "/lucy", icon: Sparkles, feature: FEATURES.agentLucy,
+};
 const platform: NavItem = { label: "Schools", href: "/platform", icon: Building2 };
 // SF-1. Two sides of the same module: the admin marks who came in and approves
 // leave; the teacher records their own periods and applies for it.
-const staff: NavItem = { label: "Staff", href: "/staff", icon: UserCheck };
-const timesheet: NavItem = { label: "My time", href: "/timesheet", icon: Clock };
+const staff: NavItem = {
+  label: "Staff", href: "/staff", icon: UserCheck, feature: FEATURES.staffRoster,
+};
+const timesheet: NavItem = {
+  label: "My time", href: "/timesheet", icon: Clock, feature: FEATURES.staffRoster,
+};
 // V1-3 (D-03). Only for the teacher who owns a class + section: her children,
 // her register, who to call. Everyone else never sees it.
 const myClass: NavItem = { label: "My Class", href: "/my-class", icon: Users };

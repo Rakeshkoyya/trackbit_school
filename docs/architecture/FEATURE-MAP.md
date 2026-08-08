@@ -370,28 +370,46 @@ tool widens what an agent can do unsupervised. When adding tools:
 
 ---
 
-## 9. Package tiers — what exists and what does not
+## 9. Package tiers — as built
 
-### What exists today
+> **Superseded 2026-08-08.** This section used to describe a two-tier Free/Pro
+> model inherited from the `task_management2` seed, plus an honest list of what
+> a tier move would require. That work is done and `core/plans.py` no longer
+> exists. The build plan and every decision behind it are in
+> [`TIERS-PLAN.md`](TIERS-PLAN.md) — read that for the *why*.
 
-`api/app/core/plans.py` implements a **two-tier Free/Pro** model inherited from
-the `task_management2` seed. It is real, wired and enforced — but it predates
-every school module:
+**Four cumulative tiers** — `free` · `pro` · `max` · `ultra` — assigned by hand
+from the operator's screen. There is no payment gateway: a school asks, the
+operator phones them, takes the money, and sets the plan.
 
-```python
-FREE = PlanLimits(boards=2, members=8, report_days=14,
-                  report_card=False, attachments=False, critical=False)
-PRO  = PlanLimits(boards=None, members=None, report_days=365,
-                  report_card=True, attachments=True, critical=True)
-```
+| Piece | Where |
+|---|---|
+| **The tier map — the only place that knows what unlocks what** | `core/features.py` (`Feature`, `TIER_ADDS`, `features_for`, `require_feature`) |
+| The API gate | `core/dependencies.py::feature_gate`, applied in `api/v1/router.py` (whole modules) and per route in `insights.py` / `students.py` |
+| Pricing, assignment, the upgrade queue | `services/tiers.py`, `models/tiers.py` |
+| Prices (operator-editable, no deploy) | `plan_prices` — public read at `GET /marketing/plans` |
+| Plan history (append-only, law 3) | `plan_changes`; `organizations.plan` is its derived cache |
+| The queue | `upgrade_requests` (org-scoped) + `upgrade_request_notes` (**platform-only** — the operator's negotiation notes, unreachable from the school) |
+| Client | `web/src/lib/features.ts` + `use-feature.ts`, `components/plan/upgrade.tsx`, `/setup/plan`, `/platform/upgrades` |
 
-- `organizations.plan` — `CHECK (plan IN ('free', 'pro'))`
-- `organizations.plan_status` — `CHECK (plan_status IN ('none','active','grace'))`
-- `services/billing.py` — Razorpay, ₹500/month flat per org, webhook-driven,
-  stub mode without keys
-- Enforcement points: `enforce_board_quota`, `enforce_member_quota`,
-  `enforce_critical_allowed`, `enforce_attachments_allowed`, plus
-  `jobs.py:210` and `services/org.py:49`
+Two rules decide every entry in the map:
+
+- **`D-107` — free buys the act of recording; paid buys the record over time.**
+  Attendance, homework logging, classwork logging, the syllabus, the timetable,
+  ABC bands and the daily report are free, in full. A school that stops
+  capturing has nothing to upgrade *for*.
+- **`D-109` — the inherited quotas are gone.** No board cap, no seat cap, no
+  attachment or critical toggle. Tasks is all-or-nothing at `max`.
+
+`organizations.plan` is `CHECK (plan IN ('free','pro','max','ultra'))` since
+migration `e8f9a0b1c2d3`, which also added `plan_source` (`manual`|`billing`) —
+the Razorpay webhook **refuses any org whose source is `manual`**, so a replayed
+subscription event cannot silently downgrade a school the operator just moved.
+
+**Regenerate the tier facts** the same way as the guard facts:
+`uv run python scripts/route_map.py` now prints a `feature` column and a
+`feature totals` block. As of 2026-08-08: **176 of 443 routes are tier-gated**,
+the rest free.
 
 ### What a basic/gold/platinum move actually requires
 

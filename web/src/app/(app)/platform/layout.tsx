@@ -10,6 +10,10 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
         tabs={[
           { label: "Schools", href: "/platform" },
           { label: "Enquiries", href: "/platform/enquiries" },
+          // `D-106`: schools that hit a wall and asked to move up. Sits beside
+          // Enquiries because it is the same job — a conversation to have —
+          // just with a school we already have rather than one we want.
+          { label: "Upgrades", href: "/platform/upgrades" },
           { label: "Catalogue", href: "/platform/catalogue" },
           { label: "Gallery", href: "/platform/gallery" },
         ]}

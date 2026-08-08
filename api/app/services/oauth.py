@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import AppError, ForbiddenError, NotFoundError, ValidationError
+from app.core.features import Feature, has_feature
 from app.core.security import generate_raw_token, hash_token
 from app.models import ApiToken, Membership, OAuthClient, OAuthGrant, Organization
 from app.services.api_tokens import ApiTokenService, _token_prefix
@@ -362,6 +363,12 @@ class OAuthService:
         if org is None or org.agent_access == "off":
             raise OAuthError("invalid_grant",
                              "Agent access is switched off for this school.")
+        # `D-106`: Ultra is what makes the connector door exist at all. Checked
+        # on refresh as well as at issue, so dropping off Ultra ends the live
+        # sessions rather than only blocking new ones.
+        if not has_feature(org, Feature.AGENT_MCP):
+            raise OAuthError("invalid_grant",
+                             "Agent connections are not included in this school's plan.")
 
         now = datetime.now(UTC)
         old.revoked_at = now
