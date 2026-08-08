@@ -7,10 +7,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { UpgradeDialog } from "@/components/plan/upgrade";
 import { Sheet } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
+import { FEATURES } from "@/lib/features";
+import { useFeature } from "@/lib/use-feature";
 import { PRIORITY } from "@/lib/format";
 import type { RecurrenceRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -48,7 +51,14 @@ export function CreateTaskSheet({
   const [monthlyDay, setMonthlyDay] = useState(1);
   const [isCritical, setIsCritical] = useState(false);
 
-  const boards = useQuery({ queryKey: ["boards"], queryFn: appApi.boards, enabled: open });
+  // `D-106`: Tasks is a Max feature, and without it `/boards` answers 402 — so
+  // the board picker came up empty and the form simply could not be completed.
+  // An empty dropdown reads as a broken screen, not a locked one, so the whole
+  // sheet is replaced by the upgrade dialog before any of it renders.
+  const hasTasks = useFeature(FEATURES.tasksBoards);
+  const boards = useQuery({
+    queryKey: ["boards"], queryFn: appApi.boards, enabled: open && hasTasks,
+  });
   const members = useQuery({ queryKey: ["members"], queryFn: appApi.members, enabled: open });
 
   const allBoards = boards.data ? [...boards.data.my_boards, ...boards.data.other_public] : [];
@@ -141,6 +151,17 @@ export function CreateTaskSheet({
 
   const canSubmit =
     !!title.trim() && !!effectiveBoard && (!repeats || freq !== "weekly" || weeklyDays.length > 0);
+
+  // Placed after every hook so the hook order never changes between renders.
+  if (!hasTasks) {
+    return (
+      <UpgradeDialog
+        feature={FEATURES.tasksBoards}
+        open={open}
+        onOpenChange={onOpenChange}
+      />
+    );
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title="New task">
