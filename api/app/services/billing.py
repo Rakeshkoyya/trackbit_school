@@ -93,6 +93,9 @@ class BillingService:
             "notes": {"org_id": str(org.id)},
         })
         org.razorpay_subscription_id = sub["id"]
+        # Ownership of this org's plan passes to the gateway here, which is what
+        # lets its webhooks through the `manual` guard in `handle_webhook`.
+        org.plan_source = "billing"
         self.db.flush()
         return CheckoutOut(
             configured=True,
@@ -120,9 +123,20 @@ class BillingService:
         if org is None:
             return {"ok": True, "ignored": "no_org"}
 
+        # `D-106`: a hand-assigned plan is the operator's decision and Razorpay
+        # does not get a vote. Without this, one replayed `subscription.cancelled`
+        # would silently drop a school the operator just put on ultra — and
+        # nothing would say why. There is no live gateway today, so every real
+        # org is `manual` and this is the branch that runs.
+        if org.plan_source == "manual":
+            logger.warning("billing webhook %s ignored: org %s is manually planned",
+                           etype, org.id)
+            return {"ok": True, "ignored": "manual_plan"}
+
         now = datetime.now(UTC)
         if etype in _ACTIVATE:
             org.plan = "pro"
+            org.plan_source = "billing"
             org.plan_status = "active"
             org.grace_until = None
             if sub.get("id"):

@@ -10,10 +10,9 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core import plans
 from app.core.config import settings
 from app.core.context import CurrentMember
-from app.core.exceptions import ConflictError, NotFoundError, PlanLimitError, ValidationError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.security import hash_password
 from app.core.validators import normalize_username
 from app.models import (
@@ -242,9 +241,9 @@ class MemberService:
 
         # Membership is created active — open model, instant (PRD D2): the invite
         # link is a login, not an accept/reject gate.
-        # Free-seat cap applies to new + reactivated members (the core loop isn't
-        # paywalled, but team size is).
-        plans.enforce_member_quota(self.db, admin.org)
+        # `D-109`: there is no seat cap. The old Free plan capped an org at 8
+        # members, which no school is, and per-student pricing already scales
+        # with size — a school is never charged for adding the teacher it hired.
         if existing:
             existing.status = "active"
             existing.org_role = role
@@ -311,12 +310,6 @@ class MemberService:
             if self.db.scalar(select(User.id).where(User.username == uname)) is not None:
                 results.append(BulkMemberResult(
                     name=row_name or uname, username=uname, role=row.role, ok=False, error="username_taken"))
-                continue
-            try:
-                plans.enforce_member_quota(self.db, admin.org)
-            except PlanLimitError:
-                results.append(BulkMemberResult(
-                    name=row_name or uname, username=uname, role=row.role, ok=False, error="plan_limit"))
                 continue
             # No name given -> start with the username as the display name; the
             # staffer replaces it on first login (set-password screen).

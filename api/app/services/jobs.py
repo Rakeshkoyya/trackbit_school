@@ -202,13 +202,16 @@ def run_report_card() -> int:
     """
     db = _session()
     try:
-        from app.core.plans import limits_for
+        from app.core.features import Feature, has_feature
         from app.services.reports import ReportService
 
         made = 0
         for org in _active_orgs(db):
-            if not limits_for(org.plan).report_card:
-                continue  # EOD report card is a Pro surface (R6)
+            # This is the TASK rollup ("82% · 3 still open"), not the school's
+            # daily report — which is free (P5, `Feature.INSIGHTS_DAILY_REPORT`).
+            # It reads public-board tasks, so it goes where Tasks goes: max.
+            if not has_feature(org, Feature.TASKS_BOARDS):
+                continue
             _, _, now_local = org_day_bounds(org.timezone)
             if now_local.hour != org.report_card_hour:
                 continue

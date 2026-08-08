@@ -8,14 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.exceptions import ValidationError
-from app.core.plans import limits_for
+from app.core.features import features_for
 from app.core.work_types import ALLOWED_COLORS, DEFAULT_WORK_TYPE, org_categories
 from app.models import Board, Membership
 from app.schemas.org import (
     OrgSettingsOut,
     OrgSettingsUpdate,
     OrgUsageOut,
-    PlanLimitsOut,
     WorkCategoryOut,
 )
 
@@ -46,7 +45,6 @@ class OrgService:
 
     def settings(self, member: CurrentMember) -> OrgSettingsOut:
         org = member.org
-        lim = limits_for(org.plan)
         return OrgSettingsOut(
             id=org.id,
             name=org.name,
@@ -66,10 +64,7 @@ class OrgService:
             agent_access=org.agent_access,
             training_data_opt_in=org.training_data_opt_in,
             work_categories=[WorkCategoryOut(**c) for c in org_categories(org)],
-            limits=PlanLimitsOut(
-                boards=lim.boards, members=lim.members, report_days=lim.report_days,
-                report_card=lim.report_card, attachments=lim.attachments, critical=lim.critical,
-            ),
+            features=sorted(str(f) for f in features_for(org.plan)),
             usage=self._usage(org.id),
         )
 

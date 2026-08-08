@@ -12,7 +12,6 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core import plans
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.recurrence import due_time, next_occurrences, occurs_on, validate_rule
@@ -131,8 +130,6 @@ class RecurringService:
         board = self._board(req.board_id)
         self._require_viewable(member, board)
         rule = validate_rule(req.recurrence)
-        if req.is_critical:
-            plans.enforce_critical_allowed(member.org)
 
         # Privacy board: a regular member can only schedule recurring work for
         # themselves (same rule as one-time task creation).

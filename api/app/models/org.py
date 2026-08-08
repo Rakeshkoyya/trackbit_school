@@ -61,10 +61,23 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     # lets a teacher issue her own, always scoped to her own authority.
     agent_access: Mapped[str] = mapped_column(
         Text, nullable=False, server_default="off")
+    # One of `core/features.TIERS` — free | pro | max | ultra (`D-106`). The
+    # derived cache of the newest `plan_changes` row (law 3): read it freely,
+    # but write it only through the service that appends the history.
     plan: Mapped[str] = mapped_column(Text, nullable=False, server_default="free")
+    # `D-106`: how this org's plan got set. `manual` = the operator assigned it
+    # from the platform screen, which is the only path today. The Razorpay
+    # webhook REFUSES to touch a `manual` org — otherwise one replayed
+    # subscription event would quietly downgrade a school we just put on ultra.
+    plan_source: Mapped[str] = mapped_column(Text, nullable=False, server_default="manual")
+    # When a hand-set plan lapses. NULL = no end date. Nothing downgrades on
+    # this automatically (`ENABLE_SCHEDULER` is off); the operator's "expiring
+    # soon" list reads it.
+    plan_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # Subscription lifecycle (plan P4-BE-01). 'none' on Free; 'active'/'grace' on
-    # Pro. Grace = a payment failed but we don't downgrade for 7 days, and we
-    # never delete anything — Free simply re-limits.
+    # a paid tier. Grace = a payment failed but we don't downgrade for 7 days,
+    # and we never delete anything — a downgrade only re-locks screens.
     plan_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="none")
     plan_renews_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     grace_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -99,7 +112,8 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
         Boolean, nullable=False, server_default=text("false"))
 
     __table_args__ = (
-        CheckConstraint("plan IN ('free', 'pro')", name="plan_valid"),
+        CheckConstraint("plan IN ('free', 'pro', 'max', 'ultra')", name="plan_valid"),
+        CheckConstraint("plan_source IN ('manual', 'billing')", name="plan_source_valid"),
         CheckConstraint("plan_status IN ('none', 'active', 'grace')", name="plan_status_valid"),
         CheckConstraint("band_b_min > 0 AND band_b_min < band_a_min AND band_a_min <= 100",
                         name="band_thresholds_valid"),

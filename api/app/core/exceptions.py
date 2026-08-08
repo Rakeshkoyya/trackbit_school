@@ -50,8 +50,15 @@ class ValidationError(AppError):
 
 
 class PlanLimitError(AppError):
-    """A Free-plan cap was hit. Never silent — carries a structured upgrade
-    prompt the client renders (plan P4-BE-01). 402 Payment Required."""
+    """The school's plan does not include this feature. Never silent — carries
+    a structured upgrade prompt the client renders. 402 Payment Required.
+
+    `required_tier` is what makes the prompt actionable (`D-106`): the wall can
+    name the tier and quote this school's own price rather than saying
+    "upgrade" and leaving them to work out which one. Raised from
+    `core/features.py::require_feature`, which should be the only thing that
+    constructs it.
+    """
 
     status_code = 402
     code = "plan_limit"
@@ -60,17 +67,16 @@ class PlanLimitError(AppError):
         self,
         feature: str,
         *,
+        required_tier: str,
         message: str,
-        limit: int | None = None,
-        current: int | None = None,
+        feature_label: str = "",
     ):
         super().__init__(
             message,
             details={
                 "feature": feature,
-                "plan": "free",
-                "limit": limit,
-                "current": current,
+                "feature_label": feature_label or feature,
+                "required_tier": required_tier,
                 "upgrade": True,
             },
         )

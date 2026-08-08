@@ -1,8 +1,13 @@
-"""Task attachments — notes + photos (plan P4-BE-02, Pro feature R6).
+"""Task attachments — notes + photos (plan P4-BE-02).
 
 Each addition appends to the append-only chain ('commented' for notes,
 'attached' for photos) so they show up in task history, and the row lives in the
 attachments table for rendering. Storage rides the adapter (R2 or local).
+
+`D-109`: attachments were a Free-vs-Pro toggle inherited from the task-management
+seed. They are no longer gated on their own — the whole Tasks module now sits
+behind `Feature.TASKS_BOARDS` (max), so a school that can reach a task can use
+every part of one.
 """
 
 import uuid
@@ -11,7 +16,6 @@ from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core import plans
 from app.core.context import CurrentMember
 from app.core.exceptions import ValidationError
 from app.core.visibility import can_view_board
@@ -57,7 +61,6 @@ class AttachmentService:
 
     def add_note(self, member: CurrentMember, instance_id: uuid.UUID, content: str) -> AttachmentOut:
         inst = self._load_task(member, instance_id)
-        plans.enforce_attachments_allowed(member.org)
         a = Attachment(instance_id=inst.id, uploaded_by=member.user_id, kind="note", content=content)
         self.db.add(a)
         self.db.flush()
@@ -68,7 +71,6 @@ class AttachmentService:
 
     def add_photo(self, member: CurrentMember, instance_id: uuid.UUID, file: UploadFile) -> AttachmentOut:
         inst = self._load_task(member, instance_id)
-        plans.enforce_attachments_allowed(member.org)
         content_type = file.content_type or "application/octet-stream"
         if content_type not in _ALLOWED_IMAGE:
             raise ValidationError("Only JPEG, PNG, WebP, or GIF images are supported.",

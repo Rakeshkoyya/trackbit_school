@@ -100,6 +100,13 @@ from app.models.staff import (
 )
 from app.models.students import Guardian, Student, StudentCategory, StudentNote
 from app.models.task import EVENT_TYPES, Attachment, TaskEvent, TaskInstance, TaskTemplate
+from app.models.tiers import (
+    UPGRADE_REQUEST_STATUSES,
+    PlanChange,
+    PlanPrice,
+    UpgradeRequest,
+    UpgradeRequestNote,
+)
 from app.models.timetable import TimetableSlot
 from app.models.user import User
 
@@ -172,8 +179,10 @@ __all__ = [
     "ParentLoginAttempt",
     "Plan",
     "PlanApproval",
+    "PlanChange",
     "PlanComment",
     "PlanEntry",
+    "PlanPrice",
     "PeriodSubstitution",
     "SchoolClass",
     "ScoreCapture",
@@ -205,5 +214,8 @@ __all__ = [
     "TaskTemplate",
     "TimesheetEntry",
     "TimetableSlot",
+    "UPGRADE_REQUEST_STATUSES",
+    "UpgradeRequest",
+    "UpgradeRequestNote",
     "User",
 ]

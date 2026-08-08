@@ -279,6 +279,9 @@ def test_report_card_job_queues_for_admin(client, org_ctx):
     try:
         org = db.get(Organization, uuid.UUID(org_id))
         org.report_card_hour = org_now(org.timezone).hour  # fire this hour
+        # The EOD report card is the TASK rollup, so it rides the Tasks feature
+        # (max). The school's own daily report is free and unaffected.
+        org.plan = "max"
         db.commit()
     finally:
         db.close()

@@ -6,7 +6,6 @@ from sqlalchemy import and_, func, select
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.orm import Session
 
-from app.core import plans
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.core.timeutil import org_day_bounds
@@ -105,7 +104,6 @@ class BoardService:
         )
 
     def create(self, member: CurrentMember, req: BoardCreateRequest) -> BoardOut:
-        plans.enforce_board_quota(self.db, member.org)
         board = Board(
             org_id=member.org_id, name=req.name, visibility=req.visibility,
             task_scope=req.task_scope, category=req.category,

@@ -39,7 +39,20 @@ def org_ctx(client, unique_email, cleanup):
     ).json()
     cleanup["orgs"].append(uuid.UUID(reg["org"]["id"]))
     cleanup["users"].append(uuid.UUID(reg["user"]["id"]))
+    # Every org is born `manual` (`D-106`) and the webhook refuses to touch one.
+    # These tests are about the gateway-owned path, which in the real flow is
+    # entered by completing checkout — so stamp it, as checkout would.
+    _set_source(reg["org"]["id"], "billing")
     return {"admin_token": reg["access_token"], "org_id": reg["org"]["id"]}
+
+
+def _set_source(org_id: str, source: str) -> None:
+    db = AdminSession()
+    try:
+        db.get(Organization, uuid.UUID(org_id)).plan_source = source
+        db.commit()
+    finally:
+        db.close()
 
 
 def _post_webhook(client, event: str, sub_id: str, *, org_id: str | None = None,
@@ -66,6 +79,34 @@ def _plan(org_id: str) -> Organization:
         return db.get(Organization, uuid.UUID(org_id))
     finally:
         db.close()
+
+
+def test_webhook_refuses_a_manually_planned_org(client, org_ctx, _webhook_secret):
+    """`D-106` / §1.8 — the trap this guard exists for.
+
+    Every real org today is `manual`: the operator sets its tier by hand. A
+    stray or replayed `subscription.cancelled` must not silently downgrade a
+    school we just put on ultra. The webhook still answers 200 (Razorpay must
+    not retry forever) but changes nothing.
+    """
+    org_id = org_ctx["org_id"]
+    _set_source(org_id, "manual")
+
+    db = AdminSession()
+    try:
+        org = db.get(Organization, uuid.UUID(org_id))
+        org.plan = "ultra"
+        db.commit()
+    finally:
+        db.close()
+
+    r = _post_webhook(client, "subscription.cancelled",
+                      f"sub_{uuid.uuid4().hex[:12]}", org_id=org_id)
+    assert r.status_code == 200
+    assert r.json()["ignored"] == "manual_plan"
+    after = _plan(org_id)
+    assert after.plan == "ultra", "a manual plan must survive a billing webhook"
+    assert after.plan_source == "manual"
 
 
 def test_webhook_flips_plan_both_directions(client, org_ctx, _webhook_secret):
@@ -137,12 +178,16 @@ def test_checkout_stub_when_unconfigured(client, org_ctx):
 
 
 def test_downgrade_is_non_destructive(client, org_ctx, _webhook_secret):
-    """A Pro org with extra boards keeps them after downgrade — just can't add more."""
+    """A Pro org with extra boards keeps every one of them after downgrade.
+
+    `D-109` narrowed what this proves: there is no quota to fall back under any
+    more, so the point is purely that a downgrade DELETES NOTHING. Re-locking a
+    screen is a tier gate (P4); it never touches rows."""
     org_id = org_ctx["org_id"]
     sub_id = f"sub_{uuid.uuid4().hex[:12]}"
     _post_webhook(client, "subscription.activated", sub_id, org_id=org_id)
 
-    # On Pro: create 3 extra boards (well past the Free cap of 2).
+    # On Pro: create 3 extra boards.
     for i in range(3):
         assert client.post(
             "/api/v1/boards", headers=_auth(org_ctx["admin_token"]),
@@ -159,8 +204,9 @@ def test_downgrade_is_non_destructive(client, org_ctx, _webhook_secret):
     total_after = len(boards_after["my_boards"]) + len(boards_after["other_public"])
     assert total_after == total_before  # nothing deleted
 
-    # But a new board is now blocked.
+    # ...and still works afterwards: a downgrade re-locks screens, it does not
+    # meter what is left behind them (`D-109`).
     assert client.post(
         "/api/v1/boards", headers=_auth(org_ctx["admin_token"]),
-        json={"name": "OneMore"},
-    ).status_code == 402
+        json={"name": f"OneMore-{random.randint(0, 9999)}"},
+    ).status_code == 200

@@ -46,13 +46,16 @@ def task_ctx(client, unique_email, cleanup):
     return {"token": token, "org_id": reg["org"]["id"], "task_id": task["id"]}
 
 
-def test_attachments_blocked_on_free(client, task_ctx):
+def test_attachments_are_not_separately_gated(client, task_ctx):
+    """`D-109`: attachments were a Free-vs-Pro toggle inherited from the
+    task-management seed. Tasks is now all-or-nothing behind
+    `Feature.TASKS_BOARDS`, so a school that can open a task can attach to it."""
     r = client.post(
         f"/api/v1/tasks/{task_ctx['task_id']}/notes", headers=_auth(task_ctx["token"]),
         json={"content": "A note"},
     )
-    assert r.status_code == 402
-    assert r.json()["error"]["details"]["feature"] == "attachments"
+    assert r.status_code == 200, r.text
+    assert r.json()["content"] == "A note"
 
 
 def test_note_and_photo_appear_in_history(client, task_ctx):

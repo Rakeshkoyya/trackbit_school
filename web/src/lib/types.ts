@@ -21,11 +21,17 @@ export interface User {
   phone: string | null;
 }
 
+/** The four package tiers, cheapest first (`D-106`). Cumulative: `max`
+ *  includes everything in `pro`, which includes everything in `free`.
+ *  Never branch on this in a component — ask for a FEATURE instead, so the
+ *  browser never carries a second copy of `core/features.py`'s tier map. */
+export type PlanTier = "free" | "pro" | "max" | "ultra";
+
 export interface Org {
   id: string;
   name: string;
   timezone: string;
-  plan: "free" | "pro";
+  plan: PlanTier;
   /** Set once TrackBit has handed the school over. From then on the school's
    *  structure — year, terms, classes, subjects, who teaches what, syllabus,
    *  timetable — is changed by us, not by the school (SETUP-REDESIGN-PLAN §6).
@@ -37,7 +43,7 @@ export interface Org {
 export interface OrgSummary {
   id: string;
   name: string;
-  plan: "free" | "pro";
+  plan: PlanTier;
   org_role: OrgRole;
 }
 
@@ -330,15 +336,6 @@ export interface History {
 }
 
 // ---- Billing + settings (S9, P4) ----
-export interface PlanLimits {
-  boards: number | null;
-  members: number | null;
-  report_days: number;
-  report_card: boolean;
-  attachments: boolean;
-  critical: boolean;
-}
-
 export interface OrgUsage {
   boards: number;
   members: number;
@@ -363,7 +360,7 @@ export interface OrgSettings {
   name: string;
   timezone: string;
   report_card_hour: number;
-  plan: "free" | "pro";
+  plan: PlanTier;
   plan_status: "none" | "active" | "grace";
   plan_renews_at: string | null;
   // V1-2 — setup & onboarding
@@ -380,7 +377,10 @@ export interface OrgSettings {
    *  locked exam captures. Default off, and asked for — no export path in v1. */
   training_data_opt_in: boolean;
   work_categories: WorkCategory[];
-  limits: PlanLimits;
+  /** Every feature this school's plan includes, computed server-side from
+   *  `core/features.py`. The browser reads this list and never re-derives the
+   *  tier map — one computation, many renderings. */
+  features: string[];
   usage: OrgUsage;
 }
 
@@ -394,7 +394,7 @@ export interface Invoice {
 }
 
 export interface Billing {
-  plan: "free" | "pro";
+  plan: PlanTier;
   plan_status: "none" | "active" | "grace";
   renews_at: string | null;
   grace_until: string | null;

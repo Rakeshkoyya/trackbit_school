@@ -7,7 +7,6 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.core import plans
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.core.recurrence import occurs_on
@@ -584,9 +583,6 @@ class TaskService:
         board = self._get_board(req.board_id)
         self._require_viewable(member, board)  # open model: any viewer can add
 
-        if req.is_critical:
-            plans.enforce_critical_allowed(member.org)
-
         # Privacy board: a regular member can only put a task on themselves
         # (they can't see anyone else's work, so they can't hand it off either).
         assignee_id = req.assignee_id
@@ -886,8 +882,6 @@ class TaskService:
                                 payload={"board_id": [str(old_board), str(req.board_id)],
                                          "reason": "moved_board"})
 
-        if req.is_critical and "is_critical" in req.model_fields_set:
-            plans.enforce_critical_allowed(member.org)
         diff: dict[str, list] = {}
         for field in ("title", "description", "category", "due_at", "all_day", "is_critical",
                       "priority"):

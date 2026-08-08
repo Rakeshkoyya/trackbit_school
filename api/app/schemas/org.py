@@ -81,7 +81,7 @@ class BulkMemberResult(BaseModel):
     ok: bool
     user_id: uuid.UUID | None = None
     password: str | None = None  # echoed back for the copyable summary on success
-    error: str | None = None  # code on failure (username_taken / invalid_username / plan_limit)
+    error: str | None = None  # code on failure (username_taken / invalid_username)
 
 
 class BulkMembersResponse(BaseModel):
@@ -107,15 +107,6 @@ class AdminResetPasswordResponse(BaseModel):
 
 
 # ---- org settings + usage (S9) ----------------------------------------
-class PlanLimitsOut(BaseModel):
-    boards: int | None
-    members: int | None
-    report_days: int
-    report_card: bool
-    attachments: bool
-    critical: bool
-
-
 class OrgUsageOut(BaseModel):
     boards: int
     members: int
@@ -170,7 +161,10 @@ class OrgSettingsOut(BaseModel):
     # entered it. No export path exists in v1.
     training_data_opt_in: bool = False
     work_categories: list[WorkCategoryOut] = []
-    limits: PlanLimitsOut
+    #: Every feature this school's plan includes (`core/features.py`), computed
+    #: server-side so no client re-derives the tier map. `D-106`: the map and
+    #: the price move on different clocks, so this list carries neither.
+    features: list[str] = []
     usage: OrgUsageOut
 
 

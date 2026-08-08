@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.core.database import SessionLocal
 from app.models import Board, Organization, TaskInstance, User
+from tests.conftest import AdminSession
 
 
 def _make_org(db, label: str) -> tuple[Organization, TaskInstance]:
@@ -53,3 +54,24 @@ def test_rls_denies_cross_org_reads():
     finally:
         db.rollback()  # never persist test fixtures
         db.close()
+
+
+def test_tier_tables_carry_org_isolation():
+    """Law 2: an org-scoped table gets its policy in its own migration.
+
+    `plan_changes` and `upgrade_requests` are org-scoped and must be isolated.
+    `plan_prices` and `upgrade_request_notes` deliberately are NOT — they are
+    platform tables with no `org_id`, and the notes especially must stay
+    unreachable from any org-scoped query (they hold the operator's commentary
+    on a live negotiation about that very school).
+    """
+    db = AdminSession()
+    try:
+        policed = set(db.execute(text(
+            "SELECT tablename FROM pg_policies WHERE tablename IN "
+            "('plan_changes', 'upgrade_requests', 'plan_prices', "
+            "'upgrade_request_notes')"
+        )).scalars().all())
+    finally:
+        db.close()
+    assert policed == {"plan_changes", "upgrade_requests"}

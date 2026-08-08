@@ -1,7 +1,8 @@
-"""Phase 4 — plan limits (P4-BE-01 enforcement) + F9 lifecycle hardening.
+"""Phase 4 — the F9 lifecycle edge table, plus the `D-109` quota removal.
 
-Limit enforcement and the F9 edge table are pure logic (no Razorpay/R2), so they
-verify end-to-end through the HTTP stack here.
+Pure logic (no Razorpay/R2), so it verifies end-to-end through the HTTP stack.
+The tier gate itself lives in `test_features.py`; what is asserted here is that
+the *old* Free/Pro metering is gone and stays gone.
 """
 
 import random
@@ -9,7 +10,7 @@ import uuid
 
 import pytest
 
-from app.models import Notification, Organization
+from app.models import Notification
 from tests.conftest import AdminSession
 
 
@@ -58,75 +59,51 @@ def org_ctx(client, unique_email, cleanup):
     }
 
 
-def _set_plan(org_id: str, plan: str) -> None:
-    db = AdminSession()
-    try:
-        org = db.get(Organization, uuid.UUID(org_id))
-        org.plan = plan
-        db.commit()
-    finally:
-        db.close()
-
-
-# ---- plan limits ------------------------------------------------------
-def test_free_board_cap_returns_structured_upgrade_error(client, org_ctx):
-    # Free = 2 boards. Register made "General"; fixture made "Ops". The 3rd fails.
-    resp = client.post(
-        "/api/v1/boards", headers=_auth(org_ctx["admin_token"]),
-        json={"name": "Third", "visibility": "public"},
-    )
-    assert resp.status_code == 402
-    err = resp.json()["error"]
-    assert err["code"] == "plan_limit"
-    assert err["details"]["feature"] == "boards"
-    assert err["details"]["upgrade"] is True
-    assert err["details"]["limit"] == 2
-
-    # Pro lifts the cap.
-    _set_plan(org_ctx["org_id"], "pro")
-    ok = client.post(
-        "/api/v1/boards", headers=_auth(org_ctx["admin_token"]),
-        json={"name": "Third", "visibility": "public"},
-    )
-    assert ok.status_code == 200
-
-
-def test_free_member_cap(client, org_ctx):
-    # Free = 8 members. Admin + Bob = 2 active. Add until the 9th fails.
-    last = None
-    for i in range(10):
-        last = client.post(
-            "/api/v1/org/members/invite", headers=_auth(org_ctx["admin_token"]),
-            json={"name": f"Hire {i}", "phone": _rand_phone(), "role": "teacher"},
+# ---- D-109: the inherited Free/Pro quotas are gone ---------------------
+# These three used to assert the caps. They now assert their ABSENCE, which is
+# the regression that matters: Tasks is all-or-nothing behind
+# `Feature.TASKS_BOARDS` (max), so a school that can reach the module is never
+# metered inside it. Re-introducing a quota should break these.
+def test_no_board_quota(client, org_ctx):
+    # The old Free plan stopped at 2 boards; register made "General" and the
+    # fixture made "Ops", so under the old rule the first of these would 402.
+    for name in ("Third", "Fourth", "Fifth"):
+        resp = client.post(
+            "/api/v1/boards", headers=_auth(org_ctx["admin_token"]),
+            json={"name": name, "visibility": "public"},
         )
-        if last.status_code == 402:
-            break
-        if last.status_code == 200 and "user_id" in last.json():
-            pass
-    assert last.status_code == 402
-    assert last.json()["error"]["details"]["feature"] == "members"
+        assert resp.status_code == 200, resp.text
 
 
-def test_free_blocks_critical_task(client, org_ctx):
+def test_no_member_seat_cap(client, org_ctx):
+    # 8 active members was the old ceiling — a number no school is. Admin + Bob
+    # are already active, so this takes the org well past it.
+    for i in range(9):
+        inv = org_ctx["invite"](f"Hire {i}")
+        assert "user_id" in inv, inv
+
+
+def test_critical_task_is_not_gated(client, org_ctx):
     resp = client.post(
         "/api/v1/tasks", headers=_auth(org_ctx["admin_token"]),
         json={"board_id": org_ctx["board_id"], "title": "Alarm me", "is_critical": True},
     )
-    assert resp.status_code == 402
-    assert resp.json()["error"]["details"]["feature"] == "critical"
-
-    _set_plan(org_ctx["org_id"], "pro")
-    ok = client.post(
-        "/api/v1/tasks", headers=_auth(org_ctx["admin_token"]),
-        json={"board_id": org_ctx["board_id"], "title": "Alarm me", "is_critical": True},
-    )
-    assert ok.status_code == 200 and ok.json()["is_critical"] is True
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["is_critical"] is True
 
 
 def test_org_settings_get_and_update(client, org_ctx):
     s = client.get("/api/v1/org/settings", headers=_auth(org_ctx["admin_token"])).json()
     assert s["plan"] == "free"
-    assert s["limits"]["boards"] == 2 and s["limits"]["report_card"] is False
+    # The settings payload carries the computed feature list, not a tier name a
+    # client would have to map itself.
+    features = set(s["features"])
+    # D-107 — every capture surface is free, in full.
+    assert {"capture.attendance", "capture.homework", "capture.lesson_log"} <= features
+    # ...and nothing above free is.
+    assert "fees.collection" not in features  # pro
+    assert "tasks.boards" not in features  # max
+    assert "agent.mcp" not in features  # ultra
     assert s["usage"]["boards"] == 2  # General + Ops
 
     upd = client.patch(
@@ -144,7 +121,6 @@ def test_org_settings_get_and_update(client, org_ctx):
 
 # ---- F9 lifecycle -----------------------------------------------------
 def test_board_ownership_transfers_when_owner_removed(client, org_ctx):
-    _set_plan(org_ctx["org_id"], "pro")  # lift board cap so the 2nd admin can create
     bea = org_ctx["invite"]("Bea", role="admin")
     bea_token = org_ctx["join"](bea)
     bea_board = client.post(
