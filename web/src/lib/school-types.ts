@@ -1281,6 +1281,66 @@ export interface Installment {
   paid_amount: string;
   status: string;
   paid_date: string | null;
+  /** `D-127` — voided by a transfer. Still rendered, struck through: what was
+   *  originally scheduled is exactly what somebody asks about later. */
+  is_voided: boolean;
+}
+
+/** FE-1 `D-117` — one class of the year, priced or not.
+ *  `structure_id === null` is the "not priced" row. It renders as a WORD, never
+ *  ₹0, which would read as "this class is free". */
+export interface ClassCoverageRow {
+  class_name: string;
+  sections: string[];
+  students_total: number;
+  structure_id: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  total_amount: string | null;
+  num_installments: number | null;
+  students_on: number;
+  students_unset: number;
+}
+
+export interface StructureCoverage {
+  academic_year_id: string;
+  classes_total: number;
+  classes_priced: number;
+  rows: ClassCoverageRow[];
+}
+
+/** FE-1 `D-124` — the actor log. `summary` is already a finished sentence
+ *  written server-side; never re-compose it from `kind` and `meta`. */
+export interface FeeEvent {
+  id: string;
+  kind: string;
+  summary: string;
+  meta: Record<string, unknown>;
+  actor_name: string | null;
+  student_fee_id: string | null;
+  fee_structure_id: string | null;
+  created_at: string;
+}
+
+/** FE-1 `D-122` — proof of a payment. `url` is minted per read (presigned GETs
+ *  expire), so never cache it. */
+export interface FeeProof {
+  id: string;
+  transaction_id: string;
+  kind: "photo" | "pdf";
+  url: string;
+  content_type: string;
+  size_bytes: number;
+  caption: string | null;
+  uploaded_by_name: string | null;
+  created_at: string;
+}
+
+export interface ApplyStructureResult {
+  created: number;
+  skipped_existing: number;
+  skipped_no_class: number;
+  message: string;
 }
 
 export interface StudentFeeListItem {
@@ -1325,6 +1385,9 @@ export interface FeeTransaction {
   note: string | null;
   mode: string | null;
   receipt_number: string | null;
+  /** The date the money changed hands — NOT `created_at`. A payment taken on
+   *  Saturday is often entered on Monday, and the receipt has to say Saturday. */
+  paid_on: string | null;
   created_at: string;
   created_by_name: string | null;
 }

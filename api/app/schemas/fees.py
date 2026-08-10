@@ -134,9 +134,50 @@ class PaymentIn(BaseModel):
     amount: Decimal
     installment_number: int | None = None  # only used by the enrolment first-payment
     mode: str | None = Field(default=None, max_length=20)
+    # `D-128`: left empty, the server generates `FR/2026-27/001` from a locked
+    # counter. Still writable, because a school reconciling against a
+    # pre-printed book has to type the number on the paper in front of it.
     receipt_number: str | None = Field(default=None, max_length=60)
     paid_on: date | None = None
     note: str | None = Field(default=None, max_length=500)
+    # `D-122`: an already-uploaded object key, so a payment and its proof land
+    # in one round trip instead of two. Optional, always — making proof
+    # mandatory would stop a cash payment being recorded at the counter, which
+    # is the one thing this screen must never do.
+    proof_key: str | None = Field(default=None, max_length=400)
+
+
+# ── proof of payment (`D-122`, `D-123`) ──────────────────────────────────────
+class PresignProofIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=200)
+    content_type: str = Field(min_length=3, max_length=100)
+
+
+class PresignProofOut(BaseModel):
+    """`url is None` means R2 is not configured, so the client should POST the
+    bytes to the pass-through upload route instead. Same two-step shape HS-1
+    uses for session media — there is no second storage path."""
+
+    key: str
+    url: str | None = None
+
+
+class ConfirmProofIn(BaseModel):
+    key: str = Field(min_length=1, max_length=400)
+    caption: str | None = Field(default=None, max_length=200)
+
+
+class ProofOut(BaseModel):
+    id: uuid.UUID
+    transaction_id: uuid.UUID
+    kind: str
+    # Minted per read: presigned GETs expire, so a stored URL would rot.
+    url: str
+    content_type: str
+    size_bytes: int
+    caption: str | None = None
+    uploaded_by_name: str | None = None
+    created_at: datetime
 
 
 class InstallmentIn(BaseModel):
@@ -163,6 +204,15 @@ class StudentFeeUpdate(BaseModel):
     opening_dues: Decimal | None = None
 
 
+class CloseFeeIn(BaseModel):
+    """`D-127`, founder Q-2 — the student transferred out.
+
+    Closing voids the unpaid instalments, drops the payable to what was actually
+    billed and paid, and marks the record `closed`. It is reversible."""
+
+    reason: str | None = Field(default=None, max_length=300)
+
+
 class InstallmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -173,6 +223,9 @@ class InstallmentOut(BaseModel):
     paid_amount: Decimal
     status: str
     paid_date: date | None
+    # `D-127`: voided by a transfer. Still rendered — struck through — because
+    # what was originally scheduled is exactly what somebody asks about later.
+    is_voided: bool = False
 
 
 class StudentFeeListItem(BaseModel):
@@ -213,6 +266,31 @@ class DueDateUpdate(BaseModel):
     due_date: date | None = None
 
 
+# ── the mutable schedule (`D-121`) ───────────────────────────────────────────
+class SplitInstallmentIn(BaseModel):
+    """Divide one instalment into several — the founder's *"some parent wants
+    more installments to pay"* case.
+
+    Splitting is the operation to reach for first because **the total is
+    preserved by construction**: `parts` equal shares, or explicit `amounts`
+    that must sum to the original. Anything already paid stays on the first
+    part, so money that has landed is never re-billed."""
+
+    parts: int | None = Field(default=None, ge=2, le=12)
+    amounts: list[Decimal] | None = Field(default=None, max_length=12)
+
+
+class AddInstallmentIn(BaseModel):
+    """Append an instalment, taking its amount out of the UNPAID ones.
+
+    The total payable does not move: this re-arranges the schedule, it does not
+    change what the family owes. Changing that is a discount."""
+
+    amount: Decimal
+    due_date: date | None = None
+    label: str | None = Field(default=None, max_length=60)
+
+
 class TransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -222,6 +300,9 @@ class TransactionOut(BaseModel):
     note: str | None
     mode: str | None
     receipt_number: str | None
+    # The date the money changed hands — NOT `created_at`. A payment taken on
+    # Saturday is often entered on Monday, and the receipt has to say Saturday.
+    paid_on: date | None = None
     created_at: datetime
     created_by_name: str | None
 

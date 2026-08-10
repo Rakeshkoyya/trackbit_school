@@ -1,145 +1,75 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IndianRupee, Layers, Plus, Search } from "lucide-react";
-import Link from "next/link";
+/**
+ * Fees → Dashboard (FE-1).
+ *
+ * The V1-10 collection board, unchanged — quarter strip, pace marker, class
+ * table with both denominators, named defaulters. It is the one computation
+ * every fee screen renders (`S-152`), and nothing here re-derives any part of it.
+ *
+ * What FE-1 adds is the **empty state**. A school that has not priced anything
+ * yet used to land on a board of zeroes, which reads as "you have collected
+ * nothing" rather than "you have not started". Zero and not-yet are different
+ * facts, and only one of them is anybody's fault.
+ *
+ * The student list that used to live under this board has moved to its own tab,
+ * where it belongs and where it can show the children nobody has set up.
+ */
+
+import { useQuery } from "@tanstack/react-query";
+import { IndianRupee } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { CollectionBoard } from "@/components/school/collection-board";
 import { YearSwitcher } from "@/components/school/year-switcher";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Sheet } from "@/components/ui/sheet";
 import { useYear } from "@/contexts/year-context";
-import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import { money } from "@/lib/school-format";
 
-const STATUS_TONE: Record<string, "success" | "neutral" | "warning" | "outline"> = {
-  paid: "success", partial: "outline", overdue: "warning", pending: "neutral",
-};
-
-
-function EnrollSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const qc = useQueryClient();
-  const { yearId } = useYear();
-  const [studentId, setStudentId] = useState("");
-  const [total, setTotal] = useState("");
-  const [discount, setDiscount] = useState("0");
-  const [structureId, setStructureId] = useState("");
-  const { data: students = [] } = useQuery({ queryKey: ["students"], queryFn: () => schoolApi.students() });
-  const { data: structures = [] } = useQuery({ queryKey: ["structures", yearId], queryFn: () => schoolApi.structures(yearId ?? undefined), enabled: !!yearId });
-
-  const enroll = useMutation({
-    mutationFn: () => schoolApi.enroll({
-      student_id: studentId, academic_year_id: yearId, total_fee: total,
-      discount: discount || "0", fee_structure_id: structureId || null,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["student-fees"] });
-      toast.success("Student enrolled for fees");
-      setStudentId(""); setTotal(""); setDiscount("0"); setStructureId("");
-      onOpenChange(false);
-    },
-    onError: (e) => showApiError(e, "Could not enrol"),
-  });
-
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange} title="Enrol student for fees">
-      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (studentId && total && yearId) enroll.mutate(); }}>
-        <div>
-          <Label>Student</Label>
-          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={studentId} onChange={(e) => setStudentId(e.target.value)} required>
-            <option value="">Select…</option>
-            {students.map((s) => <option key={s.id} value={s.id}>{s.full_name} · {s.admission_no}</option>)}
-          </select>
-        </div>
-        <div>
-          <Label>Fee structure (optional — scales installments)</Label>
-          <select className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm" value={structureId} onChange={(e) => setStructureId(e.target.value)}>
-            <option value="">None (single installment)</option>
-            {structures.map((s) => <option key={s.id} value={s.id}>{s.class_name}{s.category_name ? ` · ${s.category_name}` : ""} · {money(s.total_amount)}</option>)}
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div><Label>Total fee</Label><Input type="number" value={total} onChange={(e) => setTotal(e.target.value)} required /></div>
-          <div><Label>Discount</Label><Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} /></div>
-        </div>
-        <Button type="submit" className="w-full" disabled={enroll.isPending || !studentId || !total || !yearId}>
-          {enroll.isPending ? "Enrolling…" : "Enrol"}
-        </Button>
-      </form>
-    </Sheet>
-  );
-}
-
-function FeesInner() {
+function DashboardInner() {
   const router = useRouter();
   const { yearId } = useYear();
-  const [query, setQuery] = useState("");
-  const [enrollOpen, setEnrollOpen] = useState(false);
-  const { data: rows = [] } = useQuery({
-    queryKey: ["student-fees", yearId, query],
-    queryFn: () => schoolApi.studentFees({ year_id: yearId ?? undefined, search: query.trim() || undefined }),
+
+  const { data: coverage, isLoading } = useQuery({
+    queryKey: ["structure-coverage", yearId],
+    queryFn: () => schoolApi.structureCoverage(yearId!),
     enabled: !!yearId,
   });
 
+  const nothingPriced = !!coverage && coverage.classes_priced === 0;
+
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Fees</h1>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <YearSwitcher />
-          <Link href="/fees/structures"><Button size="sm" variant="outline"><Layers className="h-4 w-4" /> Structures</Button></Link>
-          <Button size="sm" onClick={() => setEnrollOpen(true)}><Plus className="h-4 w-4" /> Enrol</Button>
-        </div>
+      <div className="mb-4 flex justify-end">
+        <YearSwitcher />
       </div>
 
-      {/* V1-10 (`S-152`): the collection board replaces the four bare numbers
-          that used to lead this page — two amounts, one amount-past-a-date and a
-          COUNT of instalments, with no sentence and nothing named. */}
-      <CollectionBoard yearId={yearId} />
-
-      <h2 className="mb-2 mt-8 text-sm font-semibold">Every student</h2>
-      <div className="relative mb-4">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input className="pl-9" placeholder="Search student…" value={query} onChange={(e) => setQuery(e.target.value)} />
-      </div>
-
-      {rows.length === 0 ? (
-        <EmptyState icon={IndianRupee} title="No fee records yet" body="Enrol a student to start tracking installments and payments." />
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : nothingPriced ? (
+        <EmptyState
+          icon={IndianRupee}
+          title="No fees priced for this year yet"
+          body="The fee structure is the year's backbone — a total and an instalment schedule per class. Start there, then set your students up in one action."
+          action={
+            <Button size="sm" onClick={() => router.push("/fees/structure")}>
+              Set the fee structure
+            </Button>
+          }
+        />
       ) : (
-        <div className="space-y-2">
-          {rows.map((r) => (
-            <button key={r.id} onClick={() => router.push(`/fees/${r.id}`)} className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-muted/40">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{r.student_name}</p>
-                <p className="truncate text-xs text-muted-foreground">{r.class_label ?? "—"}{r.category_name ? ` · ${r.category_name}` : ""}</p>
-              </div>
-              <div className="text-right text-xs">
-                <p className="font-medium">{money(r.paid)} <span className="text-muted-foreground">/ {money(r.net_fee)}</span></p>
-                <p className="text-muted-foreground">{money(r.pending)} due</p>
-              </div>
-              <Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{r.status}</Badge>
-            </button>
-          ))}
-        </div>
+        <CollectionBoard yearId={yearId} />
       )}
-      <EnrollSheet open={enrollOpen} onOpenChange={setEnrollOpen} />
     </div>
   );
 }
 
-export default function FeesPage() {
+export default function FeesDashboardPage() {
   return (
     <AuthGuard allow={["admin"]}>
-      <FeesInner />
+      <DashboardInner />
     </AuthGuard>
   );
 }

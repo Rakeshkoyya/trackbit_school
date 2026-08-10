@@ -82,7 +82,7 @@ from app.schemas.collection import (
     RemindOut,
     YearCollection,
 )
-from app.services.fee_math import q
+from app.services.fee_math import live_installments, q
 from app.services.notify_guardian import notify_guardians
 from app.services.school_clock import today_in
 
@@ -140,7 +140,7 @@ class CollectionService:
         for sf in rows:
             class_id = sf.student.class_id if sf.student else None
             roster_by_class[class_id].add(sf.id)
-            for inst in sf.installments:
+            for inst in live_installments(sf.installments):
                 amount, paid = q(inst.amount), q(inst.paid_amount)
                 unpaid = q(amount - paid)
                 qlabel = quarter_of(inst.due_date, windows)
@@ -286,7 +286,7 @@ class CollectionService:
         owing: list[tuple[StudentFee, float, date | None]] = []
         for sf in rows:
             overdue_amt, earliest = 0.0, None
-            for inst in sf.installments:
+            for inst in live_installments(sf.installments):
                 unpaid = float(q(inst.amount) - q(inst.paid_amount))
                 if unpaid > 0 and inst.due_date and inst.due_date < today:
                     overdue_amt += unpaid
@@ -650,7 +650,7 @@ class CollectionService:
         family owes nothing — which is what makes the reminder stop the moment a
         payment lands."""
         total, earliest = 0.0, None
-        for inst in sf.installments:
+        for inst in live_installments(sf.installments):
             unpaid = float(q(inst.amount) - q(inst.paid_amount))
             if unpaid <= 0:
                 continue

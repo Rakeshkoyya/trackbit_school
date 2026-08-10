@@ -6,7 +6,7 @@ ledger is append-only — undo writes a compensating row (SPRD §4.6 invariants)
 """
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -15,6 +15,7 @@ from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
+    FeeEvent,
     FeeInstallmentTemplate,
     FeeStructure,
     Installment,
@@ -25,6 +26,7 @@ from app.models import (
     Transaction,
 )
 from app.schemas.fees import (
+    CloseFeeIn,
     DueDateUpdate,
     FeeStructureCreate,
     FeeStructureOut,
@@ -39,13 +41,17 @@ from app.schemas.fees import (
     TemplateOut,
     TransactionOut,
 )
+from app.services import fee_events
 from app.services.fee_math import (
     aggregate_paid,
+    assert_balanced,
     installment_status,
+    live_installments,
     proportional_installments,
     q,
     recompute_student_fee,
 )
+from app.services.fee_proofs import FeeProofService, next_receipt_number
 
 
 class FeeService:
@@ -349,6 +355,132 @@ class FeeService:
                     i.amount = q(q(i.paid_amount) + scaled[idx])
             self.db.add(self._txn(m, sf.id, None, q(sf.net_fee - old_net), "discount",
                                   f"Discount updated to ₹{sf.discount}"))
+            fee_events.record(
+                self.db, m, "discount_changed",
+                f"{self._who(sf)}'s discount set to ₹{q(sf.discount):,.0f} — "
+                f"net payable is now ₹{q(sf.net_fee):,.0f}. The unpaid "
+                "instalments were re-scaled to match.",
+                student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+                meta={"discount": str(q(sf.discount)),
+                      "net_fee": str(q(sf.net_fee))},
+            )
+        recompute_student_fee(sf)
+        self.db.flush()
+        return self._detail(sf)
+
+    # ── D-127: the transfer ──────────────────────────────────────────────────
+    def close_record(self, m: CurrentMember, sf_id: uuid.UUID,
+                     body: CloseFeeIn) -> StudentFeeDetail:
+        """The student has transferred out (founder Q-2).
+
+        What happens, in his words: *"the amount will be closed and remaining
+        balance will be detected from total and the student status will be
+        closed"*. Concretely:
+
+        * an instalment with nothing paid against it is **voided** — not
+          deleted (law 3), so the transfer can be undone and so the family page
+          can still show what was originally scheduled;
+        * a part-paid instalment is trimmed to what was actually paid, so the
+          unpaid remainder comes off the bill rather than being chased;
+        * `net_fee` drops to the sum of what survives, which zeroes the balance;
+        * the record goes `closed` and leaves the collection board alone.
+
+        The undo buffer is the event's own `meta` snapshot. That is deliberate:
+        the log is append-only and already the thing nobody may rewrite, so
+        putting the restore data there means an undo cannot outlive its record.
+        """
+        sf = self._load_sf(m.org_id, sf_id)
+        if sf.closed_at is not None:
+            raise ValidationError("This fee record is already closed.")
+
+        snapshot = [
+            {"id": str(i.id), "amount": str(q(i.amount)),
+             "is_voided": bool(i.is_voided)}
+            for i in sf.installments
+        ]
+        released = q(0)
+        for inst in sf.installments:
+            if inst.is_voided:
+                continue
+            paid = q(inst.paid_amount)
+            amount = q(inst.amount)
+            if paid <= 0:
+                inst.is_voided = True
+                released = q(released + amount)
+            elif paid < amount:
+                released = q(released + (amount - paid))
+                inst.amount = paid
+        kept = q(sum(q(i.amount) for i in sf.installments if not i.is_voided))
+
+        sf.net_fee = kept
+        sf.closed_at = datetime.now(UTC)
+        sf.closed_reason = body.reason
+        sf.closed_by_member_id = m.membership.id
+        sf.status = "closed"
+
+        self.db.add(self._txn(
+            m, sf.id, None, q(-released), "installment_edit",
+            f"Record closed on transfer — ₹{released} written off"))
+        fee_events.record(
+            self.db, m, "record_closed",
+            f"{self._who(sf)}'s fee record was closed on transfer. "
+            f"₹{released:,.0f} of unpaid instalments came off the bill; "
+            f"₹{kept:,.0f} stands as billed."
+            + (f" Reason: {body.reason}" if body.reason else ""),
+            student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+            meta={"released": str(released), "previous_net_fee": str(kept + released),
+                  "installments": snapshot},
+        )
+        self.db.flush()
+        return self._detail(sf)
+
+    def reopen_record(self, m: CurrentMember, sf_id: uuid.UUID) -> StudentFeeDetail:
+        """Undo the transfer — the founder asked for this in the same breath:
+        *"we can open the stundent and undo the transfer as well"*.
+
+        Restores from the snapshot the close wrote into the log. If there is no
+        snapshot to restore from we refuse rather than guess: silently
+        re-inventing a schedule would put amounts in front of a family that
+        nobody ever agreed.
+        """
+        sf = self._load_sf(m.org_id, sf_id)
+        if sf.closed_at is None:
+            raise ValidationError("This fee record is not closed.")
+
+        last = self.db.scalar(
+            select(FeeEvent)
+            .where(FeeEvent.org_id == m.org_id, FeeEvent.student_fee_id == sf.id,
+                   FeeEvent.kind == "record_closed")
+            .order_by(FeeEvent.created_at.desc()).limit(1)
+        )
+        if last is None or not last.meta.get("installments"):
+            raise ValidationError(
+                "There is no record of how this fee looked before it was "
+                "closed, so it cannot be restored automatically.")
+
+        by_id = {row["id"]: row for row in last.meta["installments"]}
+        for inst in sf.installments:
+            row = by_id.get(str(inst.id))
+            if row is None:
+                continue
+            inst.amount = q(row["amount"])
+            inst.is_voided = bool(row["is_voided"])
+        sf.net_fee = q(last.meta.get("previous_net_fee", sf.net_fee))
+        sf.closed_at = None
+        sf.closed_reason = None
+        sf.closed_by_member_id = None
+
+        assert_balanced(sf.net_fee, sf.installments)
+        self.db.add(self._txn(
+            m, sf.id, None, q(last.meta.get("released", 0)), "installment_edit",
+            "Record reopened — the transfer was undone"))
+        fee_events.record(
+            self.db, m, "record_reopened",
+            f"{self._who(sf)}'s fee record was reopened and the transfer undone. "
+            f"₹{q(sf.net_fee):,.0f} is payable again.",
+            student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+            meta={"restored_net_fee": str(q(sf.net_fee))},
+        )
         recompute_student_fee(sf)
         self.db.flush()
         return self._detail(sf)
@@ -363,8 +495,16 @@ class FeeService:
         return [TransactionOut.model_validate(t) for t in rows]
 
     # ── installment actions ──────────────────────────────────────────────────
+    def _who(self, sf: StudentFee) -> str:
+        return sf.student.full_name if sf.student else "this student"
+
     def pay(self, m: CurrentMember, inst_id: uuid.UUID, body: PaymentIn) -> StudentFeeDetail:
         inst, sf = self._load_installment(m.org_id, inst_id)
+        if sf.closed_at is not None:
+            raise ValidationError(
+                "This fee record is closed. Reopen it before recording a payment.")
+        if inst.is_voided:
+            raise ValidationError("That instalment was voided.")
         amount = q(body.amount)
         if amount <= 0:
             raise ValidationError("Payment amount must be positive.")
@@ -372,22 +512,62 @@ class FeeService:
         if amount > remaining:
             raise ValidationError(
                 f"Payment ₹{amount} exceeds remaining balance ₹{remaining} on this installment.")
+        paid_on = body.paid_on or date.today()
         inst.paid_amount = q(q(inst.paid_amount) + amount)
-        inst.paid_date = body.paid_on or date.today()
-        self.db.add(self._txn(m, sf.id, inst.id, amount, "payment", body.note,
-                              body.mode, body.receipt_number))
+        inst.paid_date = paid_on
+        # `D-128`: the school gets a receipt number without typing one, but a
+        # number it DID type always wins — reconciling against a pre-printed
+        # book is the case that breaks if we overwrite it.
+        receipt = body.receipt_number or next_receipt_number(
+            self.db, m.org_id, sf.academic_year_id)
+        txn = self._txn(m, sf.id, inst.id, amount, "payment", body.note,
+                        body.mode, receipt)
+        txn.paid_on = paid_on
+        self.db.add(txn)
+        self.db.flush()
+        if body.proof_key:
+            # One round trip for the payment and its evidence. Deliberately
+            # after the transaction is flushed, so the proof has a real id to
+            # hang off and a failed attach cannot lose the payment.
+            FeeProofService(self.db).confirm(m, txn.id, body.proof_key)
+        fee_events.record(
+            self.db, m, "payment_recorded",
+            f"₹{amount:,.0f} received from {self._who(sf)}"
+            + (f" by {body.mode}" if body.mode else "")
+            + (f" · receipt {receipt}" if receipt else "") + ".",
+            student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+            meta={"amount": str(amount), "mode": body.mode, "receipt": receipt,
+                  "installment_id": str(inst.id)},
+        )
         recompute_student_fee(sf)
         self.db.flush()
         return self._detail(sf)
 
     def mark_paid(self, m: CurrentMember, inst_id: uuid.UUID) -> StudentFeeDetail:
         inst, sf = self._load_installment(m.org_id, inst_id)
+        if sf.closed_at is not None:
+            raise ValidationError(
+                "This fee record is closed. Reopen it before recording a payment.")
+        if inst.is_voided:
+            raise ValidationError("That instalment was voided.")
         remaining = q(q(inst.amount) - q(inst.paid_amount))
         if remaining <= 0:
             raise ValidationError("Installment is already fully paid.")
         inst.paid_amount = q(inst.amount)
         inst.paid_date = date.today()
-        self.db.add(self._txn(m, sf.id, inst.id, remaining, "payment", "Marked fully paid", "cash"))
+        receipt = next_receipt_number(self.db, m.org_id, sf.academic_year_id)
+        txn = self._txn(m, sf.id, inst.id, remaining, "payment",
+                        "Marked fully paid", "cash", receipt)
+        txn.paid_on = inst.paid_date
+        self.db.add(txn)
+        fee_events.record(
+            self.db, m, "payment_recorded",
+            f"₹{remaining:,.0f} received from {self._who(sf)} — marked fully paid"
+            + (f" · receipt {receipt}" if receipt else "") + ".",
+            student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+            meta={"amount": str(remaining), "receipt": receipt,
+                  "installment_id": str(inst.id)},
+        )
         recompute_student_fee(sf)
         self.db.flush()
         return self._detail(sf)
@@ -408,6 +588,14 @@ class FeeService:
         # Compensating row — the original payment is preserved (append-only ledger).
         self.db.add(self._txn(m, sf.id, inst.id, q(-last.amount), "undo",
                               f"Reverted payment of ₹{q(last.amount)}"))
+        fee_events.record(
+            self.db, m, "payment_undone",
+            f"A payment of ₹{q(last.amount):,.0f} from {self._who(sf)} was "
+            "reverted. The original payment stays in the ledger — the undo is a "
+            "compensating entry.",
+            student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+            meta={"amount": str(q(last.amount)), "installment_id": str(inst.id)},
+        )
         recompute_student_fee(sf)
         self.db.flush()
         return self._detail(sf)
@@ -471,7 +659,7 @@ class FeeService:
         pending_count = 0
         overdue_amt = q(0)
         for sf in rows:
-            for i in sf.installments:
+            for i in live_installments(sf.installments):
                 unpaid = q(i.amount) - q(i.paid_amount)
                 if unpaid <= 0:
                     continue
@@ -504,7 +692,7 @@ class FeeService:
         for sf in rows:
             overdue_total = q(0)
             earliest: date | None = None
-            for i in sf.installments:
+            for i in live_installments(sf.installments):
                 unpaid = q(i.amount) - q(i.paid_amount)
                 if unpaid > 0 and i.due_date and i.due_date < today:
                     overdue_total = q(overdue_total + unpaid)

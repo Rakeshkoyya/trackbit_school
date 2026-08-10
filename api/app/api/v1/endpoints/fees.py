@@ -13,7 +13,7 @@ resolve to admin — so this renames a thing rather than opening one."""
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
@@ -29,8 +29,11 @@ from app.schemas.collection import (
     RemindOut,
 )
 from app.schemas.fees import (
+    AddInstallmentIn,
     ApplyStructureIn,
     ApplyStructureOut,
+    CloseFeeIn,
+    ConfirmProofIn,
     DueDateUpdate,
     FeeEventOut,
     FeeStructureCreate,
@@ -39,6 +42,10 @@ from app.schemas.fees import (
     FeeSummary,
     OverdueStudent,
     PaymentIn,
+    PresignProofIn,
+    PresignProofOut,
+    ProofOut,
+    SplitInstallmentIn,
     StructureCoverage,
     StudentFeeCreate,
     StudentFeeDetail,
@@ -48,6 +55,8 @@ from app.schemas.fees import (
 )
 from app.services import fee_events
 from app.services.collection import CollectionService
+from app.services.fee_proofs import FeeProofService
+from app.services.fee_schedule import FeeScheduleService
 from app.services.fee_structures import FeeStructureService
 from app.services.fees import FeeService
 
@@ -161,6 +170,25 @@ def update_discount(sf_id: uuid.UUID, body: StudentFeeUpdate,
     return FeeService(db).update_discount(m, sf_id, body)
 
 
+# ── D-127: the transfer (founder Q-2) ────────────────────────────────────────
+@router.post("/student-fees/{sf_id}/close", response_model=StudentFeeDetail)
+def close_record(sf_id: uuid.UUID, body: CloseFeeIn,
+                 m: CurrentMember = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """The student transferred out. Unpaid instalments are voided (never
+    deleted), the remaining balance comes off the total, and the record goes
+    `closed`. Reversible — see `/reopen`."""
+    return FeeService(db).close_record(m, sf_id, body)
+
+
+@router.post("/student-fees/{sf_id}/reopen", response_model=StudentFeeDetail)
+def reopen_record(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    """Undo the transfer, restoring the schedule from the snapshot the close
+    wrote into the append-only log."""
+    return FeeService(db).reopen_record(m, sf_id)
+
+
 @router.get("/student-fees/{sf_id}/transactions", response_model=list[TransactionOut])
 def list_transactions(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                       db: Session = Depends(get_db)):
@@ -186,10 +214,83 @@ def undo(inst_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
     return FeeService(db).undo(m, inst_id)
 
 
+# ── the mutable schedule (FE-1, `D-121`) ─────────────────────────────────────
+# All three preserve `sum(instalments) == net payable`, asserted in one place.
+# Changing what a family OWES is a discount, not a schedule edit.
+@router.post("/installments/{inst_id}/split", response_model=StudentFeeDetail)
+def split_installment(inst_id: uuid.UUID, body: SplitInstallmentIn,
+                      m: CurrentMember = Depends(require_admin),
+                      db: Session = Depends(get_db)):
+    """The founder's *"some parent wants more installments"* case.
+
+    Reach for this before `add`: the sum is preserved by construction, so it
+    cannot change what the family owes however it is called."""
+    return FeeScheduleService(db).split(m, inst_id, body)
+
+
+@router.post("/student-fees/{sf_id}/installments", response_model=StudentFeeDetail)
+def add_installment(sf_id: uuid.UUID, body: AddInstallmentIn,
+                    m: CurrentMember = Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    """Append an instalment, funded proportionally out of the unpaid ones."""
+    return FeeScheduleService(db).add(m, sf_id, body)
+
+
+@router.delete("/installments/{inst_id}", response_model=StudentFeeDetail)
+def remove_installment(inst_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    """Remove an UNPAID instalment; its amount returns to the others."""
+    return FeeScheduleService(db).remove(m, inst_id)
+
+
 @router.patch("/installments/{inst_id}/due-date", response_model=StudentFeeDetail)
 def update_due_date(inst_id: uuid.UUID, body: DueDateUpdate,
                     m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return FeeService(db).update_due_date(m, inst_id, body)
+
+
+# ── proof of payment (FE-1, `D-122`/`D-123`) ─────────────────────────────────
+# Two ways in, one storage path. `presign` + `confirm` when R2 is configured,
+# and the pass-through `upload` when it is not — the HS-1 shape, so the flow is
+# testable offline and works in dev with no credentials.
+@router.post("/transactions/{txn_id}/proofs/presign", response_model=PresignProofOut)
+def presign_proof(txn_id: uuid.UUID, body: PresignProofIn,
+                  m: CurrentMember = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    return FeeProofService(db).presign(m, txn_id, body.filename, body.content_type)
+
+
+@router.post("/transactions/{txn_id}/proofs/confirm", response_model=ProofOut)
+def confirm_proof(txn_id: uuid.UUID, body: ConfirmProofIn,
+                  m: CurrentMember = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    """Verifies the object actually landed before writing the row — a failed
+    browser PUT would otherwise leave a proof pointing at nothing, and a broken
+    thumbnail rendered as evidence is worse than no evidence."""
+    return FeeProofService(db).confirm(m, txn_id, body.key, body.caption)
+
+
+@router.post("/transactions/{txn_id}/proofs", response_model=ProofOut)
+def upload_proof(txn_id: uuid.UUID, file: UploadFile = File(...),
+                 caption: str | None = Form(default=None),
+                 m: CurrentMember = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """Pass-through upload — the camera capture on a phone lands here."""
+    return FeeProofService(db).upload(m, txn_id, file, caption)
+
+
+@router.get("/student-fees/{sf_id}/proofs", response_model=list[ProofOut])
+def list_proofs(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                db: Session = Depends(get_db)):
+    return FeeProofService(db).list_for_fee(m, sf_id)
+
+
+@router.delete("/proofs/{proof_id}", status_code=204)
+def delete_proof(proof_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """`D-123`: purges the object, keeps the row. A cheque photographed into the
+    wrong child's record has to be removable; that it existed is history."""
+    FeeProofService(db).delete(m, proof_id)
 
 
 # ── dashboard card (M4 read-only) ────────────────────────────────────────────

@@ -100,8 +100,14 @@ export const schoolApi = {
   deleteExamPortion: (id: string) =>
     api.del<{ message: string }>(`/academics/exam-portions/${id}`),
 
-  classSubjects: (classId: string) =>
-    api.get<ClassSubject[]>(`/academics/classes/${classId}/subjects`),
+  /** `mine` narrows a teacher to the subjects SHE teaches on this class — the
+   *  same flag `classes()` carries. Without it her picker offered every
+   *  subject of the class and five of six chips led to a board the server
+   *  correctly refused to fill. The narrowing is the server's, not a filter
+   *  applied to a list the browser should never have received. */
+  classSubjects: (classId: string, mine?: boolean) =>
+    api.get<ClassSubject[]>(
+      `/academics/classes/${classId}/subjects${qs({ mine: mine ? "true" : undefined })}`),
   /** The whole year in ONE read (V1-2, S-77) — feeds the by-teacher lens. */
   allClassSubjects: (yearId?: string) =>
     api.get<ClassSubject[]>(`/academics/class-subjects${qs({ year_id: yearId })}`),
@@ -904,9 +910,74 @@ export const schoolApi = {
   transactions: (id: string) => api.get<import("@/lib/school-types").FeeTransaction[]>(
     `/fees/student-fees/${id}/transactions`,
   ),
-  pay: (instId: string, b: { amount: string; mode?: string; note?: string }) =>
-    api.post<StudentFeeDetail>(`/fees/installments/${instId}/pay`, b),
+  pay: (instId: string, b: {
+    amount: string; mode?: string; note?: string; paid_on?: string;
+    receipt_number?: string | null;
+    /** `D-122` — an already-uploaded object key, so the payment and its proof
+     *  land in one round trip. Optional always: a cash payment at the counter
+     *  must never be blocked on producing evidence. */
+    proof_key?: string | null;
+  }) => api.post<StudentFeeDetail>(`/fees/installments/${instId}/pay`, b),
+  markPaid: (instId: string) =>
+    api.post<StudentFeeDetail>(`/fees/installments/${instId}/mark-paid`),
   undo: (instId: string) => api.post<StudentFeeDetail>(`/fees/installments/${instId}/undo`),
+  setDueDate: (instId: string, dueDate: string | null) =>
+    api.patch<StudentFeeDetail>(`/fees/installments/${instId}/due-date`,
+      { due_date: dueDate }),
+
+  // ── FE-1: the fee desk ────────────────────────────────────────────────────
+  /** `D-117` — every class of the year, priced or not. The unpriced row is the
+   *  one that matters, so this is a coverage read, not a list of structures. */
+  structureCoverage: (yearId: string) =>
+    api.get<import("@/lib/school-types").StructureCoverage>(
+      `/fees/structures/coverage${qs({ year_id: yearId })}`),
+  /** `D-118` — an edit to the admin; archive-and-replace underneath. Students
+   *  already set up keep the amount they were set up on. */
+  updateStructure: (id: string, b: Record<string, unknown>) =>
+    api.put<FeeStructure>(`/fees/structures/${id}`, b),
+  /** `D-120` — set a whole class up in one action. Empty `student_ids` means
+   *  every active student in the class. */
+  applyStructure: (id: string, b: { student_ids?: string[]; skip_existing?: boolean }) =>
+    api.post<import("@/lib/school-types").ApplyStructureResult>(
+      `/fees/structures/${id}/apply`, b),
+
+  /** `D-121` — the schedule may be re-arranged; the total may not move. */
+  splitInstallment: (instId: string, b: { parts?: number; amounts?: string[] }) =>
+    api.post<StudentFeeDetail>(`/fees/installments/${instId}/split`, b),
+  addInstallment: (sfId: string,
+    b: { amount: string; due_date?: string | null; label?: string | null }) =>
+    api.post<StudentFeeDetail>(`/fees/student-fees/${sfId}/installments`, b),
+  removeInstallment: (instId: string) =>
+    api.del<StudentFeeDetail>(`/fees/installments/${instId}`),
+
+  /** `D-127` — the transfer, and its undo. */
+  closeFeeRecord: (sfId: string, reason?: string) =>
+    api.post<StudentFeeDetail>(`/fees/student-fees/${sfId}/close`, { reason }),
+  reopenFeeRecord: (sfId: string) =>
+    api.post<StudentFeeDetail>(`/fees/student-fees/${sfId}/reopen`),
+
+  /** `D-124` — who did what. Two reads: the whole year (admin2 looking for a
+   *  change she noticed) and one child (the family page). */
+  feeActivity: (yearId: string) =>
+    api.get<import("@/lib/school-types").FeeEvent[]>(
+      `/fees/activity${qs({ year_id: yearId })}`),
+  feeActivityForStudent: (sfId: string) =>
+    api.get<import("@/lib/school-types").FeeEvent[]>(
+      `/fees/student-fees/${sfId}/activity`),
+
+  /** `D-122` — proof of payment. */
+  feeProofs: (sfId: string) =>
+    api.get<import("@/lib/school-types").FeeProof[]>(
+      `/fees/student-fees/${sfId}/proofs`),
+  deleteFeeProof: (proofId: string) => api.del<void>(`/fees/proofs/${proofId}`),
+  /** Pass-through upload — the phone camera lands here. */
+  uploadFeeProof: (txnId: string, file: File, caption?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (caption) form.append("caption", caption);
+    return api.upload<import("@/lib/school-types").FeeProof>(
+      `/fees/transactions/${txnId}/proofs`, form);
+  },
 
   // ── SF-1 staff: attendance · timesheet · leave ────────────────────────────
   staffAttendance: (onDate?: string) =>
