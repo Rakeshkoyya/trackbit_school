@@ -19,6 +19,7 @@ from app.models import AcademicYear, CalendarEvent, ClassSubject, ExamPortion, S
 from app.schemas.calendar import (
     CalendarEventCreate,
     CalendarEventOut,
+    CalendarEventUpdate,
     CalendarSummary,
     ExamPortionIn,
     ExamPortionOut,
@@ -290,6 +291,49 @@ class CalendarService:
                       ) -> list[CalendarEventOut]:
         """Bulk create in one transaction — the drag-select grid's commit."""
         return [self.create_event(m, b) for b in bodies]
+
+    def update_event(self, m: CurrentMember, event_id: uuid.UUID,
+                     body: CalendarEventUpdate) -> CalendarEventOut:
+        """Correct a day already on the calendar.
+
+        Until this existed a misspelt holiday or a date typed a day out could only
+        be deleted and repainted, which is a poor trade on a row the planner has
+        already paced around.
+
+        Two things make it more than a setattr loop. The dates are validated
+        *after* merging, because either one may arrive alone and `end < start` is
+        only answerable against the stored row. And terms follow the exam calendar
+        (founder, 2026-08-08), so moving — or retyping — an exam block re-syncs
+        them in the same transaction; `was_exam` is captured before the change so
+        that demoting an exam block to an ordinary event still puts the terms back.
+        """
+        event = self.db.scalar(
+            select(CalendarEvent).where(
+                CalendarEvent.id == event_id, CalendarEvent.org_id == m.org_id
+            )
+        )
+        if event is None:
+            raise NotFoundError("Event")
+
+        was_exam = event.type == EXAM_BLOCK
+        for field in ("type", "title", "start_date", "end_date",
+                      "affects_teaching", "notes"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(event, field, value)
+        if body.clear_blocks_periods:
+            event.blocks_periods = None
+        elif body.blocks_periods is not None:
+            event.blocks_periods = body.blocks_periods
+
+        if event.end_date < event.start_date:
+            raise ValidationError(
+                "The end date is before the start date.", code="bad_date_order")
+
+        self.db.flush()
+        if was_exam or event.type == EXAM_BLOCK:
+            sync_terms_from_exams(self.db, m.org_id, event.academic_year_id)
+        return CalendarEventOut.model_validate(event)
 
     def delete_event(self, m: CurrentMember, event_id: uuid.UUID) -> None:
         event = self.db.scalar(

@@ -10,6 +10,7 @@ import { ClassSubjectsPanel } from "@/components/school/class-subjects-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InlineDate, InlineText } from "@/components/ui/inline-edit";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageLoading } from "@/components/ui/page-loading";
@@ -76,13 +77,30 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
     onSuccess: () => { invalidate(); setEditTracking(null); toast.success("Tracking start updated"); },
     onError: (e) => showApiError(e, "Could not update"),
   });
+  // Label and window. `updateYear` has accepted these since P0-C; only the
+  // tracking date was ever sent, so a year labelled "2026-2027" instead of
+  // "2026-27" could be deleted but not corrected.
+  const patch = useMutation({
+    mutationFn: ({ id, body }: {
+      id: string; body: { label?: string; start_date?: string; end_date?: string };
+    }) => schoolApi.updateYear(id, body),
+    onSuccess: () => { invalidate(); toast.success("Year updated"); },
+    onError: (e) => showApiError(e, "Could not update year"),
+  });
 
   return (
     <Card title="Academic years">
       {years.map((y) => (
         <Row key={y.id} onDelete={canEdit ? () => remove.mutate(y.id) : undefined}>
-          <span className="font-medium">{y.label}</span>
-          <span className="ml-2 text-xs text-muted-foreground">{y.start_date} → {y.end_date}</span>
+          <InlineText canEdit={canEdit} value={y.label} className="font-medium" width="w-28"
+            onSave={(label) => patch.mutate({ id: y.id, body: { label } })} />
+          <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <InlineDate canEdit={canEdit} value={y.start_date}
+              onSave={(start_date) => patch.mutate({ id: y.id, body: { start_date } })} />
+            →
+            <InlineDate canEdit={canEdit} value={y.end_date}
+              onSave={(end_date) => patch.mutate({ id: y.id, body: { end_date } })} />
+          </span>
           {y.is_active ? (
             <span className="ml-2 inline-flex items-center gap-1 text-xs text-primary"><Star className="h-3 w-3" /> current</span>
           ) : canEdit ? (
@@ -134,7 +152,14 @@ function YearsCard({ canEdit }: { canEdit: boolean }) {
  *
  *  Deleting is guarded server-side (a term with plan approvals under it stays),
  *  which is why this offers no "edit dates": moving a term's window after its
- *  plans are approved would silently re-scope a locked baseline (P2).
+ *  plans are approved would silently re-scope a locked baseline (P2). Since
+ *  "a term IS its exam" (founder, 2026-08-08) the window is not this screen's to
+ *  set anyway — `sync_terms_from_exams` derives it from the exam block, so the
+ *  honest place to move a term is Plan → Exams.
+ *
+ *  The NAME is the school's own, and is editable here. It used to be overwritten
+ *  to "Term 1"/"Term 2" by that same sync on every exam edit; that is fixed in
+ *  `term_sync.py`, without which this rename would silently revert.
  */
 function TermsCard({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient();
@@ -161,6 +186,12 @@ function TermsCard({ canEdit }: { canEdit: boolean }) {
     onSuccess: () => { invalidate(); toast.success("Term removed"); },
     onError: (e) => showApiError(e, "Could not remove term"),
   });
+  const rename = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      schoolApi.updateTerm(id, { name }),
+    onSuccess: () => { invalidate(); toast.success("Term renamed"); },
+    onError: (e) => showApiError(e, "Could not rename term"),
+  });
 
   return (
     <Card title="Terms">
@@ -172,10 +203,17 @@ function TermsCard({ canEdit }: { canEdit: boolean }) {
       ) : null}
       {terms.map((t) => (
         <Row key={t.id} onDelete={canEdit ? () => remove.mutate(t.id) : undefined}>
-          <span className="font-medium">{t.name}</span>
+          <InlineText canEdit={canEdit} value={t.name} className="font-medium" width="w-36"
+            onSave={(name) => rename.mutate({ id: t.id, name })} />
           <span className="ml-2 text-xs text-muted-foreground">{t.start_date} → {t.end_date}</span>
         </Row>
       ))}
+      {terms.length > 0 && canEdit ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Click a term&apos;s name to rename it. The dates come from its exam — a term ends on
+          the last day of the exam that closes it, so move the exam on Plan → Exams.
+        </p>
+      ) : null}
       {canEdit ? (
         <form className="mt-3 flex flex-wrap gap-2" onSubmit={(e) => {
           e.preventDefault();
@@ -242,6 +280,37 @@ function ClassTeacherPicker({ klass, canEdit }: { klass: SchoolClass; canEdit: b
   );
 }
 
+/** Renaming a class in place.
+ *
+ *  `updateClass` has accepted name and section since P0-C, and only the
+ *  class-teacher picker ever called it — so a class typed "6" that should read
+ *  "VI" could only be deleted, taking its subjects, syllabus, plans and timetable
+ *  with it. Sits inside the expanded panel rather than on the row, where it would
+ *  fight the show/hide toggle. */
+function ClassRename({ klass, canEdit }: { klass: SchoolClass; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (b: { name?: string; section?: string | null }) =>
+      schoolApi.updateClass(klass.id, b),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["classes"] });
+      toast.success("Class updated");
+    },
+    onError: (e) => showApiError(e, "Could not update class"),
+  });
+  if (!canEdit) return null;
+  return (
+    <div className="mt-2 flex items-center gap-2 text-sm">
+      <span className="text-xs text-muted-foreground">Class</span>
+      <InlineText canEdit value={klass.name} width="w-20"
+        onSave={(name) => save.mutate({ name })} />
+      <span className="text-xs text-muted-foreground">Section</span>
+      <InlineText canEdit value={klass.section ?? ""} width="w-20" placeholder="none"
+        onSave={(section) => save.mutate({ section })} />
+    </div>
+  );
+}
+
 /** By-class view: each class expands into its subject table (teacher, periods/week,
  * allocation bar, copy-from-section) — the same panel the wizard uses. */
 function ByClassView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: boolean }) {
@@ -288,6 +357,7 @@ function ByClassView({ classes, canEdit }: { classes: SchoolClass[]; canEdit: bo
           </div>
           {openId === c.id ? (
             <>
+              <ClassRename klass={c} canEdit={canEdit} />
               <ClassTeacherPicker klass={c} canEdit={canEdit} />
               <ClassSubjectsPanel classId={c.id} canEdit={canEdit} />
             </>

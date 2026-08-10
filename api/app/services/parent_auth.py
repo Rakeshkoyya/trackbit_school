@@ -253,9 +253,15 @@ class ParentAuthService:
             # `Q-24` — no DOB on record is the school's gap, not the parent's
             # mistake, and it must NOT burn an attempt. This is exactly the case
             # `Q-29` keeps phone-OTP alive for.
+            # The message no longer offers the mobile door. `/parent/login/otp`
+            # exists as a page but nothing links to it, so telling a locked-out
+            # parent to "sign in with your mobile number" sent them looking for a
+            # screen the product does not show. `otp_available` stays in the
+            # details for the day that door is wired up again.
             raise AuthError(
-                "We don't have your child's date of birth on record. Please ask "
-                "the school office to add it, or sign in with your mobile number.",
+                "We don't have your child's date of birth on record, so there is "
+                "nothing here to check your answer against. Please ask the school "
+                "office to add it — you can sign in as soon as they do.",
                 code="dob_not_on_record",
                 details={"school_phone": org.phone, "otp_available": True})
         if student.date_of_birth != dob:

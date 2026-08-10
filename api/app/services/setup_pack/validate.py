@@ -22,8 +22,9 @@ right there:
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
+from app.core.dates import read_date
 from app.services.setup_pack.parse import ParsedPack, SheetData, fill_down
 from app.services.setup_pack.specs import BY_KEY, SHEETS
 
@@ -79,18 +80,12 @@ def to_date(text: str | None) -> date | None:
     """A calendar date, or None if it cannot be read safely.
 
     Deliberately not `roster_import.parse_dob`: that one enforces a plausible
-    *age* because the value it guards becomes a parent's password. A term end
-    date has no age.
+    *age* because the value it guards becomes a parent's password, and it reads a
+    two-digit year as the past. A term end date has no age and runs forward, so it
+    takes `core.dates` at its default. Both now share one format vocabulary, which
+    is what lets a school write `21-Aug-2026` on any sheet of the pack.
     """
-    if not text:
-        return None
-    raw = text.strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y"):
-        try:
-            return datetime.strptime(raw, fmt).date()
-        except ValueError:
-            continue
-    return None
+    return read_date(text)
 
 
 def to_int(text: str | None) -> int | None:
@@ -155,6 +150,20 @@ def _structure(pack: ParsedPack, out: _Report) -> None:
                     f"skipped.",
                     fix=f"Add a column headed '{header}'.",
                     rule=f"{spec.key}:missing_column:{key}")
+        # A column we could not place is silent data loss: the school typed
+        # guardian phone numbers under "Parent Contact", the mapper found no
+        # hint for it, and every one of them is dropped with the review still
+        # green. Reported as a warning, not a blocker, because the same shape
+        # covers a school's own working columns ("S.No", "Remarks") which are
+        # genuinely fine to ignore — the operator is the one who can tell which.
+        for header in data.unmapped_columns:
+            noun = "setting" if spec.is_key_value else "column"
+            out.add(spec.title, WARNING,
+                    f"'{header}' is not a {noun} we recognise, so nothing in it "
+                    f"will be imported.",
+                    fix="Rename it to one of the pack's own headers if it holds "
+                        "data we should keep — otherwise ignore this.",
+                    rule=f"{spec.key}:unmapped_column")
     for title in pack.extra_sheets:
         out.add(title, NOTE,
                 f"'{title}' is not part of the pack and will be ignored.",

@@ -118,7 +118,7 @@ export default function ParentLoginPage() {
         // the message has to carry the fix instead of a link: the office adds
         // the date of birth and this screen then works.
         toast.error(err.message, {
-          description: "Ask the school office to add your child's date of birth to their record.",
+          description: "Until it is on their record there is nothing to sign you in against.",
         });
       } else {
         toast.error(err instanceof ApiError ? err.message : "Could not sign in.");
@@ -256,7 +256,8 @@ export default function ParentLoginPage() {
             <p className="text-xs text-muted-foreground">Searching…</p>
           ) : result.rows.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No match in this class. Check the spelling, or the class you picked.
+              No match in this class. Check the spelling, or the class you picked. If your
+              child has just joined, ask the school office to add them to the register first.
             </p>
           ) : (
             <ul className="divide-y rounded-md border">

@@ -58,6 +58,7 @@ class OrgService:
             state=org.state,
             board=org.board,
             phone=org.phone,
+            parent_portal_enabled=bool(org.parent_portal_enabled),
             attendance_mode=org.attendance_mode,
             min_attendance_pct=org.min_attendance_pct,
             homework_gap_days=org.homework_gap_days,
@@ -79,9 +80,9 @@ class OrgService:
             org.timezone = req.timezone
         if req.report_card_hour is not None:
             org.report_card_hour = req.report_card_hour
-        for field in ("address", "state", "board", "phone", "attendance_mode",
-                      "min_attendance_pct", "homework_gap_days", "agent_access",
-                      "training_data_opt_in"):
+        for field in ("address", "state", "board", "phone", "parent_portal_enabled",
+                      "attendance_mode", "min_attendance_pct", "homework_gap_days",
+                      "agent_access", "training_data_opt_in"):
             value = getattr(req, field)
             if value is not None:
                 setattr(org, field, value)

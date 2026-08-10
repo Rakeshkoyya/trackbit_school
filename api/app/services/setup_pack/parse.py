@@ -202,17 +202,25 @@ def _read_key_value(grid: list[tuple], spec: SheetSpec) -> SheetData:
 
     values: dict[str, str | None] = {s.key: None for s in spec.settings}
     seen: list[str] = []
+    unknown: list[str] = []
     for row in grid:
         label = cell_text(row[0]) if row else None
-        if not label:
+        if not label or normalise(label) == "field":
             continue
+        value = cell_text(row[1]) if len(row) > 1 else None
         key = by_hint.get(normalise(label))
         if key is None:
+            # A setting we do not know. Only worth reporting when the school
+            # actually filled something in beside it — an unmatched label with an
+            # empty cell is a spacer or a heading, not a value we are dropping.
+            if value is not None:
+                unknown.append(label)
             continue
         seen.append(label)
-        values[key] = cell_text(row[1]) if len(row) > 1 else None
+        values[key] = value
 
     data.columns = seen
+    data.unmapped_columns = unknown
     data.mapping = {k: k for k, v in values.items() if v is not None}
     data.rows = [values]
     data.missing_columns = [k for k in spec.required_keys if not values.get(k)]

@@ -7,9 +7,8 @@ the parsed rows, the client confirms the mapping, and commit re-sends both.
 """
 
 import io
-import re
 import uuid
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 from openpyxl import load_workbook
@@ -17,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
+from app.core.dates import read_date, read_excel_serial
 from app.models import Guardian, SchoolClass, Student, StudentCategory
 from app.services.ai.extract import phrase_gap_question
 
@@ -58,45 +58,28 @@ FIELD_HINTS: dict[str, list[str]] = {
 # date cells (which read_first_sheet stringifies to "2015-06-03 00:00:00").
 # Anything that doesn't parse cleanly — or gives an implausible age — lands in
 # `unresolved`, NEVER a guess: this value is the parent's password.
-_DMY = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$")
-_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$")
-_EXCEL_EPOCH = date(1899, 12, 30)
+# The spellings themselves now live in `core.dates`, so the Calendar sheet and
+# this column cannot disagree about what 21-Aug-2026 means.
 
 
 def parse_dob(raw: str, today: date | None = None,
               min_age: int = 2, max_age: int = 30) -> date | None:
     """One date or None — None means "could not read this safely".
 
-    Accepted: dd/mm/yyyy · dd-mm-yy · dd.mm.yyyy · yyyy-mm-dd (incl. the
-    stringified Excel date cell) · a bare Excel serial. Day-first always — that
+    Formats come from `core.dates`, which every importer now shares — dd/mm/yyyy ·
+    dd-mm-yy · dd.mm.yyyy · yyyy-mm-dd (incl. the stringified Excel date cell) ·
+    `14 Jun 2014` and `14-Jun-14` · a bare Excel serial. Day-first always — that
     is what Indian registers write; a US-ordered sheet fails the month>12 check
     and surfaces as unresolved rather than silently swapping fields.
-    Plausibility: not in the future, age within [min_age, max_age] at import
-    time (students 2–30; the staff importer passes 16–80)."""
+    `prefer_past` is what keeps a two-digit year in the right century: 80 is 1980,
+    not 2080, because nobody in this column has been born in the future.
+    Plausibility, which stays here because only this caller has an age to check:
+    not in the future, age within [min_age, max_age] at import time (students
+    2–30; the staff importer passes 16–80)."""
     today = today or date.today()
-    raw = raw.strip()
-    parsed: date | None = None
-
-    m = _ISO.match(raw)
-    if m:
-        try:
-            parsed = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            return None
+    parsed = read_date(raw.strip(), prefer_past=True, today=today)
     if parsed is None:
-        m = _DMY.match(raw)
-        if m:
-            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            if y < 100:  # dd-mm-yy: students are born this century until ~2090
-                y += 2000 if y <= today.year % 100 else 1900
-            try:
-                parsed = date(y, mo, d)
-            except ValueError:
-                return None
-    if parsed is None and raw.isdigit():
-        serial = int(raw)
-        if 10_000 <= serial <= 60_000:  # ≈1927–2064: any plausible DOB serial
-            parsed = _EXCEL_EPOCH + timedelta(days=serial)
+        parsed = read_excel_serial(raw.strip())
     if parsed is None:
         return None
 

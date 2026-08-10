@@ -33,11 +33,12 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.dates import read_date
 from app.core.indian_states import normalise, normalise_all
 from app.schemas.events import (
     ObservanceBulkIn,
@@ -87,17 +88,9 @@ _TIER_ALIASES = {
     "low": "minor", "secondary": "minor", "optional": "minor", "2": "minor", "no": "minor",
 }
 
-# Written formats seen in real state notifications and panchang exports.
-_DATE_FORMATS = (
-    "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d %b %Y", "%d %B %Y",
-    "%b %d %Y", "%B %d %Y", "%d-%b-%Y", "%d-%B-%Y", "%d %b, %Y", "%d %B, %Y",
-    "%Y/%m/%d", "%d/%m/%y", "%d-%m-%y",
-)
-# Excel's epoch. 1900 is deliberate (Excel's own off-by-one leap bug included):
-# openpyxl usually hands back a datetime, so this only fires on a raw serial in
-# a text-formatted column.
-_EXCEL_EPOCH = date(1899, 12, 30)
-
+# The written formats seen in real state notifications and panchang exports —
+# along with the Excel epoch and the ordinal stripping — all moved to
+# `core.dates`; this module keeps only what is specific to an observance sheet.
 _ALL_INDIA_WORDS = {
     "", "all", "all india", "all-india", "india", "all states", "national",
     "nationwide", "everywhere", "pan india", "pan-india", "any", "-", "na", "n/a",
@@ -113,46 +106,18 @@ def _clean(value: Any) -> str:
 def _parse_date(value: Any, *, year_hint: int | None = None) -> date | None:
     """Read a date cell, day-first, or return None.
 
-    Day-first is not a preference — it is the correct reading for every source
-    this importer exists to consume. `%m/%d/%Y` is deliberately absent: silently
-    accepting it would turn 3 April into 4 March on exactly the rows where both
-    parse, which is the worst possible failure for a calendar.
+    The spellings live in `core.dates` now, shared with the setup pack and the
+    roster importer — this module's format list was the widest of the three and
+    became the seed for it. Day-first is not a preference there either: it is the
+    correct reading for every source this importer exists to consume, and
+    `%m/%d/%Y` is deliberately absent because silently accepting it would turn
+    3 April into 4 March on exactly the rows where both parse, which is the worst
+    possible failure for a calendar.
+
+    `year_hint` still matters here and nowhere else: an observance sheet whose
+    title carries the year and whose rows say only "15 August".
     """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    raw = _clean(value)
-    if not raw:
-        return None
-
-    # A bare number in a text column is an Excel serial.
-    if re.fullmatch(r"\d{5}(\.\d+)?", raw):
-        try:
-            return _EXCEL_EPOCH + timedelta(days=int(float(raw)))
-        except (ValueError, OverflowError):
-            return None
-
-    normalised = raw.replace(",", ", ").replace("  ", " ").strip()
-    # "15th Aug 2027" → "15 Aug 2027"
-    normalised = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", normalised, flags=re.I)
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(normalised, fmt).date()
-        except ValueError:
-            continue
-    # "15 August" with the year known from the import — common in a sheet whose
-    # title carries the year and whose rows do not repeat it.
-    if year_hint:
-        for fmt in ("%d %b", "%d %B", "%b %d", "%B %d", "%d/%m", "%d-%m"):
-            try:
-                parsed = datetime.strptime(normalised, fmt).date()
-                return parsed.replace(year=year_hint)
-            except ValueError:
-                continue
-    return None
+    return read_date(value, year_hint=year_hint)
 
 
 def _parse_states(value: Any) -> tuple[list[str] | None, list[str]]:

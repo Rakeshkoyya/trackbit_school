@@ -103,6 +103,14 @@ class AcademicService:
                 raise ConflictError("Another year already uses that label.", code="duplicate")
         for k, v in data.items():
             setattr(year, k, v)
+        # Checked after merging, because either date may arrive on its own — and
+        # checked at all because the setup screen can now edit them. An inverted
+        # year is not a cosmetic error: `teaching_days` counts nothing, the term
+        # sync walks its cursor from a start that is past every exam, and every
+        # plan forecast divides by a window that does not exist.
+        if year.start_date and year.end_date and year.end_date < year.start_date:
+            raise ValidationError(
+                "The year ends before it starts.", code="bad_date_order")
         self.db.flush()
         return YearOut.model_validate(year)
 
@@ -142,6 +150,9 @@ class AcademicService:
         term = self._scoped(Term, m.org_id, term_id)
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(term, k, v)
+        if term.start_date and term.end_date and term.end_date < term.start_date:
+            raise ValidationError(
+                "The term ends before it starts.", code="bad_date_order")
         self.db.flush()
         return TermOut.model_validate(term)
 

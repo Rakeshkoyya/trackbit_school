@@ -141,6 +141,54 @@ function SchoolSection({ s }: { s: OrgSettings }) {
   );
 }
 
+/** Whether parents may sign in at all.
+ *
+ * Imported from the setup pack's School sheet and, until now, changeable nowhere
+ * afterwards — a school that answered "No" needed a whole re-upload to change its
+ * mind, while `readiness.py` reported it as not-ready and offered nothing to act
+ * on. Its own section rather than another field on the School form, because this
+ * is the one switch on the page that decides whether an entire audience can log
+ * in; it saves on toggle like the other consequential booleans here. */
+function ParentPortalSection({ s }: { s: OrgSettings }) {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (on: boolean) => appApi.updateSettings({ parent_portal_enabled: on }),
+    onSuccess: (res) => {
+      qc.setQueryData(["settings"], res);
+      toast.success(res.parent_portal_enabled
+        ? "Parents can now sign in" : "Parent portal is off");
+    },
+    onError: (e) => showApiError(e, "Could not save"),
+  });
+  return (
+    <section className="mt-5 rounded-xl border border-border bg-card p-5">
+      <h2 className="mb-1 text-sm font-semibold">Parent portal</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Parents sign in with the school code and their child&apos;s date of birth, and see
+        only their own child. The portal is read-only — a parent can never change anything
+        in the school&apos;s records.
+      </p>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={s.parent_portal_enabled}
+          onChange={(e) => save.mutate(e.target.checked)} disabled={save.isPending} />
+        Let parents sign in
+      </label>
+      {s.parent_portal_enabled && !s.school_code ? (
+        <p className="mt-2 text-xs text-warning">
+          No school code is set, so there is nothing for a parent to type at login. Ask us to
+          set one before telling parents the portal is open.
+        </p>
+      ) : null}
+      {!s.parent_portal_enabled ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Parents cannot sign in, and anyone signed in now is signed out — the check runs on
+          every request, not only at login.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function CaptureSection({ s }: { s: OrgSettings }) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<AttendanceMode | null>(null);
@@ -708,6 +756,7 @@ export function SettingsScreen() {
       </section>
 
       <SchoolSection s={s} />
+      <ParentPortalSection s={s} />
       <CaptureSection s={s} />
       <ExamTypesSection />
       <BandSetupSection />

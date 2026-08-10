@@ -374,6 +374,10 @@ export interface OrgSettings {
   board: string | null;
   /** V1-3 (S-25): the parent portal's "tell the school why" number. */
   phone: string | null;
+  /** Whether parents may sign in at all. Set from the setup pack's School sheet;
+   *  the guard is a live check on every parent request, so switching it off ends
+   *  sessions already open rather than only blocking new ones. */
+  parent_portal_enabled: boolean;
   attendance_mode: AttendanceMode;
   min_attendance_pct: number;
   homework_gap_days: number;

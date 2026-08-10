@@ -112,6 +112,67 @@ def test_the_filled_example_pack_has_no_blockers():
     assert report.ready, [f.message for f in report.blockers]
 
 
+# ── a column we could not place (silent data loss until it is reported) ──────
+def test_an_unrecognised_column_is_named_rather_than_dropped_in_silence():
+    """The commonest real failure: the school heads its guardian columns its own
+    way, every hint misses, and the review comes back green while every parent
+    contact is discarded. `unmapped_columns` was computed and read by nobody."""
+    rows = [
+        ["Student name", "Admission no", "Class", "Section", "Date of birth",
+         "Guardian Name", "Parent Contact"],
+        ["Aarav Sharma", "1021", "6", "A", "14/06/2014", "Rajesh Sharma", "9876543210"],
+    ]
+    report = validate(_pack(students=rows))
+
+    assert report.ready, "an unknown column is worth a warning, never a blocker"
+    named = " ".join(f.message for f in report.findings
+                     if f.severity == WARNING and f.rule == "students:unmapped_column")
+    assert "Guardian Name" in named
+    assert "Parent Contact" in named
+
+
+def test_an_unrecognised_school_setting_is_reported_only_when_it_carries_a_value():
+    """Column A of the School sheet also holds spacers and headings. A label with
+    nothing beside it is one of those; a label with a value is a fact we dropped."""
+    school = [*SCHOOL_ROWS, ["Principal", "Mrs Rao"], ["Notes", None]]
+    messages = [f.message for f in validate(_pack(school=school)).findings
+                if f.rule == "school:unmapped_column"]
+
+    assert any("Principal" in m for m in messages)
+    assert not any("Notes" in m for m in messages)
+
+
+# ── month names (one date vocabulary, shared with the calendar importer) ──────
+def test_month_name_dates_are_read_on_every_sheet():
+    """A school that writes `30-Apr-2027` used to have the Calendar sheet accept
+    it and the Terms sheet refuse it, because three importers owned three format
+    lists. They share `core.dates` now."""
+    school = [
+        ["Field", "Value"],
+        ["School name", "Sunrise Public School"],
+        ["Academic year", "2026-27"],
+        ["Year starts", "1 June 2026"],
+        ["Year ends", "30-Apr-2027"],
+        ["Periods per day", 8],
+        ["Working days", "Mon-Sat"],
+    ]
+    terms = [
+        ["Term", "Starts", "Ends"],
+        ["Term 1", "01/06/2026", "30 Sep 2026"],
+        ["Term 2", "01/10/2026", "30th April 2027"],
+    ]
+    report = validate(_pack(school=school, terms=terms))
+    assert report.ready, [f.message for f in report.blockers]
+
+
+def test_us_ordered_dates_are_still_refused():
+    """Widening the vocabulary must not widen it to `%m/%d/%Y`: on the rows where
+    both readings parse it turns 3 April into 4 March, silently."""
+    school = [r for r in SCHOOL_ROWS if r[0] != "Year starts"]
+    school.append(["Year starts", "06/21/2026"])
+    assert "school:year_start" in _rules(validate(_pack(school=school)), BLOCKER)
+
+
 # ── the mid-year guarantee (D-3 / D-4) ───────────────────────────────────────
 def test_unsized_chapters_are_a_note_never_a_blocker():
     report = validate(_pack(syllabus=[

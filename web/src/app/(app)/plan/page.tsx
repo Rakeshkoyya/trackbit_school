@@ -33,6 +33,7 @@ import {
   type SuggestedDay,
 } from "@/components/wizard/year-calendar";
 import { Badge } from "@/components/ui/badge";
+import { InlineDate, InlineText } from "@/components/ui/inline-edit";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -138,6 +139,21 @@ function PlanYearInner() {
       toast.success("Removed");
     },
     onError: (e) => showApiError(e, "Could not remove that"),
+  });
+
+  // Correcting a day in place. Until `PATCH /calendar/events/{id}` existed, a
+  // holiday with a misspelt name or a date typed one day out could only be
+  // deleted and repainted — on a row the planner has already paced around.
+  const patch = useMutation({
+    mutationFn: ({ id, body }: {
+      id: string;
+      body: { title?: string; start_date?: string; end_date?: string };
+    }) => schoolApi.updateEvent(id, body),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Calendar updated");
+    },
+    onError: (e) => showApiError(e, "Could not change that"),
   });
 
   if (!yearId || !summary) {
@@ -301,12 +317,40 @@ function PlanYearInner() {
                     exit={{ opacity: 0, x: 6 }}
                     className="group flex items-center justify-between rounded-lg border border-border bg-card px-3 py-1.5 text-sm"
                   >
-                    <span className="min-w-0 truncate">
-                      <span className="font-medium">{e.title}</span>{" "}
-                      <span className="text-xs text-muted-foreground">
-                        {e.start_date === e.end_date
-                          ? fmt(e.start_date)
-                          : `${fmt(e.start_date)} → ${fmt(e.end_date)}`}
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-1">
+                      <InlineText
+                        canEdit={canEdit}
+                        value={e.title}
+                        className="font-medium"
+                        title="Click to rename"
+                        onSave={(title) => patch.mutate({ id: e.id, body: { title } })}
+                      />
+                      <span className="inline-flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+                        <InlineDate
+                          canEdit={canEdit}
+                          value={e.start_date}
+                          label={fmt(e.start_date)}
+                          onSave={(start_date) => patch.mutate({
+                            id: e.id,
+                            // A one-day event has to stay one day: sending only
+                            // the start would stretch it into a range ending on
+                            // the date it used to be.
+                            body: e.start_date === e.end_date
+                              ? { start_date, end_date: start_date }
+                              : { start_date },
+                          })}
+                        />
+                        {e.start_date === e.end_date ? null : (
+                          <>
+                            →
+                            <InlineDate
+                              canEdit={canEdit}
+                              value={e.end_date}
+                              label={fmt(e.end_date)}
+                              onSave={(end_date) => patch.mutate({ id: e.id, body: { end_date } })}
+                            />
+                          </>
+                        )}
                         {e.blocks_periods?.length
                           ? ` · periods ${e.blocks_periods.join(", ")}`
                           : ""}

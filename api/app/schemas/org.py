@@ -151,6 +151,11 @@ class OrgSettingsOut(BaseModel):
     board: str | None = None
     # V1-3 (S-25): the number behind the parent's "tell the school why" link.
     phone: str | None = None
+    # Whether parents may log in at all. Imported from the pack's School sheet and,
+    # until now, changeable nowhere afterwards — so a school that answered "No" on
+    # its setup pack could not be switched on without a re-upload, even though
+    # `readiness.py` reports it as not-ready and asks somebody to fix it.
+    parent_portal_enabled: bool = True
     attendance_mode: str = "every_period"  # D-01
     min_attendance_pct: int = 75
     homework_gap_days: int = 3
@@ -176,6 +181,9 @@ class OrgSettingsUpdate(BaseModel):
     state: str | None = Field(default=None, max_length=60)
     board: str | None = Field(default=None, max_length=60)
     phone: str | None = Field(default=None, max_length=20)
+    # Switching this off closes the door on parents already signed in — the guard
+    # is a live check on every parent request, not a token claim.
+    parent_portal_enabled: bool | None = None
     attendance_mode: str | None = Field(
         default=None, pattern="^(every_period|first_period|twice_daily)$")
     min_attendance_pct: int | None = Field(default=None, ge=0, le=100)

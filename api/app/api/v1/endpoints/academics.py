@@ -41,6 +41,7 @@ from app.schemas.calendar import (
     CalendarBulkIn,
     CalendarEventCreate,
     CalendarEventOut,
+    CalendarEventUpdate,
     CalendarSummary,
     ExamPortionIn,
     ExamPortionOut,
@@ -236,6 +237,19 @@ def list_events(year_id: uuid.UUID, m: CurrentMember = Depends(require_academic)
 def create_event(body: CalendarEventCreate, m: CurrentMember = Depends(require_admin),
                  db: Session = Depends(get_db)):
     return CalendarService(db).create_event(m, body)
+
+
+@router.patch("/calendar/events/{event_id}", response_model=CalendarEventOut)
+def update_event(event_id: uuid.UUID, body: CalendarEventUpdate,
+                 m: CurrentMember = Depends(require_admin),
+                 db: Session = Depends(get_db)):
+    """Correct a holiday's date, name or type in place.
+
+    `require_admin` rather than `require_operator`, matching create and delete on
+    this same resource: the calendar is the school's own, not part of the frozen
+    structure — a school adds its Founder's Day the week it decides on it.
+    """
+    return CalendarService(db).update_event(m, event_id, body)
 
 
 @router.delete("/calendar/events/{event_id}", response_model=MessageResponse)

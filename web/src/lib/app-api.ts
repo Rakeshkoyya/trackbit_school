@@ -146,6 +146,7 @@ export const appApi = {
     name?: string; timezone?: string; report_card_hour?: number;
     address?: string | null; state?: string | null; board?: string | null;
     phone?: string | null;
+    parent_portal_enabled?: boolean;
     attendance_mode?: string; min_attendance_pct?: number; homework_gap_days?: number;
     training_data_opt_in?: boolean;
     work_categories?: {

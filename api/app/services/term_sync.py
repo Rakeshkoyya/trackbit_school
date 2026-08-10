@@ -100,7 +100,12 @@ def sync_terms_from_exams(db: Session, org_id: uuid.UUID,
                         name=f"Term {i + 1}", start_date=cursor, end_date=end)
             db.add(term)
         else:
-            term.name = f"Term {i + 1}"
+            # The window derives from the exam. The NAME does not, and used to be
+            # overwritten here on every sync: a school calling these "First Term"
+            # and "Second Term" — which the pack's Terms sheet asks for by name,
+            # and which its Syllabus sheet must spell the same way — had them
+            # silently renamed to "Term 1" the next time anybody touched an exam
+            # block. Only a term we are creating takes a default name.
             term.start_date, term.end_date = cursor, end
         out.append(term)
         cursor = end + timedelta(days=1)
