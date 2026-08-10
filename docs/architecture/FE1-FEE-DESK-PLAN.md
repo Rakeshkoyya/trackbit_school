@@ -1,8 +1,26 @@
 # FE-1 — the fee desk
 
-**Status:** proposed, awaiting founder confirmation · **Written:** 2026-08-11
-**Supersedes nothing.** Extends M6 (the ported fee module), V1-10 (the collection
-board) and V1-18. Reference prototype: `../fee_management_system` ("Plutus").
+**Status:** ✅ **SHIPPED on `main`, 2026-08-11** — commits `48deeb3` (FE-1a/b) and
+`9e5076e` (FE-1c…FE-1k). Not pushed to origin; the founder verifies against his
+local DB first.
+**Written:** 2026-08-11 · **Supersedes nothing.** Extends M6 (the ported fee
+module), V1-10 (the collection board) and V1-18. Reference prototype:
+`../fee_management_system` ("Plutus").
+
+> **What actually landed**, against the phase table in §9: every phase FE-1a
+> through FE-1k is done except the two Dashboard additions in **FE-1j** — the
+> empty state shipped, the *collected-by-mode* strip did not (it is the one item
+> in this plan with no code behind it, and no route was added for it either).
+>
+> Migration **`b7c8d9e0f1a2`** is applied to the local **dev and test** databases
+> and verified reversible. **Production is behind** and must be migrated before
+> the code deploys — everything in it is additive, so it is safe to run first.
+>
+> Two things the plan got wrong and the build corrected, both recorded in place
+> below: `D-116`'s `class_id` FK was **dropped** (per-class pricing means a
+> structure spans several `school_classes` rows), and `test_rls.py` turned out to
+> be hardcoded per module, so "the RLS suite is green" proved nothing about the
+> new tables until coverage for them was added.
 
 ---
 

@@ -31,6 +31,7 @@ Read the one that answers your question. Do not read them all.
 | **What agents (MCP + Lucy) may do, and what they may never** | [`docs/architecture/MCP-SERVER-PLAN.md`](docs/architecture/MCP-SERVER-PLAN.md) |
 | **Which agent tools are approved to build** — ⚠️ build nothing not ticked there | [`docs/architecture/MCP-TOOL-LIST.md`](docs/architecture/MCP-TOOL-LIST.md) |
 | **How the school day is shaped** — bell schedules, typed periods, blocks | [`docs/architecture/TT2-DAY-SHAPE-PLAN.md`](docs/architecture/TT2-DAY-SHAPE-PLAN.md) |
+| **How fees are priced and collected** — structures, the schedule, proof, the actor log | [`docs/architecture/FE1-FEE-DESK-PLAN.md`](docs/architecture/FE1-FEE-DESK-PLAN.md) |
 | The current build spec | `docs/trackbit-school-prd-v2.md` (cite as `SPRD2 §x.y`) |
 | The "why" — principles and fences | `docs/trackbit-product-architecture.md` |
 | Reference for carried v1 modules (fees, tasks, sessions) | `docs/trackbit-school-prd-v1.md` |
@@ -95,9 +96,16 @@ cannot know some *other* remote URL is precious — it is not a substitute for n
 line. Never point it at a superuser either: a superuser bypasses RLS even with
 `FORCE ROW LEVEL SECURITY`, so `test_rls.py` fails for reasons unrelated to the code.
 
-⚠️ **`.env` is currently in `ACTIVE: PRODUCTION` mode** (founder's request, so the local codebase
-runs against the real prod DB). Prod is pre-launch and holds no critical data — that is the only
-reason this is safe, and it stops being true the day a real school is on it. While in this mode:
+✅ **`.env` is in `ACTIVE: LOCAL` mode** — switched 2026-08-10, re-verified 2026-08-11.
+`DATABASE_URL` is `trackbit_school_app` (NOBYPASSRLS) on localhost, so **law 2 is genuinely
+live** and anything security-related is testable here. Read the `# --- ACTIVE:` banner in
+`.env` before believing this line; it is switchable and this file has cached the wrong answer
+before.
+
+<details><summary>⚠️ If you ever switch it back to <code>ACTIVE: PRODUCTION</code> — read this first</summary>
+
+Prod is pre-launch and holds no critical data — that is the only reason that mode is safe at
+all, and it stops being true the day a real school is on it. While in PRODUCTION mode:
 
 - every click in the app is a **write to production**, and `alembic upgrade head` migrates
   production with no confirmation and no dry run;
@@ -107,6 +115,8 @@ reason this is safe, and it stops being true the day a real school is on it. Whi
   plus the Dokploy container would both fire the 19:00 report and the absence alerts off the
   same rows;
 - **never run `scripts.seed`** — it would create the demo org and demo users in production.
+
+</details>
 
 To migrate a different database without touching `.env`:
 
@@ -313,9 +323,14 @@ daily report generation · per-student homework · **Lucy** · the **parent port
 
 ## Current state and what is next
 
-Schema head is `f9a0b1c2d3e4` (TT-2 day shape: `bell_schedules`, typed
-`timetable_slots`, `session_staff` — 2026-08-10; applied to the **local test DB
-only**, prod and dev are behind). **Verify with
+Schema head is **`b7c8d9e0f1a2`** (FE-1 the fee desk: `fee_events`,
+`fee_payment_proofs`, `fee_receipt_counters`, `installments.is_voided`,
+`student_fees.closed_*`, `fee_transactions.paid_on` — 2026-08-11). Applied to the
+**local dev AND test databases** and verified reversible. **Production was NOT checked**
+(the founder asked that this work stay local), and was last confirmed at
+`d7e8f9a0b1c2` on 2026-08-08 — so run `alembic current` against prod before deploying
+rather than trusting any count of what it owes. Everything since is additive, so prod
+can be migrated ahead of the code deploy as the convention requires. **Verify with
 `uv run alembic current` rather than trusting this line** — it is a cache, and this file has
 cached a wrong revision before. As of 2026-08-08 `d7e8f9a0b1c2` is applied to **production
 and the local test DB**, verified by querying the tables rather than the version row.
