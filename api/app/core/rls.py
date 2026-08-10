@@ -221,6 +221,22 @@ SCHOOL_FEE_NOTE_TABLES = (
     "fee_notes",
 )
 
+# FE-1 the fee desk — engaged in migration b7c8d9e0f1a2.
+#
+# `fee_payment_proofs` holds photographs of a family's cheques and receipts, and
+# `fee_events` holds who-did-what across a school's whole collection. Both are
+# exactly the kind of table where a query that forgot its org filter would leak
+# something a school would never forgive, so both carry the policy.
+#
+# `fee_receipt_counters` is in here too even though it holds no personal data:
+# it is org-scoped, and a counter shared across tenants would hand two schools
+# the same receipt number.
+SCHOOL_FEE_DESK_TABLES = (
+    "fee_payment_proofs",
+    "fee_events",
+    "fee_receipt_counters",
+)
+
 # V1-11 the family's inbox (D-08/D-14) — engaged in migration b0c1d2e3f4a5.
 # `parent_login_attempts` is deliberately NOT here: like `otp_codes` it is
 # platform-level, because the DOB login runs before any session exists to set

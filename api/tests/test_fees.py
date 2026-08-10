@@ -36,7 +36,8 @@ def _setup(client, cleanup):
 
 def _structure(client, h, year_id):
     body = {
-        "class_name": "6-B", "academic_year_id": year_id, "total_amount": "30000",
+        # `D-116`: a structure prices the CLASS ("6"), not the section ("6-B").
+        "class_name": "6", "academic_year_id": year_id, "total_amount": "30000",
         "num_installments": 3,
         "installments": [
             {"installment_number": 1, "amount": "10000", "due_date": "2026-04-15"},
@@ -54,7 +55,8 @@ def test_full_fee_lifecycle(client, cleanup):
 
     # structure with a bad sum -> 422
     bad = client.post("/api/v1/fees/structures", headers=h, json={
-        "class_name": "6-B", "academic_year_id": year["id"], "total_amount": "30000",
+        # `D-116`: a structure prices the CLASS ("6"), not the section ("6-B").
+        "class_name": "6", "academic_year_id": year["id"], "total_amount": "30000",
         "num_installments": 1, "installments": [{"installment_number": 1, "amount": "25000"}]})
     assert bad.status_code == 422
 

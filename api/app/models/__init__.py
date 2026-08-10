@@ -42,9 +42,13 @@ from app.models.classroom import (
 )
 from app.models.exams import ExamPortion, ExamPortionUnit
 from app.models.fees import (
+    FEE_EVENT_KINDS,
     FEE_NOTE_KINDS,
+    FeeEvent,
     FeeInstallmentTemplate,
     FeeNote,
+    FeePaymentProof,
+    FeeReceiptCounter,
     FeeStructure,
     Installment,
     StudentFee,
@@ -144,9 +148,13 @@ __all__ = [
     "ExamPortion",
     "ExamPortionUnit",
     "ExamType",
+    "FEE_EVENT_KINDS",
     "FEE_NOTE_KINDS",
+    "FeeEvent",
     "FeeInstallmentTemplate",
     "FeeNote",
+    "FeePaymentProof",
+    "FeeReceiptCounter",
     "FeeStructure",
     "FOLLOWUP_KINDS",
     "FollowupAction",

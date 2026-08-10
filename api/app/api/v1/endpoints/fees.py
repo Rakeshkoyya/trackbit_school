@@ -1,5 +1,15 @@
-"""Fee endpoints (M6, SPRD §5.6). All gated require_office_up: director + office
-only — teachers and coordinators never reach fees (SPRD §3.3 hard rule)."""
+"""Fee endpoints (M6, SPRD §5.6; the desk rebuilt in FE-1).
+
+**Every route here is `require_admin`** — teachers never reach fees, which is one
+of the two hard rules that hold on every surface including Lucy. The single
+exception is `followup_detail`: `D-83`'s one narrow door, where a teacher who has
+been *assigned* a fee follow-up task may read that one student's fee detail
+inside that one task, and the service enforces the assignment.
+
+`D-126`: these were `require_office_up`, an admin-only alias left over from the
+pre-v2 role set. CLAUDE.md asks that it be consolidated to `require_admin` on
+touch, and FE-1 touches all of them. The guard is unchanged in effect — both
+resolve to admin — so this renames a thing rather than opening one."""
 
 import uuid
 
@@ -8,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
 from app.core.database import get_db
-from app.core.dependencies import require_academic, require_office_up
+from app.core.dependencies import require_academic, require_admin
 from app.schemas.collection import (
     AssignFollowupIn,
     AssignFollowupOut,
@@ -19,41 +29,107 @@ from app.schemas.collection import (
     RemindOut,
 )
 from app.schemas.fees import (
+    ApplyStructureIn,
+    ApplyStructureOut,
     DueDateUpdate,
+    FeeEventOut,
     FeeStructureCreate,
     FeeStructureOut,
+    FeeStructureUpdate,
     FeeSummary,
     OverdueStudent,
     PaymentIn,
+    StructureCoverage,
     StudentFeeCreate,
     StudentFeeDetail,
     StudentFeeListItem,
     StudentFeeUpdate,
     TransactionOut,
 )
+from app.services import fee_events
 from app.services.collection import CollectionService
+from app.services.fee_structures import FeeStructureService
 from app.services.fees import FeeService
 
 router = APIRouter()
 
 
-# ── fee structures ───────────────────────────────────────────────────────────
+# ── fee structures (FE-1) ────────────────────────────────────────────────────
 @router.get("/structures", response_model=list[FeeStructureOut])
 def list_structures(class_name: str | None = None, year_id: uuid.UUID | None = None,
-                    m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db)):
+                    m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return FeeService(db).list_structures(m, class_name=class_name, year_id=year_id)
 
 
+# ⚠️ BEFORE `/structures/{fs_id}`. FastAPI matches in declaration order, so a
+# literal path declared after a UUID parameter route is unreachable — the
+# router would try to parse "coverage" as a UUID and 422 every request.
+@router.get("/structures/coverage", response_model=StructureCoverage)
+def structure_coverage(year_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                       db: Session = Depends(get_db)):
+    """`D-117`: every class of the year, priced or not.
+
+    The founder's completeness check — *"once all the classes and fee structure
+    is done"* — cannot be answered by a list of the structures that exist,
+    because the class that is missing is exactly the row such a list omits."""
+    return FeeStructureService(db).coverage(m, year_id)
+
+
 @router.post("/structures", response_model=FeeStructureOut)
-def create_structure(body: FeeStructureCreate, m: CurrentMember = Depends(require_office_up),
+def create_structure(body: FeeStructureCreate, m: CurrentMember = Depends(require_admin),
                      db: Session = Depends(get_db)):
-    return FeeService(db).create_structure(m, body)
+    return FeeStructureService(db).create(m, body)
 
 
 @router.get("/structures/{fs_id}", response_model=FeeStructureOut)
-def get_structure(fs_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def get_structure(fs_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                   db: Session = Depends(get_db)):
     return FeeService(db).get_structure(m, fs_id)
+
+
+@router.put("/structures/{fs_id}", response_model=FeeStructureOut)
+def update_structure(fs_id: uuid.UUID, body: FeeStructureUpdate,
+                     m: CurrentMember = Depends(require_admin),
+                     db: Session = Depends(get_db)):
+    """`D-118`: an edit to the admin, an archive-and-replace underneath.
+
+    **Students already set up keep the amount they were set up on.** A family
+    part-way through paying ₹62,000 does not silently owe ₹68,000 because
+    somebody corrected the price; the Students tab surfaces the divergence and
+    re-applying is a separate, deliberate act."""
+    return FeeStructureService(db).update(m, fs_id, body)
+
+
+@router.post("/structures/{fs_id}/apply", response_model=ApplyStructureOut)
+def apply_structure(fs_id: uuid.UUID, body: ApplyStructureIn,
+                    m: CurrentMember = Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    """`D-120`: set a whole class up in one action.
+
+    Empty `student_ids` means every active student in the class. Students who
+    already have a record for the year are skipped and **counted in the reply** —
+    a school told "22 set up" when it selected 24 must be able to see why."""
+    return FeeStructureService(db).apply(m, fs_id, body)
+
+
+# ── the actor log (`D-124`) ──────────────────────────────────────────────────
+@router.get("/activity", response_model=list[FeeEventOut])
+def year_activity(year_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    """Everything that happened at the fee desk this year, newest first.
+
+    The founder's case: three admins share this desk, one of them changes
+    something, and another needs to find out who to ask. That is a read across
+    the whole year, not one child — the per-student feed is separate."""
+    return fee_events.for_year(db, m.org_id, year_id)
+
+
+@router.get("/student-fees/{sf_id}/activity", response_model=list[FeeEventOut])
+def student_fee_activity(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
+                         db: Session = Depends(get_db)):
+    """One child's history — what the family page shows beside the ledger."""
+    FeeService(db).get_student_fee(m, sf_id)  # same-org guard, 404s otherwise
+    return fee_events.for_student_fee(db, m.org_id, sf_id)
 
 
 # ── student fees ─────────────────────────────────────────────────────────────
@@ -61,64 +137,64 @@ def get_structure(fs_id: uuid.UUID, m: CurrentMember = Depends(require_office_up
 def list_student_fees(
     year_id: uuid.UUID | None = None, class_name: str | None = None,
     status: str | None = None, search: str | None = Query(default=None, max_length=80),
-    m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db),
+    m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db),
 ):
     return FeeService(db).list_student_fees(
         m, year_id=year_id, class_name=class_name, status=status, search=search)
 
 
 @router.post("/student-fees", response_model=StudentFeeDetail)
-def enroll(body: StudentFeeCreate, m: CurrentMember = Depends(require_office_up),
+def enroll(body: StudentFeeCreate, m: CurrentMember = Depends(require_admin),
            db: Session = Depends(get_db)):
     return FeeService(db).enroll(m, body)
 
 
 @router.get("/student-fees/{sf_id}", response_model=StudentFeeDetail)
-def get_student_fee(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def get_student_fee(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                     db: Session = Depends(get_db)):
     return FeeService(db).get_student_fee(m, sf_id)
 
 
 @router.patch("/student-fees/{sf_id}", response_model=StudentFeeDetail)
 def update_discount(sf_id: uuid.UUID, body: StudentFeeUpdate,
-                    m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db)):
+                    m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return FeeService(db).update_discount(m, sf_id, body)
 
 
 @router.get("/student-fees/{sf_id}/transactions", response_model=list[TransactionOut])
-def list_transactions(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def list_transactions(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                       db: Session = Depends(get_db)):
     return FeeService(db).list_transactions(m, sf_id)
 
 
 # ── installment actions ──────────────────────────────────────────────────────
 @router.post("/installments/{inst_id}/pay", response_model=StudentFeeDetail)
-def pay(inst_id: uuid.UUID, body: PaymentIn, m: CurrentMember = Depends(require_office_up),
+def pay(inst_id: uuid.UUID, body: PaymentIn, m: CurrentMember = Depends(require_admin),
         db: Session = Depends(get_db)):
     return FeeService(db).pay(m, inst_id, body)
 
 
 @router.post("/installments/{inst_id}/mark-paid", response_model=StudentFeeDetail)
-def mark_paid(inst_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def mark_paid(inst_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
               db: Session = Depends(get_db)):
     return FeeService(db).mark_paid(m, inst_id)
 
 
 @router.post("/installments/{inst_id}/undo", response_model=StudentFeeDetail)
-def undo(inst_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def undo(inst_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
          db: Session = Depends(get_db)):
     return FeeService(db).undo(m, inst_id)
 
 
 @router.patch("/installments/{inst_id}/due-date", response_model=StudentFeeDetail)
 def update_due_date(inst_id: uuid.UUID, body: DueDateUpdate,
-                    m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db)):
+                    m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return FeeService(db).update_due_date(m, inst_id, body)
 
 
 # ── dashboard card (M4 read-only) ────────────────────────────────────────────
 @router.get("/summary", response_model=FeeSummary)
-def summary(year_id: uuid.UUID | None = None, m: CurrentMember = Depends(require_office_up),
+def summary(year_id: uuid.UUID | None = None, m: CurrentMember = Depends(require_admin),
             db: Session = Depends(get_db)):
     return FeeService(db).summary(m, year_id)
 
@@ -126,18 +202,18 @@ def summary(year_id: uuid.UUID | None = None, m: CurrentMember = Depends(require
 @router.get("/overdue-students", response_model=list[OverdueStudent])
 def overdue_students(
     year_id: uuid.UUID | None = None, limit: int = Query(20, le=100), offset: int = Query(0, ge=0),
-    m: CurrentMember = Depends(require_office_up), db: Session = Depends(get_db),
+    m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db),
 ):
     return FeeService(db).overdue_students(m, year_id=year_id, limit=limit, offset=offset)
 
 
 # ── V1-10 · the collection board (D-64) ──────────────────────────────────────
-# Every one of these is `require_office_up` — an **admin-only alias** since the
+# Every one of these is `require_admin` — an **admin-only alias** since the
 # v2 role collapse — except `followup_detail`, which is the single narrow
 # exception `D-83` opened and guards inside the service.
 @router.get("/collection", response_model=CollectionBoard)
 def collection_board(year_id: uuid.UUID | None = None, quarter: str | None = None,
-                     m: CurrentMember = Depends(require_office_up),
+                     m: CurrentMember = Depends(require_admin),
                      db: Session = Depends(get_db)):
     """The one computation every fee screen renders (`S-152`): quarter strip,
     collection curve, class table with both denominators, and the named
@@ -146,14 +222,14 @@ def collection_board(year_id: uuid.UUID | None = None, quarter: str | None = Non
 
 
 @router.get("/student-fees/{sf_id}/notes", response_model=list[FeeNoteOut])
-def fee_notes(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def fee_notes(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
               db: Session = Depends(get_db)):
     return CollectionService(db).notes(m, sf_id)
 
 
 @router.post("/student-fees/{sf_id}/notes", response_model=FeeNoteOut)
 def add_fee_note(sf_id: uuid.UUID, body: FeeNoteIn,
-                 m: CurrentMember = Depends(require_office_up),
+                 m: CurrentMember = Depends(require_admin),
                  db: Session = Depends(get_db)):
     """`D-84`: append-only. What the family SAID is the point — "spoke to the
     mother, paying after the 15th" is what makes a row go away."""
@@ -161,7 +237,7 @@ def add_fee_note(sf_id: uuid.UUID, body: FeeNoteIn,
 
 
 @router.post("/student-fees/{sf_id}/remind", response_model=RemindOut)
-def remind(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
+def remind(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
            db: Session = Depends(get_db)):
     """One human press per reminder — no automatic dunning. The service holds
     the manners: one per week, quiet hours, primary guardian only, and it stops
@@ -171,7 +247,7 @@ def remind(sf_id: uuid.UUID, m: CurrentMember = Depends(require_office_up),
 
 @router.post("/student-fees/{sf_id}/assign", response_model=AssignFollowupOut)
 def assign_followup(sf_id: uuid.UUID, body: AssignFollowupIn,
-                    m: CurrentMember = Depends(require_office_up),
+                    m: CurrentMember = Depends(require_admin),
                     db: Session = Depends(get_db)):
     """`D-83`: the task carries the amount, the date and the conversation log —
     the person making the call cannot make it usefully while blind to them."""
