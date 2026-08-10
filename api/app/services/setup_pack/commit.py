@@ -53,6 +53,7 @@ from app.models import (
     User,
 )
 from app.schemas.fees import StudentFeeCreate
+from app.services import bell
 from app.services.fees import FeeService
 from app.services.planner import PlannerService
 from app.services.roster_import import RosterImporter
@@ -213,6 +214,14 @@ class PackCommitter:
         year.periods_per_day = to_int(pack.setting("periods_per_day")) or 8
         year.period_times = self._period_times(pack, year.periods_per_day)
         self.db.flush()
+        # TT-2: the pack still describes the day with four numbers, and that is
+        # the school's STARTING shape. Opening it as a bell schedule is what
+        # makes every later edit — a 15:30 homework block, a moved lunch — an
+        # append rather than an overwrite of what the school first told us.
+        # `ensure` is idempotent, so re-uploading a pack never rewrites a day the
+        # school has since changed.
+        bell.ensure(self.db, m.org_id, year, list(year.period_times or []),
+                    year.tracking_start_date or year.start_date or date.today())
         self._activate(m, year)
         self._organization(m, pack, out)
         self.db.flush()

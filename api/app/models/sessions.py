@@ -51,8 +51,10 @@ class Session(Base, UUIDPKMixin, CreatedAtMixin):
     # End of the block ("17:30") — draws the hostel week grid and feeds the
     # deterministic teacher-clash check. NULL = open-ended.
     end_time: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # study = evening prep (optional per-student logs) · homework = homework board
-    # · activity = yoga/boxing/… (memories only).
+    # What the block is, and therefore what the teacher is asked to capture —
+    # the vocabulary and the capture matrix live in `core/day_shape.py`. TT-2
+    # widened this from study|homework|activity; never branch on the string here
+    # or in a service, read `day_shape.capture_for(kind)`.
     kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="study")
     # When class-linked: restrict the computed roster to the "Hosteller" category.
     hostellers_only: Mapped[bool] = mapped_column(
@@ -63,9 +65,13 @@ class Session(Base, UUIDPKMixin, CreatedAtMixin):
         back_populates="session", cascade="all, delete-orphan")
     classes: Mapped[list["SessionClass"]] = relationship(
         back_populates="session", cascade="all, delete-orphan")
+    staff: Mapped[list["SessionStaff"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan")
 
     __table_args__ = (
-        CheckConstraint("kind IN ('study', 'homework', 'activity')", name="kind_valid"),
+        CheckConstraint(
+            "kind IN ('study', 'homework', 'activity', 'sports', 'course', 'assembly')",
+            name="kind_valid"),
     )
 
 
@@ -109,6 +115,35 @@ class SessionClass(Base, UUIDPKMixin):
     )
 
 
+class SessionStaff(Base, UUIDPKMixin):
+    """Everyone who may run this block (TT-2).
+
+    `owner_member_id` stays as the person accountable for the block; this is the
+    list of people who can actually open the meeting, mark it and post memories.
+    Assembly, yoga and the homework class are covered by whoever is free that
+    day — before this, only the single owner could capture anything, so the
+    photo of Tuesday's assembly had nowhere to go unless one named teacher took
+    it. The owner is always treated as staff whether or not a row exists here.
+    """
+
+    __tablename__ = "session_staff"
+
+    org_id: Mapped[uuid.UUID] = _org_fk()
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    member_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="CASCADE"), nullable=False
+    )
+
+    session: Mapped["Session"] = relationship(back_populates="staff")
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "member_id", name="uq_session_staff_session_id"),
+    )
+
+
 class SessionMeeting(Base, UUIDPKMixin, CreatedAtMixin):
     __tablename__ = "session_meetings"
 
@@ -119,6 +154,15 @@ class SessionMeeting(Base, UUIDPKMixin, CreatedAtMixin):
     date: Mapped[date] = mapped_column(Date, nullable=False)
     # Legacy single batch photo (pre-HS-1). New media lands in session_media.
     evidence_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # TT-2: the block's class log — one line for the whole meeting, "what we did
+    # today". An extra course needs it; a study session never did, which is why
+    # `day_shape.CAPTURE[kind].class_log` decides whether the screen offers it.
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Who actually ran it. With session_staff any of several teachers may open
+    # the meeting, so "the owner took it" stopped being a safe assumption.
+    taken_by_member_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memberships.id", ondelete="SET NULL"), nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint("session_id", "date", name="uq_session_meetings_session_id"),

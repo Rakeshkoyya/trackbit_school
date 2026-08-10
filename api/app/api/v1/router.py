@@ -30,6 +30,7 @@ from app.api.v1.endpoints import (
     auth,
     bands,
     billing,
+    blocks,
     boards,
     checks,
     classroom,
@@ -98,6 +99,10 @@ api_router.include_router(ops.router, prefix="/ops", tags=["ops"])
 api_router.include_router(academics.router, prefix="/academics", tags=["academics"])
 api_router.include_router(planner.router, prefix="/planner", tags=["planner"])
 api_router.include_router(timetable.router, prefix="/timetable", tags=["timetable"])
+# TT-2 `D-114`: capturing a non-subject period is free, for the same reason the
+# timetable is. The hostel week planner and the records board stay on /sessions
+# behind SESSIONS_HOSTEL (max) — free buys the act of recording (`D-107`).
+api_router.include_router(blocks.router, prefix="/blocks", tags=["blocks"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
 # V1-3 — the class teacher's area (D-03)
 api_router.include_router(my_class.router, prefix="/my-class", tags=["my-class"])

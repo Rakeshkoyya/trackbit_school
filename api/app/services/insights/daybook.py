@@ -56,8 +56,9 @@ from app.schemas.insights import (
     DaybookRow,
     DaybookSlice,
 )
+from app.services import bell
 from app.services.calendar import day_lock
-from app.services.school_clock import breaks_of, day_periods, today_in
+from app.services.school_clock import breaks_of, today_in
 from app.services.timesheet import TimesheetService
 
 #: Slices past this fold into "Other work". A ring of eleven arcs is a colour
@@ -105,8 +106,11 @@ class DaybookService:
         today = today_in(m.org.timezone)
         on = on or today
         year = self._year(m.org_id)
-        period_times = year.period_times if year else []
-        periods = day_periods(period_times, year.periods_per_day if year else 8)
+        # TT-2: the day book is read for any past date, so it must use the shape
+        # that date actually ran on, not the one in force today.
+        shape = bell.resolve(self.db, year, on)
+        period_times = shape.entries
+        periods = shape.periods
         working = set(year.working_weekdays or [0, 1, 2, 3, 4, 5]) if year \
             else {0, 1, 2, 3, 4, 5}
         lock = day_lock(self.db, m.org_id, on, year_id or (year.id if year else None))

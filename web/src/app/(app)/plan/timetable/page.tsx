@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Upload } from "lucide-react";
+import { Plus, Sparkles, Upload } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { BellEditor } from "@/components/school/bell-editor";
 import { ClassSelect, useClassSubjectPick } from "@/components/school/plan-shared";
 import { TeacherWeekGrid, TimetableGrid } from "@/components/school/timetable-grid";
 import { YearSwitcher } from "@/components/school/year-switcher";
@@ -15,28 +16,208 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { useYear } from "@/contexts/year-context";
+import { appApi } from "@/lib/app-api";
+import { BLOCK_KINDS, DEFAULT_BLOCK_KIND, blockLabel, captureFor } from "@/lib/day-shape";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
+import type { TimetableBlock } from "@/lib/school-types";
 
-function PeriodsControl({ yearId }: { yearId: string }) {
+/** Create or edit a block — a period that is not a subject (TT-2).
+ *
+ *  A block carries no weekdays or times of its own: the grid says when it runs
+ *  (`D-113`). What it needs from the admin is what it *is* (the kind, which
+ *  decides what the teacher is asked to capture), who may run it, and whether
+ *  it is only for hostellers — which is the whole day-scholar / hosteller split
+ *  in one checkbox.
+ */
+function BlockSheet({ open, onOpenChange, editing }: {
+  open: boolean; onOpenChange: (v: boolean) => void; editing: TimetableBlock | null;
+}) {
   const qc = useQueryClient();
-  const { data: cfg } = useQuery({ queryKey: ["period-config", yearId], queryFn: () => schoolApi.periodConfig(yearId) });
-  const [val, setVal] = useState("");
-  const save = useMutation({
-    mutationFn: (n: number) => schoolApi.setPeriodConfig({
-      academic_year_id: yearId, periods_per_day: n, period_times: cfg?.period_times ?? [] }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["period-config", yearId] }); qc.invalidateQueries({ queryKey: ["timetable"] }); toast.success("Periods/day updated"); },
-    onError: (e) => showApiError(e, "Could not update"),
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<string>(DEFAULT_BLOCK_KIND);
+  const [hostellersOnly, setHostellersOnly] = useState(false);
+  const [staff, setStaff] = useState<Set<string>>(new Set());
+  const [seeded, setSeeded] = useState<string | null>(null);
+
+  // Reset the form whenever the sheet opens on a different block — adjusted
+  // during render (React's documented pattern) rather than in an effect.
+  const formKey = open ? (editing?.id ?? "new") : null;
+  if (formKey !== seeded) {
+    setSeeded(formKey);
+    if (open) {
+      setName(editing?.name ?? "");
+      setKind(editing?.kind ?? DEFAULT_BLOCK_KIND);
+      setHostellersOnly(editing?.hostellers_only ?? false);
+      setStaff(new Set(editing?.staff_member_ids ?? []));
+    }
+  }
+
+  const { data: membersRes } = useQuery({
+    queryKey: ["members"], queryFn: appApi.members, enabled: open });
+  const teachers = (membersRes?.members ?? []).filter((m) => m.status === "active" && m.member_id);
+
+  const done = (msg: string) => {
+    qc.invalidateQueries({ queryKey: ["timetable-blocks"] });
+    qc.invalidateQueries({ queryKey: ["timetable"] });
+    toast.success(msg);
+    onOpenChange(false);
+  };
+  const body = () => ({
+    name: name.trim(), kind, hostellers_only: hostellersOnly,
+    staff_member_ids: [...staff],
   });
-  const current = cfg?.periods_per_day ?? 8;
+  const create = useMutation({
+    mutationFn: () => schoolApi.createBlock(body()),
+    onSuccess: () => done("Block added"),
+    onError: (e) => showApiError(e, "Could not add the block"),
+  });
+  const update = useMutation({
+    mutationFn: () => schoolApi.updateBlock(editing!.id, body()),
+    onSuccess: () => done("Block saved"),
+    onError: (e) => showApiError(e, "Could not save the block"),
+  });
+  const cap = captureFor(kind);
+  const asks = [
+    cap.roll && "attendance",
+    cap.homeworkCheck && "homework checking",
+    cap.classLog && "a class log",
+    cap.studentLogs && "per-student notes",
+    cap.memories && "photos",
+  ].filter(Boolean) as string[];
+
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="text-muted-foreground">Periods/day</span>
-      <Input className="h-8 w-16" type="number" min={1} max={16}
-        value={val === "" ? String(current) : val}
-        onChange={(e) => setVal(e.target.value)} />
-      <Button size="sm" variant="outline" disabled={save.isPending || val === "" || Number(val) === current}
-        onClick={() => save.mutate(Number(val))}>Save</Button>
+    <Sheet open={open} onOpenChange={onOpenChange}
+           title={editing ? "Edit block" : "New block"}>
+      <div className="space-y-4">
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted-foreground">Name</span>
+          <Input value={name} placeholder="e.g. Homework class, AI class, Games"
+                 onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted-foreground">What kind of period is it?</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value)}
+                  className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm">
+            {BLOCK_KINDS.map((k) => (
+              <option key={k} value={k}>{blockLabel(k)}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            The teacher will be asked for {asks.join(", ")}.
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={hostellersOnly} className="mt-0.5"
+                 onChange={(e) => setHostellersOnly(e.target.checked)} />
+          <span>
+            Hostellers only
+            <span className="block text-xs text-muted-foreground">
+              Day scholars go home; only hostellers appear on the roll.
+            </span>
+          </span>
+        </label>
+        <div className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Who can take it</span>
+          <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+            {teachers.map((t) => (
+              <label key={t.member_id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox" checked={staff.has(t.member_id!)}
+                  onChange={(e) => setStaff((prev) => {
+                    const next = new Set(prev);
+                    if (e.target.checked) next.add(t.member_id!); else next.delete(t.member_id!);
+                    return next;
+                  })}
+                />
+                {t.name}
+              </label>
+            ))}
+            {teachers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No active staff yet.</p>
+            ) : null}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Anyone ticked can open it and record the day — so assembly or yoga can
+            be taken by whoever is free. Leave empty and only you can.
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Which classes and when it runs come from the grid — put the block in a
+          cell and that class joins it.
+        </p>
+        <Button className="w-full" disabled={!name.trim() || create.isPending || update.isPending}
+                onClick={() => (editing ? update.mutate() : create.mutate())}>
+          {editing ? "Save block" : "Add block"}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}
+
+function BlocksPanel() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<TimetableBlock | null>(null);
+  const { data: blocks = [] } = useQuery({
+    queryKey: ["timetable-blocks"], queryFn: schoolApi.blocks });
+  const remove = useMutation({
+    mutationFn: (id: string) => schoolApi.deleteBlock(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["timetable-blocks"] });
+      qc.invalidateQueries({ queryKey: ["timetable"] });
+      toast.success("Block removed");
+    },
+    onError: (e) => showApiError(e, "Could not remove the block"),
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          A block is a period that is not a subject — homework class, games, an
+          extra course, assembly. Build it here, then drop it into the grid.
+        </p>
+        <Button size="sm" onClick={() => { setEditing(null); setOpen(true); }}>
+          <Plus className="h-4 w-4" /> New block
+        </Button>
+      </div>
+      {blocks.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          No blocks yet.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {blocks.map((b) => (
+            <li key={b.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+              <div className="min-w-40 flex-1">
+                <p className="text-sm font-medium">
+                  {b.name}
+                  {!b.active ? (
+                    <span className="ml-1.5 text-xs text-muted-foreground">· archived</span>
+                  ) : null}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {b.kind_label}
+                  {b.hostellers_only ? " · hostellers only" : ""}
+                  {b.slot_count
+                    ? ` · ${b.slot_count} period${b.slot_count === 1 ? "" : "s"} on the grid`
+                    : " · not on the grid yet"}
+                  {b.roster_count ? ` · ${b.roster_count} student${b.roster_count === 1 ? "" : "s"}` : ""}
+                </p>
+                {b.staff_names.length ? (
+                  <p className="text-xs text-muted-foreground/80">{b.staff_names.join(", ")}</p>
+                ) : null}
+              </div>
+              <Button size="sm" variant="outline"
+                      onClick={() => { setEditing(b); setOpen(true); }}>Edit</Button>
+              <Button size="sm" variant="outline" disabled={remove.isPending}
+                      onClick={() => remove.mutate(b.id)}>Remove</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <BlockSheet open={open} onOpenChange={setOpen} editing={editing} />
     </div>
   );
 }
@@ -194,6 +375,7 @@ function TimetableAdmin() {
   const qc = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [tab, setTab] = useState<"grid" | "timings" | "blocks">("grid");
 
   const draft = useMutation({
     mutationFn: () => schoolApi.timetableDraft(classId),
@@ -211,17 +393,46 @@ function TimetableAdmin() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <PageHeader title="Timetable" subtitle="Weekly period grid — tap a cell to assign a subject" />
+        <PageHeader
+          title="Timetable"
+          subtitle="The shape of the day, and what runs in each period"
+        />
         <div className="flex items-center gap-2">
           <YearSwitcher />
-          <ClassSelect classes={classes} classId={classId} onChange={setClassId} />
+          {tab === "grid" ? (
+            <ClassSelect classes={classes} classId={classId} onChange={setClassId} />
+          ) : null}
         </div>
       </div>
 
-      {classId ? (
+      <div className="mb-4 flex gap-1 border-b border-border">
+        {([
+          ["grid", "Grid"],
+          ["timings", "School timings"],
+          ["blocks", "Blocks"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key} type="button" onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+              tab === key
+                ? "border-primary font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "timings" ? (
+        yearId ? <BellEditor yearId={yearId} /> : (
+          <p className="text-sm text-muted-foreground">Pick an academic year first.</p>
+        )
+      ) : tab === "blocks" ? (
+        <BlocksPanel />
+      ) : classId ? (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            {yearId ? <PeriodsControl yearId={yearId} /> : null}
             <div className="flex-1" />
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}><Upload className="h-4 w-4" /> Import</Button>
             <Button size="sm" variant="outline" disabled={draft.isPending} onClick={() => draft.mutate()}>

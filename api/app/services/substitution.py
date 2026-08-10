@@ -46,7 +46,7 @@ from app.models import (
     User,
 )
 from app.schemas.insights import SubstitutionIn, SubstitutionOut
-from app.services import notifications
+from app.services import bell, notifications
 from app.services.school_clock import half_day_periods
 
 
@@ -224,9 +224,11 @@ class SubstitutionService:
         if key not in self._half_cache:
             year = self.db.scalar(select(AcademicYear).where(
                 AcademicYear.org_id == org_id, AcademicYear.is_active.is_(True)))
+            # TT-2: which periods a half-day costs depends on where lunch fell
+            # on THAT day, which a mid-year reshape can move.
+            shape = bell.resolve(self.db, year, on)
             self._half_cache[key] = set(half_day_periods(
-                year.period_times if year else [], key,
-                year.periods_per_day if year else 8))
+                shape.entries, key, shape.periods_per_day))
         return self._half_cache[key]
 
     # ── writes ───────────────────────────────────────────────────────────────

@@ -18,16 +18,18 @@ import { useYear } from "@/contexts/year-context";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
+import { BLOCK_KINDS, blockLabel } from "@/lib/day-shape";
 import type { SessionKind, SessionSummary } from "@/lib/school-types";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const KINDS: { value: SessionKind; label: string }[] = [
-  { value: "study", label: "Study" },
-  { value: "homework", label: "Homework" },
-  { value: "activity", label: "Activity" },
-];
+// TT-2 widened the kind vocabulary; `lib/day-shape.ts` owns the labels so this
+// page and the timetable's block picker cannot disagree about what a kind is.
+const KINDS: { value: SessionKind; label: string }[] = BLOCK_KINDS.map((k) => ({
+  value: k as SessionKind, label: blockLabel(k),
+}));
 const KIND_TONE: Record<SessionKind, "primary" | "warning" | "success"> = {
   study: "primary", homework: "warning", activity: "success",
+  sports: "success", course: "primary", assembly: "warning",
 };
 
 function BlockSheet({ open, onOpenChange, editing }: {

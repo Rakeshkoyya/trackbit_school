@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet } from "@/components/ui/sheet";
 import { appApi } from "@/lib/app-api";
+import { captureFor, timeRange } from "@/lib/day-shape";
 import { showApiError } from "@/lib/errors";
 import { dayLabel } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
@@ -51,23 +52,49 @@ function HomeworkSheet({ target, onClose }: { target: HwTarget | null; onClose: 
   );
 }
 
-/** One tappable row per period — every action lives on the period page. */
+/** One tappable row per period — every action lives on the period page.
+ *
+ *  TT-2: a **block** (homework class, games, an extra course, assembly) routes
+ *  to its own capture screen and carries none of a subject period's chrome —
+ *  no topic, no lesson log, no homework chip, and no attendance count, because
+ *  its roll is its own and is taken over there.
+ */
 function PeriodRow({ p }: { p: MyDayPeriod }) {
+  const isBlock = p.slot_type === "block";
   const done = p.attendance_marked && p.logged;
+  const clock = timeRange(p.start, p.end);
+  const href = isBlock && p.session_id
+    ? `/my-day/block/${p.session_id}`
+    : `/my-day/period/${p.class_id}/${p.period_no}`;
   return (
-    <Link href={`/my-day/period/${p.class_id}/${p.period_no}`}
+    <Link href={href}
       className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/40 active:scale-[0.995]">
-      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md text-xs font-bold ${done ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]" : "bg-muted"}`}>
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md text-xs font-bold ${
+        isBlock ? "bg-primary/10 text-primary"
+          : done ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]" : "bg-muted"}`}>
         P{p.period_no}
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold">
-          {p.class_label}{p.subject_name ? ` · ${p.subject_name}` : ""}
+          {isBlock
+            ? `${p.block_name ?? "Block"} · ${p.class_label}`
+            : `${p.class_label}${p.subject_name ? ` · ${p.subject_name}` : ""}`}
         </p>
         <p className="truncate text-xs text-muted-foreground">
-          {p.status === "not_held" ? "Not held" : p.planned_topic ?? "No topic planned this week"}
+          {clock ? <span className="tabular-nums">{clock}</span> : null}
+          {clock ? " · " : ""}
+          {isBlock
+            ? p.block_kind_label ?? captureFor(p.block_kind).label
+            : p.status === "not_held" ? "Not held"
+              : p.planned_topic ?? "No topic planned this week"}
         </p>
       </div>
+      {isBlock ? (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Badge tone="primary">{captureFor(p.block_kind).hint}</Badge>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </div>
+      ) : (
       <div className="flex shrink-0 items-center gap-1.5">
         {p.status === "not_held" ? (
           <Badge tone="neutral">not held</Badge>
@@ -88,6 +115,7 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
         )}
         <ChevronRight className="h-4 w-4 text-muted-foreground" />
       </div>
+      )}
     </Link>
   );
 }
@@ -311,7 +339,7 @@ function MyDayInner() {
           <h2 className="mb-2 text-sm font-semibold">Today’s periods</h2>
           <div className="space-y-2">
             {data.periods.map((p) => (
-              <PeriodRow key={`${p.period_no}-${p.class_subject_id}`} p={p} />
+              <PeriodRow key={`${p.period_no}-${p.class_subject_id ?? p.session_id ?? p.class_id}`} p={p} />
             ))}
           </div>
         </section>

@@ -104,6 +104,29 @@ class MediaOut(BaseModel):
     created_at: datetime
 
 
+class CaptureFlags(BaseModel):
+    """What this block asks the teacher for — mirrors `core/day_shape.Capture`.
+
+    Sent to the client so the screen is built from the same table the API
+    validates against. A sports block that offers a homework tab, or an assembly
+    that demands a roll, would both be the screen and the server disagreeing
+    about what the period is.
+    """
+
+    roll: bool = True
+    class_log: bool = False
+    student_logs: bool = False
+    memories: bool = True
+    homework_check: bool = False
+
+
+class ClassOption(BaseModel):
+    """One class present in the block's roster — the homework tab row."""
+
+    class_id: uuid.UUID
+    label: str
+
+
 class MeetingOut(BaseModel):
     id: uuid.UUID
     session_id: uuid.UUID
@@ -112,6 +135,18 @@ class MeetingOut(BaseModel):
     evidence_url: str | None
     roster: list[MeetingRosterRow]
     media: list[MediaOut] = Field(default_factory=list)
+    # TT-2
+    session_name: str = ""
+    kind_label: str = ""
+    #: The block's class log ("what we covered"), where the kind keeps one.
+    note: str | None = None
+    hostellers_only: bool = False
+    capture: CaptureFlags = Field(default_factory=CaptureFlags)
+    class_options: list[ClassOption] = Field(default_factory=list)
+
+
+class MeetingNoteIn(BaseModel):
+    note: str | None = Field(default=None, max_length=4000)
 
 
 # ── per-student study logs (HS-2: named sections, like the class deep log) ──

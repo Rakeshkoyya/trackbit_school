@@ -88,6 +88,7 @@ from app.models.sessions import (
     SessionClass,
     SessionMedia,
     SessionMeeting,
+    SessionStaff,
     SessionStudent,
     SessionStudentLog,
 )
@@ -107,7 +108,7 @@ from app.models.tiers import (
     UpgradeRequest,
     UpgradeRequestNote,
 )
-from app.models.timetable import TimetableSlot
+from app.models.timetable import BellSchedule, TimetableSlot
 from app.models.user import User
 
 __all__ = [
@@ -123,6 +124,7 @@ __all__ = [
     "BandAssessmentResult",
     "BandAssessmentStudent",
     "BandDescriptor",
+    "BellSchedule",
     "Board",
     "BoardCategory",
     "BoardMember",
@@ -192,6 +194,7 @@ __all__ = [
     "SessionClass",
     "SessionMedia",
     "SessionMeeting",
+    "SessionStaff",
     "SessionStudent",
     "SessionStudentLog",
     "SkillArea",

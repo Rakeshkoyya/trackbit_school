@@ -65,8 +65,9 @@ from app.schemas.staff import (
     TimesheetSlot,
     TimesheetWeek,
 )
+from app.services import bell
 from app.services.calendar import expand_blocked_dates
-from app.services.school_clock import breaks_of, day_periods, today_in
+from app.services.school_clock import breaks_of, today_in
 from app.services.staff_month import parse_month
 from app.services.substitution import SubstitutionService, covers_between
 
@@ -255,8 +256,11 @@ class TimesheetService:
         mid = self._resolve_member(m, member_id)
         on = on or self._today(m)
         year = self._year(m.org_id)
-        period_times = year.period_times if year else []
-        periods = day_periods(period_times, year.periods_per_day if year else 8)
+        # TT-2: the shape of the day is effective-dated, so a timesheet for a
+        # past day must be drawn with the clock that day actually ran on.
+        shape = bell.resolve(self.db, year, on)
+        period_times = shape.entries
+        periods = shape.periods
         working = set(year.working_weekdays) if year else {0, 1, 2, 3, 4, 5}
         return self._build_day(
             on, periods, working,
@@ -273,8 +277,7 @@ class TimesheetService:
         anchor = week_start or self._today(m)
         monday = anchor - timedelta(days=anchor.weekday())
         year = self._year(m.org_id)
-        periods = day_periods(year.period_times if year else [],
-                              year.periods_per_day if year else 8)
+        periods = bell.resolve(self.db, year, monday).periods
         working = set(year.working_weekdays) if year else {0, 1, 2, 3, 4, 5}
         sunday = monday + timedelta(days=6)
 
@@ -324,8 +327,7 @@ class TimesheetService:
         month = month or f"{today:%Y-%m}"
         start, end = parse_month(month)
         year = self._year(m.org_id)
-        periods = day_periods(year.period_times if year else [],
-                              year.periods_per_day if year else 8)
+        periods = bell.resolve(self.db, year, start).periods
         working = set(year.working_weekdays) if year else {0, 1, 2, 3, 4, 5}
 
         teaching = self._teaching(m.org_id, mid, start, end)
@@ -450,8 +452,7 @@ class TimesheetService:
         """
         on = on or self._today(m)
         year = self._year(m.org_id)
-        periods = day_periods(year.period_times if year else [],
-                              year.periods_per_day if year else 8)
+        periods = bell.resolve(self.db, year, on).periods
         working = set(year.working_weekdays) if year else {0, 1, 2, 3, 4, 5}
 
         staff = list(self.db.execute(

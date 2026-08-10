@@ -163,6 +163,8 @@ parallel store that can disagree with what was actually created.
 | Plan draft / generate / approve / extend | `plan.plans` | `planner.py`, `plan_validate.py` | `/planner/plan/{cs}/*` | `/plan/week` | admin approves · teacher comments |
 | Teacher's own plan + reschedule | `plan.my_subjects` | `my_syllabus.py`, `plan_schedule.py` | `/planner/my-subjects`, `PUT /plan/{cs}/schedule` | `/plan/my-subjects` | teacher (own only) |
 | Timetable grid, clash validation, import | `plan.timetable` | `timetable.py` | `/timetable/*` | `/plan/timetable` | admin writes · teacher reads own week |
+| School timings (the bell schedule, effective-dated) | `plan.timetable` | `bell.py`, `timetable.py` | `/timetable/bell`, `/timetable/bell/history` | `/plan/timetable` → Timings | admin writes · teacher reads |
+| Blocks — a period that is not a subject | `plan.timetable` | `timetable.py` | `/timetable/blocks/*` | `/plan/timetable` → Blocks | admin writes · teacher reads |
 | Exam calendar & portion mapping | `plan.exams` | `main_exams.py`, `exam_map.py` | `/main-exams`, `/planner/exam-map` | `/plan/exams` | admin writes · teacher reads |
 | Hostel session blocks | `plan.hostel` | `sessions.py` | `/sessions` | `/plan/hostel` | admin creates · teacher runs |
 
@@ -184,6 +186,7 @@ tap, record only deviations. Budgets: quick-log ≤ 3 taps / 25s; period card
 |---|---|---|---|---|---|
 | My Day (today's periods + evening) | `capture.my_day` | `classroom.py` | `/classroom/my-day` | `/my-day` | teacher |
 | Period card (the capture surface) | `capture.period` | `periods.py`, `classroom.py` | `/periods/card`, `/periods/*` | `/my-day/period/[classId]/[no]` | teacher of that class |
+| Block capture (homework class · sports · course · assembly) | `capture.period` | `blocks.py`, `sessions.py` | `/blocks/*` | `/my-day/block/[blockId]` | the block's **staff** (`session_staff`), its owner, or admin |
 | Attendance (register + exceptions) | `capture.attendance` | `attendance.py` | `/attendance/*` | `/attendance`, `/attendance/[classId]` | any teacher of the class |
 | Lesson log + topic coverage | `capture.lesson_log` | `classroom.py` | `/classroom/lesson-logs` | period card | subject teacher |
 | Deep log / observations (per student) | `capture.observations` | `classroom.py` | `/classroom/observations` | period card | subject teacher |

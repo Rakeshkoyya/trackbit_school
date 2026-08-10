@@ -215,10 +215,20 @@ export interface HomeworkPending {
 
 export interface MyDayPeriod {
   period_no: number;
-  class_subject_id: string;
+  /** TT-2: "subject" | "block". A block routes to its own capture screen and
+   *  has no topic, no lesson log and no homework of its own. */
+  slot_type: string;
+  class_subject_id: string | null;
   class_id: string;
   class_label: string;
   subject_name: string | null;
+  session_id: string | null;
+  block_name: string | null;
+  block_kind: string | null;
+  block_kind_label: string | null;
+  /** Straight off the bell schedule — "" when the school never set timings. */
+  start: string;
+  end: string;
   planned_topic: string | null;
   planned_topic_id: string | null;
   logged: boolean;
@@ -268,10 +278,19 @@ export interface TimetableSlot {
   class_id: string;
   weekday: number;
   period_no: number;
-  class_subject_id: string;
+  /** TT-2: "subject" | "block". A block's flavour is `block_kind`. */
+  slot_type: string;
+  class_subject_id: string | null;
   subject_name: string | null;
   teacher_member_id: string | null;
   teacher_name: string | null;
+  session_id: string | null;
+  block_name: string | null;
+  block_kind: string | null;
+  block_kind_label: string | null;
+  hostellers_only: boolean;
+  staff_member_ids: string[];
+  staff_names: string[];
   effective_from: string;
   effective_to: string | null;
 }
@@ -291,6 +310,10 @@ export interface TimetableGrid {
   periods_per_day: number;
   slots: TimetableSlot[];
   clashes: TimetableClash[];
+  /** TT-2: the day's real clock, drawn down the grid's left edge. */
+  periods: GridPeriod[];
+  breaks: GridBreak[];
+  has_timings: boolean;
 }
 
 export interface TeacherSlot {
@@ -298,8 +321,14 @@ export interface TeacherSlot {
   period_no: number;
   class_id: string;
   class_label: string;
+  slot_type: string;
   subject_name: string | null;
-  class_subject_id: string;
+  class_subject_id: string | null;
+  session_id: string | null;
+  block_name: string | null;
+  block_kind: string | null;
+  start: string;
+  end: string;
 }
 
 export interface TeacherWeek {
@@ -307,18 +336,70 @@ export interface TeacherWeek {
   weekdays: number[];
   periods_per_day: number;
   slots: TeacherSlot[];
+  periods: GridPeriod[];
 }
 
 export interface PeriodTime {
   start: string;
   end: string;
+  /** "period" is teachable time and takes a number; anything else is a break. */
   kind: string;
+  /** TT-2: what to call it on screen ("Short break"). */
+  label?: string | null;
 }
 
 export interface PeriodConfig {
   academic_year_id: string;
   periods_per_day: number;
   period_times: PeriodTime[];
+}
+
+/** TT-2: the shape of the school day, effective-dated so history stays true. */
+export interface BellSchedule {
+  academic_year_id: string;
+  id: string | null;
+  periods_per_day: number;
+  entries: PeriodTime[];
+  note: string | null;
+  effective_from: string | null;
+  effective_to: string | null;
+  /** False when periods are numbered but have no clock — draw no time column. */
+  has_timings: boolean;
+}
+
+export interface BellHistory {
+  academic_year_id: string;
+  schedules: BellSchedule[];
+}
+
+/** A non-subject period: homework class, sports, extra course, assembly. */
+export interface TimetableBlock {
+  id: string;
+  name: string;
+  kind: string;
+  kind_label: string;
+  hostellers_only: boolean;
+  active: boolean;
+  owner_member_id: string | null;
+  staff_member_ids: string[];
+  staff_names: string[];
+  class_ids: string[];
+  roster_count: number;
+  /** Live grid cells pointing at it. >0 means the grid owns its schedule. */
+  slot_count: number;
+}
+
+export interface GridPeriod {
+  period_no: number;
+  start: string;
+  end: string;
+}
+
+export interface GridBreak {
+  after_period_no: number;
+  label: string;
+  start: string;
+  end: string;
 }
 
 export interface TimetableImportCell {
@@ -384,7 +465,10 @@ export interface Compliance {
 }
 
 // ── sessions (M2) ───────────────────────────────────────────────────────────
-export type SessionKind = "study" | "homework" | "activity";
+/** TT-2 widened this from study|homework|activity — see `lib/day-shape.ts`,
+ *  which owns the labels and what each kind asks the teacher to capture. */
+export type SessionKind =
+  | "study" | "homework" | "activity" | "sports" | "course" | "assembly";
 
 export interface SessionSummary {
   id: string;
@@ -641,6 +725,15 @@ export interface MediaPresign {
   upload_url: string | null;
 }
 
+/** What a block asks the teacher for — mirrors `core/day_shape.Capture`. */
+export interface CaptureFlags {
+  roll: boolean;
+  class_log: boolean;
+  student_logs: boolean;
+  memories: boolean;
+  homework_check: boolean;
+}
+
 export interface Meeting {
   id: string;
   session_id: string;
@@ -649,6 +742,42 @@ export interface Meeting {
   evidence_url: string | null;
   roster: MeetingRow[];
   media: SessionMediaItem[];
+  // ── TT-2 ──────────────────────────────────────────────────────────────────
+  session_name: string;
+  kind_label: string;
+  /** The block's class log ("what we covered"), on the kinds that keep one. */
+  note: string | null;
+  hostellers_only: boolean;
+  /** Prefer this over the client-side table: the server knows the real kind. */
+  capture: CaptureFlags;
+  /** Classes present tonight — the homework screen's first row of tabs. */
+  class_options: { class_id: string; label: string }[];
+}
+
+// ── TT-2: the homework class walk (class → subject → the books) ──────────────
+export interface BlockSubjectOption {
+  class_subject_id: string;
+  subject_name: string;
+  open_count: number;
+}
+
+export interface BlockAssignment {
+  assignment_id: string;
+  subject_name: string;
+  text: string;
+  assigned_on: string;
+  due_date: string | null;
+  checked: boolean;
+  student_id: string | null;
+}
+
+export interface BlockHomework {
+  meeting_id: string;
+  date: string;
+  class_id: string | null;
+  class_subject_id: string | null;
+  subjects: BlockSubjectOption[];
+  assignments: BlockAssignment[];
 }
 
 // ── homework board (HS) ──────────────────────────────────────────────────────

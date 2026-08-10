@@ -1,6 +1,6 @@
 """The school day as a list of periods, and where "now" falls in it (SF-1).
 
-`academic_years.period_times` is a JSON list of `{start, end, kind}` that INCLUDES
+`bell_schedules.entries` is a JSON list of `{start, end, kind, label}` that INCLUDES
 breaks, in wall-clock order. Everything else in the app addresses a period by its
 1-based `period_no` — the timetable grid, `class_periods`, the period card. The
 mapping between the two lives here and nowhere else:
@@ -12,7 +12,8 @@ wrong would silently misalign a teacher's timesheet with their timetable, which
 is why it is one pure function with tests rather than an inline enumerate() in
 three services.
 
-Pure and I/O-free — it takes the JSON it is given. The caller loads the year.
+Pure and I/O-free — it takes the JSON it is given. `services/bell.py` is what
+decides *which* list applies to a date, because that needs the database.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -20,7 +21,13 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
-PERIOD_KIND = "period"
+from app.core.day_shape import PERIOD_KIND
+
+__all__ = [
+    "PERIOD_KIND", "DayPeriod", "DayBreak", "periods_of", "breaks_of",
+    "fallback_periods", "day_periods", "periods_before_lunch", "half_day_periods",
+    "marking_period_nos", "current_period_no", "phase", "today_in", "month_bounds",
+]
 
 
 class DayPeriod(BaseModel):
@@ -69,9 +76,13 @@ def breaks_of(period_times: list[dict] | None) -> list[DayBreak]:
         if kind == PERIOD_KIND:
             seen += 1
             continue
+        # TT-2: the admin may name a break ("Short break", "Games") in the
+        # timings editor. Falling back to the title-cased kind keeps every
+        # pre-TT-2 entry rendering exactly as it did.
         out.append(DayBreak(
             after_period_no=seen,
-            label=str(kind).replace("_", " ").capitalize(),
+            label=str(entry.get("label") or "").strip()
+            or str(kind).replace("_", " ").capitalize(),
             start=str(entry.get("start") or ""),
             end=str(entry.get("end") or ""),
         ))

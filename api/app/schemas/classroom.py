@@ -37,10 +37,24 @@ class MyDayPeriod(BaseModel):
     (V2-P6). Two periods of the same class-subject on one day are independent:
     `logged` and `planned_topic` are resolved per period, never per class-subject."""
     period_no: int
-    class_subject_id: uuid.UUID
+    # TT-2: 'subject' | 'block'. A block is a homework class, games, an extra
+    # course or assembly — everything below that describes a *subject* period
+    # (topic, lesson log, homework set) is null on one, and the row routes to a
+    # different capture screen. What it asks for is `core/day_shape.CAPTURE`.
+    slot_type: str = "subject"
+    class_subject_id: uuid.UUID | None = None
     class_id: uuid.UUID
     class_label: str
     subject_name: str | None = None
+    # Block payload (null on a subject period).
+    session_id: uuid.UUID | None = None
+    block_name: str | None = None
+    block_kind: str | None = None
+    block_kind_label: str | None = None
+    # The clock, straight off the bell schedule — "P9 · 15:30" beats "P9" when
+    # the day now runs past 2pm and half of it is optional.
+    start: str = ""
+    end: str = ""
     planned_topic: str | None = None
     planned_topic_id: uuid.UUID | None = None
     logged: bool = False

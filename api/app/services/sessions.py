@@ -18,10 +18,11 @@ import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import selectinload
 
+from app.core import day_shape
 from app.core.context import CurrentMember
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.models import (
@@ -33,6 +34,7 @@ from app.models import (
     SessionClass,
     SessionMedia,
     SessionMeeting,
+    SessionStaff,
     SessionStudent,
     SessionStudentLog,
     Student,
@@ -42,6 +44,8 @@ from app.models import (
 from app.models import Session as SessionModel
 from app.schemas.sessions import (
     AttendanceRecordIn,
+    CaptureFlags,
+    ClassOption,
     HomeworkBoardOut,
     HomeworkBoardRow,
     HomeworkItem,
@@ -79,6 +83,22 @@ def _minutes(hhmm: str) -> int | None:
         return None
 
 
+def open_tonight(d: date):
+    """"Homework that is live on `d`" — set on/before that day and either not
+    yet due, or (no due date at all) set within the last three days.
+
+    One definition, because the evening homework class and the hostel homework
+    board must offer the same list. If they drifted, a warden would tick a book
+    on one screen and find it still outstanding on the other.
+    """
+    return and_(
+        HomeworkAssignment.date <= d,
+        or_(HomeworkAssignment.due_date >= d,
+            and_(HomeworkAssignment.due_date.is_(None),
+                 HomeworkAssignment.date >= d - timedelta(days=3))),
+    )
+
+
 def _media_kind(content_type: str) -> str:
     if content_type.startswith("image/"):
         return "photo"
@@ -105,7 +125,19 @@ class SessionService:
         return s
 
     def _own(self, m: CurrentMember, s: SessionModel) -> None:
-        if not (m.is_coordinator_up or s.owner_member_id == m.membership.id):
+        """Admin, the owner, or anyone on the block's staff (TT-2).
+
+        Staff is what makes assembly and yoga capturable at all: they are taken
+        by whichever teacher is free that morning, and before `session_staff`
+        existed only one named owner could open the meeting — so the photo of
+        Tuesday's assembly had nowhere to go.
+        """
+        if m.is_coordinator_up or s.owner_member_id == m.membership.id:
+            return
+        on_staff = self.db.scalar(select(SessionStaff.id).where(
+            SessionStaff.session_id == s.id,
+            SessionStaff.member_id == m.membership.id).limit(1))
+        if on_staff is None:
             raise ForbiddenError("This isn't your session.", code="not_your_session")
 
     # ── computed roster (HS-1) ───────────────────────────────────────────────
@@ -132,6 +164,11 @@ class SessionService:
                                           Student.id.in_(explicit_ids))):
                 by_id[st.id] = (st, True)
         return sorted(by_id.values(), key=lambda t: t[0].full_name)
+
+    def roster(self, org_id: uuid.UUID, s: SessionModel) -> list[tuple[Student, bool]]:
+        """The effective roster — public because TT-2's block surface needs the
+        same computed union and must not grow a second version of it."""
+        return self._roster(org_id, s)
 
     # ── teacher-clash check (HS-1, deterministic — §11: no solver) ──────────
     def _check_clash(self, org_id: uuid.UUID, s: SessionModel) -> None:
@@ -352,9 +389,40 @@ class SessionService:
                 media_count=media_counts.get(st.id, 0)))
         # The meeting's media strip is the whole-class memories; per-student media
         # lives on the student page (SessionStudentCard).
+        cap = day_shape.capture_for(s.kind)
+        class_options = [
+            ClassOption(class_id=cid, label=label)
+            for cid, label in sorted(classes.items(), key=lambda kv: kv[1])
+        ]
         return MeetingOut(id=meeting.id, session_id=s.id, date=meeting.date, kind=s.kind,
                           evidence_url=meeting.evidence_url, roster=roster,
-                          media=self._media_out([md for md in media if md.student_id is None]))
+                          media=self._media_out([md for md in media if md.student_id is None]),
+                          session_name=s.name, kind_label=cap.label, note=meeting.note,
+                          hostellers_only=s.hostellers_only,
+                          class_options=class_options,
+                          capture=CaptureFlags(
+                              roll=cap.roll, class_log=cap.class_log,
+                              student_logs=cap.student_logs, memories=cap.memories,
+                              homework_check=cap.homework_check))
+
+    def set_meeting_note(self, m: CurrentMember, meeting_id: uuid.UUID,
+                         note: str | None) -> MeetingOut:
+        """The block's class log — one line for the whole meeting (TT-2).
+
+        Offered only where `day_shape.CAPTURE[kind].class_log` is true: an extra
+        course wants "what we covered today", a games period does not, and a
+        screen that asks anyway is a screen that gets left blank.
+        """
+        meeting, s = self._meeting(m, meeting_id)
+        if not day_shape.capture_for(s.kind).class_log:
+            raise ValidationError(
+                f"A {day_shape.label_for(s.kind).lower()} block does not keep a class log.",
+                code="no_class_log")
+        cleaned = (note or "").strip()
+        meeting.note = cleaned or None
+        meeting.taken_by_member_id = m.membership.id
+        self.db.flush()
+        return self._meeting_out(m, s, meeting)
 
     def _meeting(self, m: CurrentMember,
                  meeting_id: uuid.UUID) -> tuple[SessionMeeting, SessionModel]:
@@ -430,16 +498,11 @@ class SessionService:
             subject_of_cs[cs_id] = subject_name
         if not subject_of_cs:
             return {}
-        # "Open tonight": set on/before the meeting day and either not yet due,
-        # or (no due date) set within the last 3 days.
         assignments = list(self.db.scalars(
             select(HomeworkAssignment).where(
                 HomeworkAssignment.org_id == org_id,
                 HomeworkAssignment.class_subject_id.in_(subject_of_cs.keys()),
-                HomeworkAssignment.date <= d,
-                (HomeworkAssignment.due_date >= d)
-                | (HomeworkAssignment.due_date.is_(None)
-                   & (HomeworkAssignment.date >= d - timedelta(days=3))))
+                open_tonight(d))
             .order_by(HomeworkAssignment.date.desc())))
         out: dict[uuid.UUID, list[HomeworkItem]] = {}
         for st, _explicit in roster:

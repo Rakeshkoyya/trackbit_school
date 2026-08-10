@@ -30,6 +30,7 @@ Read the one that answers your question. Do not read them all.
 | **Where a feature lives, and who may use it** | [`docs/architecture/FEATURE-MAP.md`](docs/architecture/FEATURE-MAP.md) |
 | **What agents (MCP + Lucy) may do, and what they may never** | [`docs/architecture/MCP-SERVER-PLAN.md`](docs/architecture/MCP-SERVER-PLAN.md) |
 | **Which agent tools are approved to build** — ⚠️ build nothing not ticked there | [`docs/architecture/MCP-TOOL-LIST.md`](docs/architecture/MCP-TOOL-LIST.md) |
+| **How the school day is shaped** — bell schedules, typed periods, blocks | [`docs/architecture/TT2-DAY-SHAPE-PLAN.md`](docs/architecture/TT2-DAY-SHAPE-PLAN.md) |
 | The current build spec | `docs/trackbit-school-prd-v2.md` (cite as `SPRD2 §x.y`) |
 | The "why" — principles and fences | `docs/trackbit-product-architecture.md` |
 | Reference for carried v1 modules (fees, tasks, sessions) | `docs/trackbit-school-prd-v1.md` |
@@ -243,6 +244,7 @@ they own, in Python or in the browser.**
 | `core/bands.py` | the A/B/C vocabulary, `chip()`, `tier_for`, `movement`, the descriptors |
 | `core/band_assessment.py` | `marks` \| `rating` \| `other` — three kinds of statement that never pool |
 | `core/collection.py` | fee quarters as due-date windows; `Collection` deliberately has **no `outstanding`** |
+| `core/day_shape.py` | what a period **is** — bell-entry kinds, the six block kinds, and `CAPTURE`: what each block asks the teacher to record |
 | `core/work_types.py` | staff work categories and their fixed colours |
 | `core/staff.py` | `not_operator()` — the operator is a member of every school but is not staff |
 | `core/indian_states.py` | the canonical state list; `normalise()` **never guesses** |
@@ -311,7 +313,9 @@ daily report generation · per-student homework · **Lucy** · the **parent port
 
 ## Current state and what is next
 
-Schema head is `d7e8f9a0b1c2` (oauth_clients + oauth_grants, 2026-08-08). **Verify with
+Schema head is `f9a0b1c2d3e4` (TT-2 day shape: `bell_schedules`, typed
+`timetable_slots`, `session_staff` — 2026-08-10; applied to the **local test DB
+only**, prod and dev are behind). **Verify with
 `uv run alembic current` rather than trusting this line** — it is a cache, and this file has
 cached a wrong revision before. As of 2026-08-08 `d7e8f9a0b1c2` is applied to **production
 and the local test DB**, verified by querying the tables rather than the version row.

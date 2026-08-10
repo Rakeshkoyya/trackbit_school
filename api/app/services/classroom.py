@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core import day_shape
 from app.core import homework_verdict as verdicts
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
@@ -122,6 +123,7 @@ class ClassroomService:
         morning"* rather than either asking again or silently dropping the
         section — and what lets period 3 take it when period 1 never happened.
         """
+        from app.services import bell  # noqa: PLC0415
         from app.services.school_clock import marking_period_nos  # noqa: PLC0415
         year = self._active_year(m.org_id)
         att = AttendanceService(self.db)
@@ -130,8 +132,10 @@ class ClassroomService:
             if held is None:
                 return True, False
             return held.period_no == period_no, True
-        marking = marking_period_nos(
-            year.period_times if year else None, m.org.attendance_mode)
+        # TT-2: the shape of the day is effective-dated, so which periods mark
+        # attendance is a question about a DATE, not about the year.
+        shape = bell.resolve(self.db, year, d or self._today(m))
+        marking = marking_period_nos(shape.entries, m.org.attendance_mode)
         return (not marking or period_no in marking), None
 
     # ── My Day (CL-1) ────────────────────────────────────────────────────────
@@ -239,6 +243,13 @@ class ClassroomService:
         day_slots = day_slots + [ts for ts, _who in covering]
         covering_by_slot = {(ts.class_id, ts.period_no): who for ts, who in covering}
 
+        # TT-2: blocks leave the subject pipeline here. A games period has no
+        # class-subject, so it has no topic, no lesson log and no homework — and
+        # feeding it through `period_states` / `_assign_topics` would either
+        # crash on the null id or, worse, invent an empty Maths card for it.
+        block_slots = [ts for ts in day_slots if ts.slot_type == "block"]
+        day_slots = [ts for ts in day_slots if ts.slot_type != "block"]
+
         att_service = AttendanceService(self.db)
         class_ids = list({ts.class_id for ts in day_slots})
         att = att_service.period_states(m.org_id, class_ids, today)
@@ -263,8 +274,10 @@ class ClassroomService:
 
         # V1-3 (D-01/Q-02a): which periods the org's mode takes attendance in.
         # The card itself stays for every period — only the attendance ask moves.
+        from app.services import bell  # noqa: PLC0415
         from app.services.school_clock import marking_period_nos  # noqa: PLC0415
-        marking = set(marking_period_nos(year.period_times, m.org.attendance_mode))
+        shape = bell.resolve(self.db, year, today)
+        marking = set(marking_period_nos(shape.entries, m.org.attendance_mode))
 
         # Founder, 2026-08-05 — **once a day means once a day, and the ask
         # follows the gap.** In `first_period` the register belongs to the DAY,
@@ -308,7 +321,24 @@ class ClassroomService:
                 late_count=state.get("late_count"),
                 homework_set=ts.class_subject_id in hw_cs,
                 substituting=(ts.class_id, ts.period_no) in covering_by_slot,
-                covering_for=covering_by_slot.get((ts.class_id, ts.period_no))))
+                covering_for=covering_by_slot.get((ts.class_id, ts.period_no)),
+                start=ts.start, end=ts.end))
+
+        # TT-2 blocks. Deliberately thin: the roll, the log and the memories all
+        # live on the block's own meeting, which does not exist until she opens
+        # it, so there is nothing to count here and nothing to pre-create. The
+        # row is a doorway, and `block_kind` is what the doorway leads to.
+        for ts in block_slots:
+            periods.append(MyDayPeriod(
+                period_no=ts.period_no, slot_type="block", class_subject_id=None,
+                class_id=ts.class_id, class_label=ts.class_label,
+                session_id=ts.session_id, block_name=ts.block_name,
+                block_kind=ts.block_kind,
+                block_kind_label=day_shape.label_for(ts.block_kind),
+                start=ts.start, end=ts.end,
+                # A block never carries the school-day register (D-91): its roll
+                # is its own, taken against its own roster on its own meeting.
+                marks_attendance=False, roster_count=0))
         periods.sort(key=lambda p: p.period_no)
         tasks, older = self._my_day_tasks(m, today, year)
         return MyDayOut(date=today, classes=classes, periods=periods,
@@ -1071,14 +1101,52 @@ class ClassroomService:
             raise NotFoundError("Homework")
         return hw
 
-    def _can_touch_homework(self, m: CurrentMember, cs, hw) -> None:
+    def _block_covers_homework(self, m: CurrentMember, block_id: uuid.UUID,
+                               class_id: uuid.UUID) -> bool:
+        """May this member check this class's homework from inside a block?
+
+        TT-2: the evening homework class is run by a warden who very likely
+        teaches none of the subjects she is supervising. Three things must all
+        hold, and the narrowness is the point — this is the one path by which
+        somebody who does not teach a class can write its homework verdicts:
+
+        1. the block's kind actually does homework checking (`day_shape`);
+        2. she is on that block's staff (or its owner, or an admin);
+        3. the class is genuinely in the block — it has a live timetable cell
+           for it, or is linked to it directly.
+        """
+        from app.models import Session as SessionModel  # noqa: PLC0415
+        from app.models import SessionClass, TimetableSlot  # noqa: PLC0415
+        from app.services.timetable import TimetableService  # noqa: PLC0415
+
+        block = self.db.scalar(select(SessionModel).where(
+            SessionModel.id == block_id, SessionModel.org_id == m.org_id))
+        if block is None or not day_shape.capture_for(block.kind).homework_check:
+            return False
+        if not TimetableService(self.db).may_take_block(m, block_id):
+            return False
+        on_grid = self.db.scalar(select(TimetableSlot.id).where(
+            TimetableSlot.org_id == m.org_id, TimetableSlot.session_id == block_id,
+            TimetableSlot.class_id == class_id,
+            TimetableSlot.effective_to.is_(None)).limit(1))
+        if on_grid is not None:
+            return True
+        return self.db.scalar(select(SessionClass.id).where(
+            SessionClass.session_id == block_id,
+            SessionClass.class_id == class_id).limit(1)) is not None
+
+    def _can_touch_homework(self, m: CurrentMember, cs, hw,
+                            block_id: uuid.UUID | None = None) -> None:
         """S-93: a substitute who covered this class since the homework was set
         may open and check it — `homework_checks.checked_by_member_id` exists
-        precisely to record that it was someone else."""
+        precisely to record that it was someone else. TT-2 adds the same
+        widening for the staff of a homework block."""
         try:
             self._can_capture(m, cs)
             return
         except ForbiddenError:
+            if block_id is not None and self._block_covers_homework(m, block_id, cs.class_id):
+                return
             from app.models import PeriodSubstitution  # noqa: PLC0415
             covered = self.db.scalar(
                 select(PeriodSubstitution.id).where(
@@ -1099,10 +1167,11 @@ class ClassroomService:
              else q.where(Student.class_id == class_id))
         return list(self.db.scalars(q.order_by(Student.roll_no, Student.full_name)))
 
-    def homework_sheet(self, m: CurrentMember, assignment_id: uuid.UUID) -> HomeworkSheetOut:
+    def homework_sheet(self, m: CurrentMember, assignment_id: uuid.UUID,
+                       block_id: uuid.UUID | None = None) -> HomeworkSheetOut:
         hw = self._homework(m, assignment_id)
         cs = self._cs(m.org_id, hw.class_subject_id)
-        self._can_touch_homework(m, cs, hw)
+        self._can_touch_homework(m, cs, hw, block_id)
         klass = self.db.get(SchoolClass, cs.class_id)
         subject = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
         check = self.db.scalar(
@@ -1209,7 +1278,8 @@ class ClassroomService:
         }
 
     def check_homework(self, m: CurrentMember, assignment_id: uuid.UUID,
-                       body: HomeworkCheckIn) -> HomeworkSheetOut:
+                       body: HomeworkCheckIn,
+                       block_id: uuid.UUID | None = None) -> HomeworkSheetOut:
         """Record who didn't do it. An empty list means everyone did.
 
         Full replace of the exception set (P1v2, same contract as
@@ -1218,7 +1288,7 @@ class ClassroomService:
         """
         hw = self._homework(m, assignment_id)
         cs = self._cs(m.org_id, hw.class_subject_id)
-        self._can_touch_homework(m, cs, hw)
+        self._can_touch_homework(m, cs, hw, block_id)
 
         check = self.db.scalar(
             select(HomeworkCheck).where(HomeworkCheck.assignment_id == assignment_id))
@@ -1253,7 +1323,9 @@ class ClassroomService:
         check.checked_at = datetime.now(UTC)
         check.checked_by_member_id = m.membership.id
         self.db.flush()
-        return self.homework_sheet(m, assignment_id)
+        # Carry the block through: the re-read runs the same guard, and a warden
+        # who may write these verdicts must be able to read back what she wrote.
+        return self.homework_sheet(m, assignment_id, block_id)
 
     # ── compliance (CL-4) — coordinator/director ─────────────────────────────
     def compliance(self, m: CurrentMember, on_date: date | None = None) -> ComplianceOut:

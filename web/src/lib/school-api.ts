@@ -55,6 +55,11 @@ export const schoolApi = {
   terms: (yearId?: string) => api.get<Term[]>(`/academics/terms${qs({ year_id: yearId })}`),
   createTerm: (b: { academic_year_id: string; name: string; start_date: string; end_date: string }) =>
     api.post<Term>("/academics/terms", b),
+  /** Rename a term or move its window. The route has existed since P0-C and no
+   *  screen ever called it, so correcting "Term 1" to "First Term" meant deleting
+   *  the term — which unscopes every chapter filed under it. */
+  updateTerm: (id: string, b: { name?: string; start_date?: string; end_date?: string }) =>
+    api.patch<Term>(`/academics/terms/${id}`, b),
   deleteTerm: (id: string) => api.del<{ message: string }>(`/academics/terms/${id}`),
 
   subjects: () => api.get<Subject[]>("/academics/subjects"),
@@ -76,6 +81,11 @@ export const schoolApi = {
   // calendar (M1)
   calendarSummary: (yearId: string) =>
     api.get<CalendarSummary>(`/academics/calendar/summary${qs({ year_id: yearId })}`),
+  /** Correct a day in place. Before this, a holiday with the wrong date or a
+   *  misspelt name could only be deleted and repainted. */
+  updateEvent: (id: string, b: { type?: string; title?: string; start_date?: string;
+    end_date?: string; affects_teaching?: boolean; notes?: string | null }) =>
+    api.patch<CalendarEvent>(`/academics/calendar/events/${id}`, b),
   deleteEvent: (id: string) => api.del<{ message: string }>(`/academics/calendar/events/${id}`),
   /** One round trip for a drag-selected range (V2-P7). */
   createEvents: (events: import("@/lib/school-types").CalendarEventInput[]) =>
@@ -739,8 +749,19 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").TimetableGrid>(
       `/timetable/grid${qs({ class_id: classId, on_date: onDate })}`,
     ),
-  setSlot: (b: { class_id: string; weekday: number; period_no: number; class_subject_id: string; effective_from?: string }) =>
-    api.put<import("@/lib/school-types").TimetableGrid>("/timetable/slot", b),
+  setSlot: (b: {
+    class_id: string; weekday: number; period_no: number;
+    slot_type?: "subject" | "block";
+    class_subject_id?: string | null; session_id?: string | null;
+    effective_from?: string;
+  }) => api.put<import("@/lib/school-types").TimetableGrid>("/timetable/slot", b),
+  /** One block across many classes and days — "assembly, period 1, everyone". */
+  setSlotsBulk: (b: {
+    class_ids: string[]; weekdays: number[]; period_no: number;
+    slot_type?: "subject" | "block";
+    class_subject_id?: string | null; session_id?: string | null;
+    effective_from?: string;
+  }) => api.post<{ written: number; skipped: string[] }>("/timetable/slot/bulk", b),
   clearSlot: (b: { class_id: string; weekday: number; period_no: number; effective_from?: string }) =>
     api.post<import("@/lib/school-types").TimetableGrid>("/timetable/slot/clear", b),
   validateTimetable: () =>
@@ -750,6 +771,93 @@ export const schoolApi = {
     api.get<import("@/lib/school-types").PeriodConfig>(`/timetable/period-config${qs({ year_id: yearId })}`),
   setPeriodConfig: (b: { academic_year_id: string; periods_per_day: number; period_times: import("@/lib/school-types").PeriodTime[] }) =>
     api.put<import("@/lib/school-types").PeriodConfig>("/timetable/period-config", b),
+  // ── TT-2: the bell schedule (when the day happens) ────────────────────────
+  bellSchedule: (yearId: string, onDate?: string) =>
+    api.get<import("@/lib/school-types").BellSchedule>(
+      `/timetable/bell${qs({ year_id: yearId, on_date: onDate })}`),
+  /** Reshape the day from `effective_from`. Append-only: the old shape stays. */
+  setBellSchedule: (b: {
+    academic_year_id: string;
+    entries: import("@/lib/school-types").PeriodTime[];
+    effective_from?: string; note?: string | null;
+  }) => api.put<import("@/lib/school-types").BellSchedule>("/timetable/bell", b),
+  bellHistory: (yearId: string) =>
+    api.get<import("@/lib/school-types").BellHistory>(
+      `/timetable/bell/history${qs({ year_id: yearId })}`),
+
+  // ── TT-2: blocks (a period that is not a subject) ─────────────────────────
+  blocks: () => api.get<import("@/lib/school-types").TimetableBlock[]>("/timetable/blocks"),
+  createBlock: (b: {
+    name: string; kind: string; hostellers_only?: boolean;
+    staff_member_ids?: string[]; class_ids?: string[]; owner_member_id?: string | null;
+  }) => api.post<import("@/lib/school-types").TimetableBlock>("/timetable/blocks", b),
+  updateBlock: (id: string, b: {
+    name?: string; kind?: string; hostellers_only?: boolean;
+    staff_member_ids?: string[]; class_ids?: string[];
+    owner_member_id?: string | null; active?: boolean;
+  }) => api.patch<import("@/lib/school-types").TimetableBlock>(`/timetable/blocks/${id}`, b),
+  deleteBlock: (id: string) => api.del<void>(`/timetable/blocks/${id}`),
+
+  // ── TT-2: capturing a block (free — `D-114`). Mirrors the session capture
+  // calls above but routed through /blocks, which gates on the block's staff.
+  openBlock: (blockId: string, onDate?: string) =>
+    api.post<import("@/lib/school-types").Meeting>(
+      `/blocks/${blockId}/open${qs({ on_date: onDate })}`),
+  blockAttendance: (meetingId: string, rows: {
+    student_id: string; status: string; late_minutes?: number | null; homework_done?: boolean | null;
+  }[]) => api.patch<import("@/lib/school-types").Meeting>(
+    `/blocks/meetings/${meetingId}/attendance`, { rows }),
+  setBlockNote: (meetingId: string, note: string | null) =>
+    api.put<import("@/lib/school-types").Meeting>(
+      `/blocks/meetings/${meetingId}/note`, { note }),
+  blockStudentCard: (meetingId: string, studentId: string) =>
+    api.get<import("@/lib/school-types").SessionStudentCard>(
+      `/blocks/meetings/${meetingId}/students/${studentId}`),
+  setBlockStudentLogs: (meetingId: string, studentId: string,
+                        entries: { section: string; note: string }[]) =>
+    api.put<import("@/lib/school-types").SessionStudentCard>(
+      `/blocks/meetings/${meetingId}/students/${studentId}/logs`, { entries }),
+  deleteBlockMedia: (mediaId: string) => api.del<void>(`/blocks/media/${mediaId}`),
+  uploadBlockMedia: async (meetingId: string, file: File,
+                           opts?: { caption?: string; studentId?: string }) => {
+    const DIRECT_LIMIT = 25 * 1024 * 1024;
+    if (file.size > DIRECT_LIMIT) {
+      const pre = await api.post<import("@/lib/school-types").MediaPresign>(
+        `/blocks/meetings/${meetingId}/media/presign`,
+        { filename: file.name, content_type: file.type || "application/octet-stream",
+          size_bytes: file.size, student_id: opts?.studentId ?? null },
+      );
+      if (pre.upload_url) {
+        const put = await fetch(pre.upload_url, {
+          method: "PUT", body: file,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        });
+        if (!put.ok) throw new Error("Upload to storage failed");
+        return api.post<import("@/lib/school-types").Meeting>(
+          `/blocks/meetings/${meetingId}/media/confirm`,
+          { key: pre.key, caption: opts?.caption || null, student_id: opts?.studentId ?? null });
+      }
+    }
+    const form = new FormData();
+    form.append("file", file);
+    if (opts?.caption) form.append("caption", opts.caption);
+    if (opts?.studentId) form.append("student_id", opts.studentId);
+    return api.upload<import("@/lib/school-types").Meeting>(
+      `/blocks/meetings/${meetingId}/media`, form);
+  },
+  /** The homework class: subject tabs for a class, and what is live tonight. */
+  blockHomework: (meetingId: string, p?: { classId?: string; classSubjectId?: string }) =>
+    api.get<import("@/lib/school-types").BlockHomework>(
+      `/blocks/meetings/${meetingId}/homework${qs({
+        class_id: p?.classId, class_subject_id: p?.classSubjectId })}`),
+  blockHomeworkSheet: (meetingId: string, assignmentId: string) =>
+    api.get<import("@/lib/school-types").HomeworkSheet>(
+      `/blocks/meetings/${meetingId}/homework/${assignmentId}`),
+  checkBlockHomework: (meetingId: string, assignmentId: string,
+                       results: { student_id: string; status: string; note?: string | null }[]) =>
+    api.post<import("@/lib/school-types").HomeworkSheet>(
+      `/blocks/meetings/${meetingId}/homework/${assignmentId}/check`, { results }),
+
   timetableImportAnalyze: (classId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);

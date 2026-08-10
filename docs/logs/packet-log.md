@@ -1836,3 +1836,65 @@ Migration head = **`f4e5f6a7b8c9`**. Backend **200 tests passing**, ruff clean; 
     `components/school/{main-exam-board,exam-workbench}.tsx`, `/plan/exams`, `/bands/exams`.
     `test_myclass_exams.py` (11) — the two syllabus scopes pinned in **both** directions, because a
     scope test that only checks what is present cannot tell a block from an empty screen.
+
+---
+
+## TT-2 — the day shape (2026-08-10)
+
+**Founder ask:** *"timetable can be editable after the importing… we can set different timing and
+no.of periods in the admin UI… maybe we can add breaks inbetween"*, with the worked case: 8:00–2:00
+for everyone, a 30-minute break, then a **hostellers-only** homework class at 15:30, an AI class at
+16:30 and games 18:00–19:00 — and assembly/yoga taken by whichever teacher is free.
+
+Two things made that unsayable. Timings were a single JSONB on `academic_years`, synthesised at
+setup from four numbers, with **no editor anywhere in the app** (the admin could change
+`periods_per_day` and nothing else). And `timetable_slots.class_subject_id` was `NOT NULL`, so a
+cell could only ever be a subject.
+
+- **`bell_schedules` — the day is effective-dated** (`D-115`). Founder: *"after the term1 exams
+  admin can decide to introduce new classes and change the timetable structure."* A single value
+  would have silently re-rendered September's timesheets and day-book with October's clock, and
+  every number would still have looked plausible. `services/bell.py` resolves the shape **as of a
+  date**; `school_clock` stays pure. The numbering rule is untouched — `period_no` is still the
+  index among `kind == 'period'` entries — which is why appending a 15:30 block makes it period 9
+  and migrates not one `class_periods` row.
+  ⚠️ `academic_years.period_times`/`periods_per_day` survive as a **cache of the current shape**,
+  written only by `bell.sync_year_cache`, so the ~25 readers that render *today* stayed correct
+  without a 25-file diff. The timesheet, day book and substitution half-day — the three that render
+  *past* dates — were moved to the resolver. **`bell.resolve(db, year, on_date)` is the only correct
+  read for a date.**
+- **Typed slots** (`D-112`). A cell holds a class-subject **or** a block, under a CHECK that it is
+  exactly one. A block is a `Session` — reusing four tables and ~600 lines of tested attendance,
+  per-student log, R2 media and computed-roster code rather than growing a second entity. Its
+  flavour is `sessions.kind`, widened to six; there is deliberately no copy of it on the slot.
+- **`core/day_shape.py`** — the new vocabulary module. `CAPTURE[kind]` says what each block asks
+  for (roll · class log · student logs · memories · homework check), and the My Day row, the capture
+  screen and the API's validation all read that one table. `web/src/lib/day-shape.ts` mirrors it.
+- **`session_staff`** — assembly and yoga are taken by whoever is free, and until now only a single
+  `owner_member_id` could open a meeting, so Tuesday's assembly photo had nowhere to go.
+- **The clash validator learned the difference between a cell and a commitment.** One assembly block
+  placed on twenty classes is a teacher standing in *one* hall; bucketing by cell would have
+  reported nineteen clashes. `_commitments` returns `(teacher, engagement)` and the validator counts
+  distinct engagements.
+- **`D-1` narrowed, on founder instruction.** `require_operator` froze *all* structure at handover.
+  The **initial build** (import, generate, the legacy period-config, the draft) stays frozen; the
+  **day shape** — one cell, the timings, the blocks — moved to `require_admin`. A school that cannot
+  move its own games period without filing a ticket keeps its real timetable on paper, and then the
+  register, the day book and the daily report are all describing a fiction.
+- **The homework class** writes to `homework_results`, the canonical store — not to a second column.
+  Its sheet defaults to **`not_checked`**, not "not done": nothing is claimed before the teacher
+  saves, and reaching the ordinary case still costs one tap, not one per child (P1v2). The
+  per-student `note` column has existed since HW-1 and no UI had ever written it. A per-student
+  **photo** lands in `session_media` with `student_id` set — inside the decided hostel-media fence
+  exception, which is exactly why it belongs to the block's meeting and not to the assignment.
+  `_can_touch_homework` grew a **block arm** (the warden teaches none of these subjects), narrowed
+  by three conditions and pinned by a test that it is not a skeleton key to another class's books.
+- **Tiering** (`D-114`): capturing a block is **free**, like the timetable it hangs off. The hostel
+  week planner and the records board stay on `/sessions` at max — free buys the act of recording
+  (`D-107`).
+
+New: `core/day_shape.py`, `services/bell.py`, `services/blocks.py`, `schemas/blocks.py`,
+`endpoints/blocks.py` (`/blocks`, ungated), `components/school/bell-editor.tsx`,
+`web/src/lib/day-shape.ts`, `/my-day/block/[blockId]`. Migration **`f9a0b1c2d3e4`**.
+`test_day_shape.py` (14) — including the four negative-authorization cases, because a block's staff
+list is the only thing between a teacher and another block's roster.
