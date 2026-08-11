@@ -55,6 +55,7 @@ from app.models import (
 from app.schemas.fees import StudentFeeCreate
 from app.services import bell
 from app.services.fees import FeeService
+from app.services.period_load import recompute_periods_per_week
 from app.services.planner import PlannerService
 from app.services.roster_import import RosterImporter
 from app.services.setup_pack.parse import ParsedPack, fill_down
@@ -478,11 +479,11 @@ class PackCommitter:
             if not targets:
                 out.skipped += 1
                 continue
-            # `periods_per_week` is NOT NULL, so "not decided yet" is 0 here —
-            # which is exactly how `readiness._classes` already reads it
-            # ("N of M allocations have periods/week"). It is a state, not a
-            # weekly budget of zero.
-            ppw = to_int(row.get("periods_per_week")) or 0
+            # TT-3: the sheet no longer asks for periods/week, because a school
+            # filling this in during April does not yet know it — it finds out
+            # when the timetable is drawn. `_timetable` below derives it, so a
+            # new allocation starts at 0 and is corrected the moment the grid
+            # lands. Nothing here writes the column.
             teacher = staff.get(_norm(row.get("teacher")))
 
             for key in targets:
@@ -490,13 +491,12 @@ class PackCommitter:
                 cs = existing.get((class_id, subject.id))
                 if cs is None:
                     cs = ClassSubject(org_id=m.org_id, class_id=class_id,
-                                      subject_id=subject.id, periods_per_week=ppw)
+                                      subject_id=subject.id, periods_per_week=0)
                     self.db.add(cs)
                     self.db.flush()
                     existing[(class_id, subject.id)] = cs
                     out.created += 1
                 else:
-                    cs.periods_per_week = ppw
                     out.updated += 1
                 if teacher:
                     cs.teacher_member_id = teacher
@@ -603,7 +603,14 @@ class PackCommitter:
         out = self._result(result, "timetable")
         rows = pack.rows("timetable")
         if not rows:
-            out.notes.append("No timetable — teachers will see no periods on My Day.")
+            # TT-3 makes this note bigger than it was: with no grid there is
+            # nothing to derive periods/week from either, so the planner cannot
+            # date a single chapter. Say both, or the school reads it as a
+            # cosmetic gap on My Day.
+            out.notes.append(
+                "No timetable — teachers will see no periods on My Day, and no "
+                "subject has a weekly period count, so the planner cannot work "
+                "out chapter dates yet. Draw the grid and both fill in.")
             return
         effective = year.tracking_start_date or year.start_date or date.today()
         existing = {
@@ -633,6 +640,14 @@ class PackCommitter:
                 slot.class_subject_id = cs_id
                 out.updated += 1
         self.db.flush()
+        # TT-3: the grid is the only source of periods/week, so deriving it is
+        # part of importing a timetable rather than a separate step somebody
+        # could forget. Whole-org: an import writes every class at once.
+        n = recompute_periods_per_week(self.db, m.org_id)
+        if n:
+            out.notes.append(
+                f"Weekly period counts worked out from this grid for {n} "
+                f"class-subject{'' if n == 1 else 's'}.")
 
     # ── 9b. exam portions ────────────────────────────────────────────────────
     def _portions(self, m: CurrentMember, exams: dict[str, uuid.UUID],

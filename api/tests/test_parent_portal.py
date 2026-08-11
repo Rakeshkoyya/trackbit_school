@@ -143,6 +143,12 @@ def test_today_view_daily_status_and_content(client, cleanup, monkeypatch):
     h, _year, klass, cs = _setup(client, cleanup)
     phone = _phone()
     s = _add_student(client, h, klass["id"], "Aisha", phone)
+    # A "partial day" needs two marked periods to be partial BETWEEN, so this
+    # test is about `every_period`. Explicit since 2026-08-11, when one register
+    # a day became the default: there, the two marks below are one register and
+    # the child is simply absent.
+    client.patch("/api/v1/org/settings", headers=h,
+                 json={"attendance_mode": "every_period"})
 
     unit = client.post("/api/v1/planner/syllabus/units", headers=h,
                        json={"class_subject_id": cs["id"], "title": "Grammar"}).json()

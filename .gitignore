@@ -42,3 +42,6 @@ docs/reference/
 
 # Claude Code local state (incl. git worktrees under .claude/worktrees/)
 .claude/
+
+# Cygwin/MSYS crash dumps (a killed pytest leaves these)
+*.stackdump

@@ -171,7 +171,9 @@ def test_settings_round_trip_and_work_category_rules(client, cleanup):
     h = _headers(reg)
 
     s = client.get("/api/v1/org/settings", headers=h).json()
-    assert s["attendance_mode"] == "every_period"
+    # One register a day (founder, 2026-08-11) — see `test_once_per_day.py`,
+    # which owns the reason. This was `every_period` until then.
+    assert s["attendance_mode"] == "first_period"
     assert s["min_attendance_pct"] == 75
     assert s["homework_gap_days"] == 3
     keys = {c["key"] for c in s["work_categories"]}

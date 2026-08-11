@@ -50,6 +50,41 @@ def visible_class_ids(db: Session, m: CurrentMember) -> set[uuid.UUID] | None:
         _SchoolClass.class_teacher_member_id == m.membership.id)))
 
 
+def assert_can_edit_class_subject(
+    db: Session, m: CurrentMember, class_subject_id: uuid.UUID,
+) -> ClassSubject:
+    """May this member change THIS subject's syllabus? Returns it if so.
+
+    Narrower than `assert_can_take_class`, which answers *may she stand in front
+    of this class* and is therefore true for every subject of a class she
+    teaches one subject of — the right rule for attendance and the wrong one for
+    a syllabus, where it would let the Hindi teacher rewrite the Maths chapters
+    (the same distinction `main_exams.assert_can_record_subject` draws for
+    marks).
+
+    Admin anywhere; otherwise the subject's own teacher, or the class teacher of
+    its homeroom — she is answerable for her class's record and is the person
+    who keeps the syllabus current for a colleague who has left.
+
+    Lives here rather than on either service because both `PlannerService` and
+    `SyllabusBoardService` need it and `syllabus_board` already imports
+    `planner`; a helper on either would close an import cycle.
+    """
+    cs = db.scalar(select(ClassSubject).where(
+        ClassSubject.id == class_subject_id, ClassSubject.org_id == m.org_id))
+    if cs is None:
+        raise NotFoundError("Class-subject")
+    if m.is_coordinator_up:
+        return cs
+    if cs.teacher_member_id == m.membership.id:
+        return cs
+    klass = db.get(SchoolClass, cs.class_id)
+    if klass is not None and klass.class_teacher_member_id == m.membership.id:
+        return cs
+    raise ForbiddenError("This subject is not yours to edit.",
+                         code="not_your_subject")
+
+
 def assert_can_take_class(
     db: Session, m: CurrentMember, class_id: uuid.UUID, class_subject_id: uuid.UUID | None,
     on_date: date | None = None, period_no: int | None = None,

@@ -63,7 +63,6 @@ function ScopePicker({
       {TOOLSETS.map((t) => {
         const on = selected.has(t.name);
         const sensitive = t.name === "fees" || t.name === "bands";
-        const pending = "pending" in t && t.pending === true;
         return (
           <label
             key={t.name}
@@ -85,11 +84,6 @@ function ScopePicker({
                 {sensitive ? (
                   <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
                     opt in
-                  </span>
-                ) : null}
-                {pending ? (
-                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                    not built yet
                   </span>
                 ) : null}
               </span>

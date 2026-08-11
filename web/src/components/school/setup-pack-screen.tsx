@@ -17,7 +17,7 @@
  *   * only a blocker blocks. The Import button is disabled on blockers alone.
  */
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowRight,
@@ -32,6 +32,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { StaffLoginsEditor } from "@/components/school/staff-logins-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -184,6 +185,9 @@ function Report({ review }: { review: PackReview }) {
   );
 }
 
+/** The generated logins, exactly as imported. Read-only on purpose: step 5 is
+ *  where they are corrected, and two editable renderings of one list is how the
+ *  two start disagreeing about what was actually handed over. */
 function Credentials({ rows }: { rows: PackCredential[] }) {
   function copy() {
     const text = rows
@@ -254,6 +258,7 @@ export function SetupPackScreen({ orgId }: { orgId: string }) {
   const [review, setReview] = useState<PackReview | null>(null);
   const [result, setResult] = useState<PackImport | null>(null);
   const [replaceSyllabus, setReplaceSyllabus] = useState(false);
+  const [loginsSaved, setLoginsSaved] = useState(false);
 
   const { data: orgs } = useQuery({
     queryKey: ["platform-orgs"],
@@ -261,10 +266,23 @@ export function SetupPackScreen({ orgId }: { orgId: string }) {
   });
   const org = orgs?.find((o) => o.id === orgId);
 
+  const qc = useQueryClient();
+
   const { data: readiness } = useQuery({
     queryKey: ["readiness", orgId],
     queryFn: () => platformApi.readiness(orgId),
     enabled: Boolean(result?.imported),
+  });
+
+  const handover = useMutation({
+    mutationFn: () => platformApi.markHandedOver(orgId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["readiness", orgId] });
+      qc.invalidateQueries({ queryKey: ["platform-orgs"] });
+      toast.success("Handed over — the school is live");
+    },
+    onError: (e) =>
+      toast.error(e instanceof ApiError ? e.message : "Could not hand it over"),
   });
 
   const download = useMutation({
@@ -423,8 +441,24 @@ export function SetupPackScreen({ orgId }: { orgId: string }) {
       ) : null}
 
       {result?.imported ? (
-        <Card step={5} title="Hand it over"
-          subtitle="Check the school reads correctly before you give out the password.">
+        <Card
+          step={5}
+          title="Set the staff logins"
+          subtitle="The names above are generated from the pack. Correct them here — the school's own employee IDs, a misspelt name, a password you would rather choose."
+          done={loginsSaved}
+        >
+          <StaffLoginsEditor
+            orgId={orgId}
+            credentials={result.credentials}
+            onSaved={() => setLoginsSaved(true)}
+          />
+        </Card>
+      ) : null}
+
+      {result?.imported ? (
+        <Card step={6} title="Hand it over"
+          subtitle="Check the school reads correctly before you give out the password."
+          done={Boolean(readiness?.handed_over_at)}>
           <div className="flex flex-wrap items-center gap-3">
             {readiness ? (
               <Badge tone={readiness.ready_count === readiness.total ? "success" : "warning"}>
@@ -437,11 +471,30 @@ export function SetupPackScreen({ orgId }: { orgId: string }) {
                 : <Download className="h-4 w-4" />}
               Download the handover sheet
             </Button>
-            <Button variant="outline" onClick={() => router.push("/platform")}>
-              Readiness &amp; handover
+            {/* Handover is the moment the school becomes its own: it freezes the
+                structure routes behind `require_operator`. Doing it from here
+                rather than only from /platform means the operator finishes on
+                the screen they started on — but AFTER the logins, because the
+                sheet they print is the one this step just settled. */}
+            <Button
+              variant={loginsSaved ? "primary" : "outline"}
+              onClick={() => handover.mutate()}
+              disabled={handover.isPending || Boolean(readiness?.handed_over_at)}
+            >
+              {handover.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {readiness?.handed_over_at ? "Handed over" : "Hand the school over"}
+            </Button>
+            <Button variant="ghost" onClick={() => router.push("/platform")}>
+              Readiness
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
+          {!loginsSaved ? (
+            <p className="mt-3 text-sm text-warning">
+              Save the logins above first — the handover sheet is what the school
+              is given, and it should carry the usernames they will actually use.
+            </p>
+          ) : null}
           <p className="mt-3 text-sm text-muted-foreground">
             Give the school the handover sheet — it carries the school code, both
             sign-in addresses and the line between what they change themselves

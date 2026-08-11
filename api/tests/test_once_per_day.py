@@ -246,6 +246,57 @@ def test_the_board_points_every_teacher_at_the_same_register(client, cleanup):
     assert row["suggested_period_no"] == 3, "everyone must be sent to the held register"
 
 
+def test_a_new_school_starts_on_one_register_a_day(client, cleanup):
+    """The default mode (founder, 2026-08-11).
+
+    `every_period` was the default from V1-2 until now, which meant a school that
+    never opened Settings was asking its teachers for the roll in all eight
+    periods — the exact per-class, per-period chore `P1v2` exists to prevent, and
+    the one shape a school should have to opt INTO."""
+    import uuid as _uuid
+    email = f"admin-{_uuid.uuid4().hex[:12]}@example.com"
+    reg = client.post("/api/v1/auth/register-org",
+                      json={"org_name": "Default Mode School", "name": "Director",
+                            "email": email, "password": "supersecret1",
+                            "timezone": "Asia/Kolkata"}).json()
+    cleanup["orgs"].append(_uuid.UUID(reg["org"]["id"]))
+    cleanup["users"].append(_uuid.UUID(reg["user"]["id"]))
+    h = {"Authorization": f"Bearer {reg['access_token']}"}
+
+    settings = client.get("/api/v1/org/settings", headers=h)
+    assert settings.status_code == 200, settings.text
+    assert settings.json()["attendance_mode"] == "first_period"
+
+
+@pytest.mark.parametrize(("mode", "expected"), [
+    ("first_period", True),
+    ("every_period", False),
+    ("twice_daily", False),
+])
+def test_the_capture_sheet_is_told_whether_the_register_is_the_days(
+        client, cleanup, mode, expected):
+    """The sheet hides its period picker on `once_per_day`, and this is the flag
+    it reads.
+
+    It failed silently for the whole life of the mode: the service computed it
+    and passed it to `AttendanceRosterOut`, which did not declare the field, so
+    Pydantic dropped it on every response. `undefined` is falsy, so every
+    once-per-day school was offered a picker for periods 1–8 — an invitation to
+    open a second register the server would only redirect back into the first.
+    Nothing raised, nothing logged, and no test looked at the payload."""
+    ctx = _setup(client, cleanup)
+    h = ctx["h"]
+    res = client.patch("/api/v1/org/settings", headers=h,
+                       json={"attendance_mode": mode})
+    assert res.status_code == 200, res.text
+
+    sheet = client.get("/api/v1/attendance/roster", headers=h, params={
+        "class_id": ctx["class"]["id"], "period_no": 1}).json()
+    assert "once_per_day" in sheet, \
+        "the sheet cannot hide a picker it is never told about"
+    assert sheet["once_per_day"] is expected
+
+
 def test_guardians_are_alerted_once_by_whichever_period_took_it(client, cleanup):
     ctx = _setup(client, cleanup)
     h = ctx["h"]

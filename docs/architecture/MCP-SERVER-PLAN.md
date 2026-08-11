@@ -224,7 +224,7 @@ mechanisms:
 | A connector must not be able to do everything the user can | `scope` — the credential's toolsets |
 | A `basic`-tier school must not see platinum features | `tier` — FEATURE-MAP §9.6 says this must happen at schema time, "like the role filter, not by erroring" |
 
-The thirteen toolsets, named after the feature-ID prefixes already in FEATURE-MAP §2–§7
+The twelve toolsets, named after the feature-ID prefixes already in FEATURE-MAP §2–§7
 so a tier, a nav gate, a connector scope and a tool filter all name a feature the same
 way:
 
@@ -242,7 +242,11 @@ way:
 | `insights` | the 7 dashboard tabs, daily report | admin |
 | `fees` | collection, structures, ledger | **admin only**, off by default |
 | `sessions` | hostel sessions | |
-| `events` | observances, what's on | |
+
+> `events` was a fourteenth line here and is **retired** (founder, 2026-08-11). No tool was
+> ever tagged to it, so it offered a real but empty permission on the issue screen. The
+> calendar's occasions belong to `core` (which already carries the calendar) and the
+> observance queue to `planning`; §8.9's `events` column moves with them if it is built.
 
 Default for a new connector: `core + students + capture + planning + tasks`. `fees` and
 `bands` require an explicit, separately-worded opt-in on the issue screen.

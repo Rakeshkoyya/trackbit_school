@@ -295,6 +295,30 @@ def chapter_status(*, topics: int, taught_full: int, taught_partial: int,
     return CHAPTER_NOT_STARTED if planned else CHAPTER_NOT_SCHEDULED
 
 
+def shown_chapter_status(manual: str | None, not_planned: bool,
+                         derived: str) -> str:
+    """THE word a screen prints for a chapter. Import it; do not re-decide it.
+
+    Two facts can answer "where is this chapter": what the lesson logs OBSERVED
+    (`derived`, from `chapter_status` above) and what a human STATED
+    (`syllabus_units.manual_status`, SY-2). The human wins — she is looking at
+    the class, and the record is only a proxy for it.
+
+    With one exception, and it is the same exception `excluded` already is: a
+    chapter the school has taken OUT OF SCOPE reads `not_scheduled` whatever
+    anybody typed. `not_planned` is the more recent decision, and a "completed"
+    typed in September must not resurrect a chapter dropped in November.
+
+    Pure and primitive-only, so `core/` keeps importing no models and both the
+    syllabus board and the exam map can call it. They did not, once, and the
+    same chapter read "Completed" on one tab and "not started" on the next —
+    which is `S-51` exactly: one fact, two computations, two answers.
+    """
+    if not_planned or not manual:
+        return derived
+    return manual
+
+
 # The school's own reading of how hard a chapter is (SY-1). A vocabulary rather
 # than free text because it is a filter and a sort key on the board; NULL —
 # nobody has judged it — is a fourth state and never renders as 'moderate'.

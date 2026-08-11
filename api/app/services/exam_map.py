@@ -33,7 +33,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
-from app.core.coverage import chapter_status
+from app.core.coverage import chapter_status, shown_chapter_status
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
@@ -168,7 +168,15 @@ class ExamMapService:
                             term_id=u.term_id,
                             selected=u.id in selected_units,
                             covered_earlier=u.id in earlier_units,
-                            status=state_by_unit.get(u.id, ("not_scheduled", None))[0],
+                            # SY-2: the SHOWN status, by the same rule the
+                            # syllabus board uses — a human's typed word wins
+                            # over the logs unless the chapter is out of scope.
+                            # Re-deriving it here is how the same chapter came
+                            # to read "Completed" on one tab and "not started"
+                            # on the next.
+                            status=shown_chapter_status(
+                                u.manual_status, u.not_planned,
+                                state_by_unit.get(u.id, ("not_scheduled", None))[0]),
                             planned_end=state_by_unit.get(u.id, ("", None))[1])
                         for u in units]))
             ex_row = next((e for e in fit.exams if e.exam_event_id == ev.id), None)

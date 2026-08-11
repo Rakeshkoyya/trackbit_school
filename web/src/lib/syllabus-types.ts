@@ -54,7 +54,17 @@ export interface SyllabusChapterRow {
   baseline_end: string | null;
   actual_start: string | null;
   actual_end: string | null;
+  /** What the row SHOWS — `manual_status` when somebody typed one, the derived
+   *  word otherwise. Never re-derive it here; the server already chose. */
   status: ChapterStatus;
+  /** What the lesson logs say, always, whatever was typed over it. */
+  derived_status: ChapterStatus;
+  /** What a human typed, or null. Non-null means the row STATES its progress
+   *  rather than observing it, and the grid says so rather than letting a claim
+   *  pass for a record. */
+  manual_status: ChapterStatus | null;
+  /** Unaffected by `manual_status` — typing "completed" moves the word on the
+   *  row, never the percentage under it. */
   completion_pct: number | null;
   /** V1-15's pace marker at chapter scale: how much of this chapter's own
    *  planned window has gone by, in teaching days. What makes the completion
@@ -120,6 +130,15 @@ export interface ChapterPatch {
   not_planned?: boolean;
   term_id?: string;
   clear_term?: boolean;
+  /** The typed teaching status. "unset" hands the cell back to the lesson logs,
+   *  the same escape `difficulty` has — without it a mis-tap is permanent. */
+  status?: ChapterStatus | "unset";
+  /** Size the chapter from its own row. Only accepted when the chapter holds
+   *  exactly ONE topic (the chapter-only shape every importer produces); a
+   *  chapter split into topics is refused with `chapter_not_single_topic`
+   *  rather than having a division nobody made invented for it. */
+  est_periods?: number;
+  clear_est_periods?: boolean;
 }
 
 export interface RescheduleViolation {

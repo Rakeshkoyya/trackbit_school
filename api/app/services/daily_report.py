@@ -47,6 +47,7 @@ from app.services.ai.report import deterministic_summary
 from app.services.attendance import day_absence_maps, is_day_absent
 from app.services.calendar import day_lock
 from app.services.planner import PlannerService
+from app.services.school_clock import marking_period_nos
 from app.services.sessions import SessionService
 
 ABSENTEE_WINDOW_DAYS = 5
@@ -163,11 +164,55 @@ class DailyReportService:
                 ClassPeriod.attendance_marked_at.is_not(None))
             .options(selectinload(ClassPeriod.exceptions))))
         marked_keys = {(mk.class_id, mk.period_no) for mk in marks}
-        marked_cs: set[uuid.UUID] = {
-            s.class_subject_id for s in slots if (s.class_id, s.period_no) in marked_keys}
         absences = sum(1 for mk in marks for e in mk.exceptions if e.status == "absent")
         lates = sum(1 for mk in marks for e in mk.exceptions if e.status == "late")
-        unmarked = [s for s in slots if (s.class_id, s.period_no) not in marked_keys]
+
+        # V1-3 `D-01`: the denominator is the MODE's, not the timetable's. The
+        # briefing was the last attendance consumer still counting every
+        # timetabled slot as a register it was owed, so a school on
+        # `first_period` — captured exactly as intended — opened the admin
+        # dashboard to "8 of 64 periods marked · 56 period(s) not marked" as the
+        # very first sentence of its day. `insights/attendance.py::_capture_grid`
+        # is the sibling rendering of this rule; both derive `held` from the
+        # marked periods themselves, so the heatmap and the briefing cannot
+        # disagree about which period holds a class's register.
+        year = self.db.scalar(select(AcademicYear).where(
+            AcademicYear.org_id == org_id, AcademicYear.is_active.is_(True)))
+        marking = set(marking_period_nos(
+            year.period_times if year else None, m.org.attendance_mode))
+        once = m.org.attendance_mode == "first_period"
+        # class → the period that actually HOLDS the day's register. Founder,
+        # 2026-08-05: period 1 may have been cancelled, so the register is
+        # wherever it was taken, and once it is taken the day is done.
+        held: dict[uuid.UUID, int] = {}
+        if once:
+            for mk in sorted(marks, key=lambda x: x.period_no):
+                held.setdefault(mk.class_id, mk.period_no)
+
+        def _expected(class_id: uuid.UUID, period_no: int) -> bool:
+            if once and class_id in held:
+                return period_no == held[class_id]
+            return not marking or period_no in marking
+
+        expected = [s for s in slots if _expected(s.class_id, s.period_no)]
+        unmarked = [s for s in expected if (s.class_id, s.period_no) not in marked_keys]
+
+        # Two different questions, and once-per-day is what separates them.
+        #
+        #   · "had attendance but no lesson log" is about THIS period: somebody
+        #     marked it, so somebody was in that room — why is there no log?
+        #     Period-level in every mode.
+        #   · "logged but attendance wasn't taken" is about the class's
+        #     REGISTER, which in a once-per-day school belongs to the day and
+        #     not to this subject's period. Asking the Science teacher why she
+        #     never took a register the class teacher took at nine o'clock is
+        #     noise, and it fired on every afternoon subject in the school.
+        marked_cs: set[uuid.UUID] = {
+            s.class_subject_id for s in slots if (s.class_id, s.period_no) in marked_keys}
+        register_classes = {cid for cid, _p in marked_keys}
+        register_cs: set[uuid.UUID] = (
+            {s.class_subject_id for s in slots if s.class_id in register_classes}
+            if once else marked_cs)
 
         logged_cs = set(self.db.scalars(
             select(LessonLog.class_subject_id).where(
@@ -180,7 +225,7 @@ class DailyReportService:
         for csid in sorted(marked_cs - logged_cs, key=lambda c: cs_meta.get(c, (None, ""))[1]):
             ambiguities.append(
                 f"{cs_meta.get(csid, (None, '?'))[1]} had attendance but no lesson log — was it logged?")
-        for csid in sorted((logged_cs & timetabled_cs) - marked_cs,
+        for csid in sorted((logged_cs & timetabled_cs) - register_cs,
                            key=lambda c: cs_meta.get(c, (None, ""))[1]):
             ambiguities.append(
                 f"{cs_meta.get(csid, (None, '?'))[1]} was logged but attendance wasn't taken.")
@@ -188,11 +233,28 @@ class DailyReportService:
         ambiguities.extend(self._homework_streak_ambiguities(m))
 
         # ── sections ──
-        att_lines = [f"{len(marked_keys)} of {len(slots)} periods marked · "
-                     f"{absences} absent · {lates} late"]
-        if unmarked:
-            names = sorted({class_labels.get(s.class_id, "?") for s in unmarked})
-            att_lines.append(f"{len(unmarked)} period(s) not marked: {', '.join(names[:6])}")
+        # A once-per-day school counts REGISTERS, one per class, and says so —
+        # "6 of 7 periods marked" would be a true number answering a question
+        # that school never asked.
+        marked_expected = sum(
+            1 for s in expected if (s.class_id, s.period_no) in marked_keys)
+        if once:
+            taken = len({s.class_id for s in expected
+                         if (s.class_id, s.period_no) in marked_keys})
+            owed = len({s.class_id for s in expected})
+            att_lines = [f"{taken} of {owed} registers taken · "
+                         f"{absences} absent · {lates} late"]
+            if unmarked:
+                names = sorted({class_labels.get(s.class_id, "?") for s in unmarked})
+                att_lines.append(
+                    f"{len(names)} class(es) without a register: {', '.join(names[:6])}")
+        else:
+            att_lines = [f"{marked_expected} of {len(expected)} periods marked · "
+                         f"{absences} absent · {lates} late"]
+            if unmarked:
+                names = sorted({class_labels.get(s.class_id, "?") for s in unmarked})
+                att_lines.append(
+                    f"{len(unmarked)} period(s) not marked: {', '.join(names[:6])}")
 
         teach_lines = [f"{len(logged_cs & timetabled_cs)} of {len(timetabled_cs)} timetabled classes logged"]
         if unlogged_cs:

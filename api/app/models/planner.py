@@ -73,6 +73,21 @@ class SyllabusUnit(Base, UUIDPKMixin, CreatedAtMixin):
     not_planned: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false")
 
+    # SY-2 — the teaching status a human TYPED, overriding the derived word.
+    #
+    # Every other status on the board is computed from the lesson logs, and that
+    # stays the default: NULL here means "ask the logs", which is what every
+    # existing chapter reads and what keeps coverage honest. A school running
+    # its board like the founder's tracker spreadsheet needs to be able to state
+    # the status on the row, so this stores what she said — and the board sends
+    # the derived word alongside it, never instead of it, so nobody mistakes a
+    # claim for an observation.
+    #
+    # Deliberately NOT part of any coverage figure: `core/coverage.py` still
+    # counts taught topics. Typing "completed" moves the word on the row, not
+    # the percentage under it.
+    manual_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     topics: Mapped[list["SyllabusTopic"]] = relationship(
         back_populates="unit", cascade="all, delete-orphan", order_by="SyllabusTopic.position",
     )
@@ -81,6 +96,10 @@ class SyllabusUnit(Base, UUIDPKMixin, CreatedAtMixin):
         CheckConstraint(
             "difficulty IS NULL OR difficulty IN ('easy', 'moderate', 'hard')",
             name="ck_syllabus_units_difficulty"),
+        CheckConstraint(
+            "manual_status IS NULL OR manual_status IN "
+            "('not_started', 'in_progress', 'completed')",
+            name="ck_syllabus_units_manual_status"),
     )
 
 

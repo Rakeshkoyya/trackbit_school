@@ -37,6 +37,7 @@ import { HomeworkOverviewBlock, OVERVIEW_WINDOW_DAYS } from "@/components/insigh
 import { SyllabusPulseBlock } from "@/components/insights/syllabus";
 import { CoverSheet } from "@/components/insights/cover-sheet";
 import { ReasonSheet, type ReasonTarget } from "@/components/insights/reason-sheet";
+import { UpgradeGate } from "@/components/plan/upgrade";
 import { DayNotice } from "@/components/school/day-notice";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,7 @@ import { useYear } from "@/contexts/year-context";
 import { appApi } from "@/lib/app-api";
 import { showApiError } from "@/lib/errors";
 import { eventsApi } from "@/lib/events-api";
+import { FEATURES } from "@/lib/features";
 import { insightsApi } from "@/lib/insights-api";
 import type { QuickAction } from "@/lib/insights-types";
 import { schoolApi } from "@/lib/school-api";
@@ -547,17 +549,22 @@ function DashboardInner() {
               <HomeworkOverviewBlock section={homeworkSection} board={homework}
                 loading={homeworkLoading && !homework} />
             </div>
+            {/* Tasks and exams pair off (founder, 2026-08-11). They are the two
+                plain module cards left in this grid after attendance, staff,
+                syllabus and homework graduated out of it — which is what left
+                every row below with an empty right half. Two three-metric cards
+                are the same shape, so they sit level. */}
             {modules.map((s) => <SectionCard key={s.key} section={s} />)}
-            {/* Full width, like syllabus and homework: a ring beside its ledger
-                and then a row of quarter rings does not fit half a grid column
-                without the quarters collapsing to something unreadable. */}
+            {exams ? <SectionCard section={exams} /> : null}
+            {/* Fees runs horizontally across the row: the ring beside its ledger
+                and then a row of quarter rings is a wide reading, and it is the
+                one block here that carries two devices instead of metrics. */}
             {feeBoard && feeBoard.academic_year_id ? (
               <div className="lg:col-span-2"><FeesSection board={feeBoard} /></div>
             ) : null}
             {bandDist && bandDist.subjects.length ? (
               <div className="lg:col-span-2"><BandsSection data={bandDist} /></div>
             ) : null}
-            {exams ? <SectionCard section={exams} /> : null}
           </div>
         )}
       </section>
@@ -590,7 +597,15 @@ function DashboardInner() {
                     Open
                   </Link>
                 ) : (
-                  <Button size="sm" variant="outline" onClick={() => setAlertFor(a)}>Create task</Button>
+                  // The alert itself is free — the red row, the name, the
+                  // diagnosis. Dispatching it as a task is the Tasks module, so
+                  // a school without it gets the upgrade dialog rather than a
+                  // form whose board list is empty and whose submit 402s.
+                  <UpgradeGate feature={FEATURES.tasksBoards}>
+                    <Button size="sm" variant="outline" onClick={() => setAlertFor(a)}>
+                      Create task
+                    </Button>
+                  </UpgradeGate>
                 )}
               </div>
             ))}

@@ -78,15 +78,6 @@ export const TOOLSETS = [
   { name: "tasks", label: "Tasks", hint: "Boards, tasks and recurring templates" },
   { name: "insights", label: "Insights", hint: "The admin dashboards and daily report" },
   { name: "sessions", label: "Sessions", hint: "Hostel and activity sessions" },
-  // `pending` = the toolset exists but none of its tools are built yet, so
-  // ticking it grants a real but currently empty permission. Say so rather than
-  // offering it as though it already does something.
-  {
-    name: "events",
-    label: "Events",
-    hint: "Observances and what's on — no tools built yet",
-    pending: true,
-  },
   { name: "fees", label: "Fees", hint: "Collection and structures — admin only" },
 ] as const;
 

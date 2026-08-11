@@ -531,8 +531,13 @@ export interface AttendanceRosterRow {
 
 export interface AttendanceRoster {
   /** One register a day: the sheet hides its period picker, because choosing a
-   *  period is a question with no meaning when the register is the day's. */
-  once_per_day?: boolean;
+   *  period is a question with no meaning when the register is the day's.
+   *
+   *  Required, not optional. It was declared `?:` here while the API schema did
+   *  not declare it at all — so it arrived `undefined`, read as false, and every
+   *  once-per-day school was shown the picker anyway. An optional field is how
+   *  a missing one stops being a type error. */
+  once_per_day: boolean;
   class_id: string;
   class_label: string;
   period_no: number;

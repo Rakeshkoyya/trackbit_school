@@ -583,8 +583,13 @@ def write_pack(school: School, messy: bool = False) -> None:
         [[cname, "", homerooms.get(cname, "")] for cname in school.classes])
 
     staff = [[t.name, "", t.email, t.mobile, "", "Teacher"] for t in school.teachers]
+    # TT-3: no periods column. The weekly load is COUNTED off the Timetable
+    # sheet below (`services/period_load.py` does the same at import), so
+    # emitting it here would be emitting a number the importer ignores — and
+    # the invariant "periods sum to weekly capacity" is now enforced by the
+    # grid this generator lays down, not by a column beside it.
     assignments = [
-        [a.class_name, "", a.subject, t.name, a.periods]
+        [a.class_name, "", a.subject, t.name]
         for t in school.teachers for a in t.assignments
     ]
 
@@ -626,7 +631,7 @@ def write_pack(school: School, messy: bool = False) -> None:
     add("Staff", ["Name", "Employee ID", "Email", "Phone", "Date of birth", "Role"],
         staff)
     add("Teaching Assignments",
-        ["Class", "Section", "Subject", "Teacher", "Periods per week"], assignments)
+        ["Class", "Section", "Subject", "Teacher"], assignments)
     add("Syllabus",
         ["Class", "Section", "Subject", "Term", "Ch #", "Chapter",
          "Est. periods"], syllabus)

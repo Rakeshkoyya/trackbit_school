@@ -127,10 +127,25 @@ class SchoolClass(Base, UUIDPKMixin, CreatedAtMixin):
 
 
 class ClassSubject(Base, UUIDPKMixin, CreatedAtMixin):
-    """A subject taught in a class by a teacher, with its weekly period budget.
+    """A subject taught in a class by a teacher, with its weekly period load.
 
-    periods_per_week is *entered*, never generated — TrackBit has no timetable
-    solver (SPRD §11 fence); it only captures the allocation as data.
+    **`periods_per_week` is DERIVED, never entered (TT-3, founder).** It is the
+    count of this class-subject's live `timetable_slots`, and
+    `services/period_load.py::recompute_periods_per_week` is its ONLY writer —
+    called from every grid mutation and from the setup import. Treat it exactly
+    like `Plan.status` or `year.period_times`: a cache of another table, kept
+    because the planner reads it on nearly every path and a COUNT per read
+    would sit on the critical path of every plan, forecast and exam-fit.
+
+    It was *entered* until TT-3, on the setup pack's Teaching Assignments
+    sheet. That never worked: a school completing the pack in April cannot know
+    what the June timetable will give Class 5 English, so the column arrived
+    blank or wrong — and it is the divisor the whole planner runs on, so every
+    date the app could have computed was quietly unavailable.
+
+    The one case where a stored value survives untouched is a class with NO
+    timetable rows at all; see the module docstring in `period_load.py` for why
+    zeroing it there would be worse than leaving it.
     """
 
     __tablename__ = "class_subjects"

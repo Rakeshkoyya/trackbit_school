@@ -86,10 +86,12 @@ STAFF = [
     ["Vikram Rao", "vikram.rao", "", "Admin"],
 ]
 ASSIGNMENTS = [
-    ["Class", "Section", "Subject", "Teacher", "Periods per week"],
+    # TT-3: no "Periods per week" column — it is counted off the Timetable
+    # sheet now, so the pack cannot carry a number that contradicts the grid.
+    ["Class", "Section", "Subject", "Teacher"],
     # Blank section: applies to 6-A and 6-B alike.
-    ["6", "", "Mathematics", "Anita Desai", 6],
-    ["6", "A", "Science", "Vikram Rao", 5],
+    ["6", "", "Mathematics", "Anita Desai"],
+    ["6", "A", "Science", "Vikram Rao"],
 ]
 SYLLABUS = [
     ["Class", "Section", "Subject", "Term", "Ch #", "Chapter", "Est. periods"],
@@ -229,8 +231,12 @@ def test_a_blank_section_gives_both_sections_the_subject(org, db_session):
     rows = list(db_session.scalars(select(ClassSubject).where(
         ClassSubject.org_id == org.org_id, ClassSubject.subject_id == maths.id)))
     assert len(rows) == 2, "one row for 6-A and one for 6-B"
-    assert all(r.periods_per_week == 6 for r in rows)
     assert all(r.teacher_member_id is not None for r in rows)
+    # TT-3: periods/week is counted off the Timetable sheet, which in this pack
+    # gives 6-A one Maths period and never mentions 6-B. So the two rows
+    # legitimately differ — 6-A from its grid, 6-B untouched because it has no
+    # grid to derive from. Asserting them equal was asserting the typed column.
+    assert sorted(r.periods_per_week for r in rows) == [0, 1]
 
 
 def test_the_class_teacher_is_linked_from_the_staff_sheet(org, db_session):
@@ -343,16 +349,17 @@ def test_replace_is_available_but_only_when_asked_for(org, db_session):
 def test_a_corrected_pack_updates_rather_than_duplicates(org, db_session):
     _commit(db_session, org, _pack())
     _commit(db_session, org, _pack(assignments=[
-        ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-        ["6", "", "Mathematics", "Anita Desai", 8],
-        ["6", "A", "Science", "Vikram Rao", 5],
+        ["Class", "Section", "Subject", "Teacher"],
+        ["6", "", "Mathematics", "Anita Desai"],
+        ["6", "A", "Science", "Vikram Rao"],
     ]))
     maths = db_session.scalar(select(Subject).where(
         Subject.org_id == org.org_id, Subject.name == "Mathematics"))
     rows = list(db_session.scalars(select(ClassSubject).where(
         ClassSubject.org_id == org.org_id, ClassSubject.subject_id == maths.id)))
+    # Re-importing corrects in place rather than duplicating — that is what this
+    # test is for, and it is unchanged by TT-3.
     assert len(rows) == 2
-    assert all(r.periods_per_week == 8 for r in rows)
 
 
 # ── the optional sheets ──────────────────────────────────────────────────────

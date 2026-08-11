@@ -93,8 +93,20 @@ class SyllabusChapterRow(BaseModel):
     actual_end: date | None = None
 
     # not_scheduled | not_started | in_progress | completed
+    #
+    # SY-2: this is what the ROW SHOWS — the human's word when she has typed
+    # one, the logs' word otherwise. Both are always sent separately as well, so
+    # a screen can say which it is looking at and no client has to guess.
     status: str
+    # What the lesson logs say, always, whatever the human typed over it.
+    derived_status: str = ""
+    # What the human typed, or None. Non-null means `status == manual_status`
+    # and the row states its progress rather than observing it.
+    manual_status: str | None = None
     # Of this chapter's own topics — carries its denominator (`topics_total`).
+    # UNAFFECTED by `manual_status`: typing "completed" moves the word on the
+    # row, never the percentage under it — coverage stays `core/coverage.py`'s
+    # one computation.
     completion_pct: float | None = None
     # V1-15's pace marker, at chapter scale: the share of this chapter's own
     # planned window that has already gone by, in TEACHING days. It is what
@@ -181,6 +193,20 @@ class ChapterPatchIn(BaseModel):
     # True = out of scope this year, False = back in. Absent leaves it alone,
     # like every other field here.
     not_planned: bool | None = None
+
+    # SY-2 — the typed teaching status. "unset" hands the row back to the
+    # lesson logs, the same shape `difficulty` uses, so a cell can always be
+    # returned to its derived state from the control that overrode it.
+    status: str | None = Field(default=None)  # not_started|in_progress|completed|unset
+
+    # The chapter's period estimate, set from the chapter row rather than by
+    # opening its topics. Only meaningful when the chapter holds exactly ONE
+    # topic — the chapter-only shape every importer produces and the one the
+    # grid renders as a single line. A chapter genuinely split into topics is
+    # sized topic by topic and the service says so rather than silently
+    # picking one to carry the whole number.
+    est_periods: int | None = Field(default=None, ge=0, le=400)
+    clear_est_periods: bool = False
 
 
 class ChapterScheduleIn(BaseModel):

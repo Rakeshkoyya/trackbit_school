@@ -61,7 +61,17 @@ function HomeworkSheet({ target, onClose }: { target: HwTarget | null; onClose: 
  */
 function PeriodRow({ p }: { p: MyDayPeriod }) {
   const isBlock = p.slot_type === "block";
-  const done = p.attendance_marked && p.logged;
+  // Once a day (founder, 2026-08-11): the register is the DAY's, so a period
+  // that is not being asked for one is not an unfinished period. Reading `done`
+  // as "attendance_marked && logged" left every afternoon period grey in a
+  // once-per-day school however completely its teacher had captured it — the
+  // roll it was waiting on had been taken at nine o'clock by somebody else.
+  const attendanceSettled = p.attendance_marked || p.marks_attendance === false;
+  const done = attendanceSettled && p.logged;
+  // The day's roll is done and this is not the period holding it: say so, in
+  // the off state. Nothing to tap, and the silence it replaces read as "this
+  // period does not do attendance" — a different fact.
+  const rollTakenElsewhere = p.day_attendance_taken === true && !p.attendance_marked;
   const clock = timeRange(p.start, p.end);
   const href = isBlock && p.session_id
     ? `/my-day/block/${p.session_id}`
@@ -104,6 +114,14 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
               <Badge tone={p.absent_count ? "warning" : "success"}>
                 <Users className="h-3 w-3" /> {p.present_count}/{p.roster_count}
               </Badge>
+            ) : rollTakenElsewhere ? (
+              /* Taken already, elsewhere in the day. Off, not absent from the
+                 row: a teacher who sees nothing cannot tell "done" from
+                 "this period never marks", and only one of those means she can
+                 stop thinking about it. */
+              <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                <Check className="h-3 w-3" /> roll taken
+              </span>
             ) : p.marks_attendance === false ? null : (
               /* V1-3 (D-01): a period this school's mode never marks shows no
                  attendance chip at all — an empty one would read as a chore. */

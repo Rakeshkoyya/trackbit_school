@@ -88,6 +88,54 @@ def test_academic_and_roster_flow(client, cleanup):
     assert found.status_code == 200 and len(found.json()) == 1
 
 
+def test_admission_no_is_correctable(client, cleanup):
+    """A wrong admission number is a transcription error, not a decision — it is
+    corrected in place. The unique constraint still has to be respected, and
+    saving the record unchanged must not read as a clash with itself."""
+    admin = _register_admin(client, cleanup)
+    h = _h(admin["access_token"])
+
+    asha = client.post("/api/v1/students", headers=h,
+                       json={"admission_no": "A100", "full_name": "Asha Rao"}).json()
+    client.post("/api/v1/students", headers=h,
+                json={"admission_no": "A101", "full_name": "Bilal Khan"})
+
+    # the correction lands
+    fixed = client.patch(f"/api/v1/students/{asha['id']}", headers=h,
+                         json={"admission_no": "A100/2024"})
+    assert fixed.status_code == 200, fixed.text
+    assert fixed.json()["admission_no"] == "A100/2024"
+
+    # and it is what a later read returns
+    assert client.get(f"/api/v1/students/{asha['id']}",
+                      headers=h).json()["admission_no"] == "A100/2024"
+
+    # surrounding whitespace is trimmed, not stored
+    trimmed = client.patch(f"/api/v1/students/{asha['id']}", headers=h,
+                           json={"admission_no": "  A100/2024  "})
+    assert trimmed.status_code == 200 and trimmed.json()["admission_no"] == "A100/2024"
+
+    # taking someone else's number -> 409, not a 500 off the unique index
+    clash = client.patch(f"/api/v1/students/{asha['id']}", headers=h,
+                         json={"admission_no": "A101"})
+    assert clash.status_code == 409, clash.text
+
+    # saving the row with its OWN number is not a clash
+    same = client.patch(f"/api/v1/students/{asha['id']}", headers=h,
+                        json={"admission_no": "A100/2024", "full_name": "Asha S Rao"})
+    assert same.status_code == 200 and same.json()["full_name"] == "Asha S Rao"
+
+    # blank is refused
+    blank = client.patch(f"/api/v1/students/{asha['id']}", headers=h,
+                         json={"admission_no": "   "})
+    assert blank.status_code in (400, 422), blank.text
+
+    # a PATCH that does not mention it leaves it alone
+    other = client.patch(f"/api/v1/students/{asha['id']}", headers=h,
+                         json={"roll_no": "7"})
+    assert other.status_code == 200 and other.json()["admission_no"] == "A100/2024"
+
+
 def test_teacher_cannot_write_master_data(client, cleanup):
     admin = _register_admin(client, cleanup)
     h = _h(admin["access_token"])

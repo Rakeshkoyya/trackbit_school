@@ -563,3 +563,188 @@ def test_timeline_gives_the_dialog_its_chapters_and_fixed_points(client, cleanup
     # Another teacher gets a sentence, not an empty timeline.
     assert client.get(f"/api/v1/planner/plan/{s['cs']['id']}/timeline",
                       headers=s["oh"]).status_code == 403
+
+
+# ── SY-2: the typed status, the row's own periods, and who may write them ────
+def test_typed_status_overrides_the_logs_and_unset_hands_it_back(client, cleanup):
+    """The founder's tracker has a `Teaching Status` column a human types.
+
+    It is an OVERRIDE, not a replacement, and the row carries both words so the
+    two can never be confused: `derived_status` is always what the lesson logs
+    say, `manual_status` is what somebody claimed, and `status` is what the
+    screen shows. "unset" hands the cell back to the logs — without that escape
+    a mis-tap would be permanent.
+    """
+    s = _setup(client, cleanup)
+    unit = _chapter(client, s["h"], s["cs"]["id"], "Fractions", [("Adding", 3)])
+    client.post(f"/api/v1/planner/plan/{s['cs']['id']}/draft", headers=s["h"])
+
+    before = _chapters(_board(client, s["h"], year_id=s["year"]["id"]))[0]
+    assert before["status"] == cov.CHAPTER_NOT_STARTED
+    assert before["derived_status"] == cov.CHAPTER_NOT_STARTED
+    assert before["manual_status"] is None
+
+    r = client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                     headers=s["th"], json={"status": "completed"})
+    assert r.status_code == 200, r.text
+
+    row = _chapters(_board(client, s["h"], year_id=s["year"]["id"]))[0]
+    assert row["status"] == cov.CHAPTER_COMPLETED
+    assert row["manual_status"] == cov.CHAPTER_COMPLETED
+    # The logs are untouched, and so is the percentage under the word: nobody
+    # taught anything, so coverage must not move because somebody said so.
+    assert row["derived_status"] == cov.CHAPTER_NOT_STARTED
+    assert row["completion_pct"] == 0
+    assert row["actual_start"] is None
+
+    client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                 headers=s["th"], json={"status": "unset"})
+    back = _chapters(_board(client, s["h"], year_id=s["year"]["id"]))[0]
+    assert back["status"] == cov.CHAPTER_NOT_STARTED
+    assert back["manual_status"] is None
+
+
+def test_out_of_scope_beats_a_stale_typed_status(client, cleanup):
+    """A chapter marked "completed" in September and dropped from the year in
+    November reads Not scheduled, not Completed. The school's scope decision is
+    the more recent statement, and letting a stale claim survive it would put a
+    chapter nobody is teaching back into the school's coverage."""
+    s = _setup(client, cleanup)
+    unit = _chapter(client, s["h"], s["cs"]["id"], "Fractions", [("Adding", 3)])
+    client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                 headers=s["h"], json={"status": "completed"})
+    client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                 headers=s["h"], json={"not_planned": True})
+
+    row = _chapters(_board(client, s["h"], year_id=s["year"]["id"]))[0]
+    assert row["status"] == cov.CHAPTER_NOT_SCHEDULED
+    assert row["overdue"] is False
+    # The claim is kept, not erased — putting the chapter back in scope restores
+    # exactly what she typed rather than silently losing it.
+    assert row["manual_status"] == cov.CHAPTER_COMPLETED
+
+
+def test_status_word_is_validated(client, cleanup):
+    s = _setup(client, cleanup)
+    unit = _chapter(client, s["h"], s["cs"]["id"], "Fractions", [("Adding", 3)])
+    r = client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                     headers=s["h"], json={"status": "nearly"})
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "bad_status"
+
+
+def test_chapter_row_sizes_a_single_topic_chapter_and_refuses_a_split_one(
+        client, cleanup):
+    """The grid's Periods cell.
+
+    A chapter-only school — one chapter, one topic, which is what every importer
+    produces — sizes from the row. A chapter genuinely split into topics is
+    refused with a sentence rather than guessed at: spreading 8 periods over
+    three topics means inventing a division nobody made.
+    """
+    s = _setup(client, cleanup)
+    single = _chapter(client, s["h"], s["cs"]["id"], "Fractions", [("Fractions", None)])
+    split = _chapter(client, s["h"], s["cs"]["id"], "Decimals",
+                     [("Tenths", None), ("Hundredths", None)])
+
+    r = client.patch(f"/api/v1/planner/syllabus/units/{single['id']}",
+                     headers=s["th"], json={"est_periods": 6})
+    assert r.status_code == 200, r.text
+
+    rows = {c["title"]: c for c in
+            _chapters(_board(client, s["h"], year_id=s["year"]["id"]))}
+    assert rows["Fractions"]["est_periods"] == 6
+    assert rows["Fractions"]["unsized_topics"] == 0
+
+    bad = client.patch(f"/api/v1/planner/syllabus/units/{split['id']}",
+                       headers=s["th"], json={"est_periods": 8})
+    assert bad.status_code == 422, bad.text
+    assert bad.json()["error"]["code"] == "chapter_not_single_topic"
+    # Refused means unchanged — not half-applied to the first topic.
+    assert rows["Decimals"]["est_periods"] is None
+
+    # And it can be un-sized again, back to "nobody has estimated this".
+    client.patch(f"/api/v1/planner/syllabus/units/{single['id']}",
+                 headers=s["th"], json={"clear_est_periods": True})
+    after = {c["title"]: c for c in
+             _chapters(_board(client, s["h"], year_id=s["year"]["id"]))}
+    assert after["Fractions"]["est_periods"] is None
+
+
+def test_adding_and_sizing_a_chapter_is_the_subject_teachers_not_anyones(
+        client, cleanup):
+    """The negative authorization test for the guards that moved off the route.
+
+    `add_unit`, `add_topic`, `set_topic_estimate` and `delete_unit` went from
+    `require_operator` to `require_academic` so a teacher can keep her own
+    syllabus current after handover. The rule that stops her writing into a
+    COLLEAGUE'S subject now lives in the service — if this test fails, any
+    teacher can rewrite any subject's chapters by posting its id.
+    """
+    s = _setup(client, cleanup)
+
+    mine = client.post("/api/v1/planner/syllabus/units", headers=s["th"], json={
+        "class_subject_id": s["cs"]["id"], "title": "Mine to add"})
+    assert mine.status_code == 200, mine.text
+
+    theirs = client.post("/api/v1/planner/syllabus/units", headers=s["oh"], json={
+        "class_subject_id": s["cs"]["id"], "title": "Not hers to add"})
+    assert theirs.status_code == 403, theirs.text
+    assert theirs.json()["error"]["code"] == "not_your_subject"
+
+    unit_id = mine.json()["id"]
+    assert client.post("/api/v1/planner/syllabus/topics", headers=s["oh"], json={
+        "unit_id": unit_id, "title": "Not hers"}).status_code == 403
+    assert client.delete(f"/api/v1/planner/syllabus/units/{unit_id}",
+                         headers=s["oh"]).status_code == 403
+
+    topic = client.post("/api/v1/planner/syllabus/topics", headers=s["th"], json={
+        "unit_id": unit_id, "title": "Mine"}).json()
+    assert client.put(
+        f"/api/v1/planner/syllabus/topics/{topic['id']}/estimate",
+        headers=s["oh"], json={"est_periods": 4}).status_code == 403
+    assert client.put(
+        f"/api/v1/planner/syllabus/topics/{topic['id']}/estimate",
+        headers=s["th"], json={"est_periods": 4}).status_code == 200
+
+    # And the typed status is hers to set on her own subject only.
+    assert client.patch(f"/api/v1/planner/syllabus/units/{unit_id}",
+                        headers=s["oh"], json={"status": "completed"}
+                        ).status_code == 403
+
+
+def test_the_exam_map_prints_the_same_status_word_as_the_board(client, cleanup):
+    """One fact, one word, both screens.
+
+    The exam map re-derived the chapter's status from the logs while the board
+    showed what a teacher had typed, so the same chapter read "Completed" on
+    Plan → Syllabus and "not started" one tab across on Exam mapping. That is
+    `S-51` — one fact computed twice — and the fix is that both call
+    `core/coverage.py::shown_chapter_status`. This test is what stops it coming
+    back the next time either screen grows a status column.
+    """
+    s = _setup(client, cleanup)
+    unit = _chapter(client, s["h"], s["cs"]["id"], "Fractions", [("Adding", 3)])
+    today = date.today()
+    _exam(client, s["h"], s["year"], "Term 1", today + timedelta(days=30),
+          today + timedelta(days=34))
+    client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                 headers=s["h"], json={"status": "completed"})
+
+    board_row = _chapters(_board(client, s["h"], year_id=s["year"]["id"]))[0]
+    mapped = client.get(f"/api/v1/planner/exam-map?class_id={s['class']['id']}",
+                        headers=s["h"]).json()
+    map_row = mapped["exams"][0]["subjects"][0]["chapters"][0]
+
+    assert board_row["status"] == cov.CHAPTER_COMPLETED
+    assert map_row["status"] == board_row["status"]
+
+    # And out-of-scope still beats the claim on BOTH, for the same reason.
+    client.patch(f"/api/v1/planner/syllabus/units/{unit['id']}",
+                 headers=s["h"], json={"not_planned": True})
+    board_row = _chapters(_board(client, s["h"], year_id=s["year"]["id"]))[0]
+    mapped = client.get(f"/api/v1/planner/exam-map?class_id={s['class']['id']}",
+                        headers=s["h"]).json()
+    map_row = mapped["exams"][0]["subjects"][0]["chapters"][0]
+    assert board_row["status"] == cov.CHAPTER_NOT_SCHEDULED
+    assert map_row["status"] == board_row["status"]

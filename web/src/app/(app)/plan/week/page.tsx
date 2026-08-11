@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { ClassWeekGrid } from "@/components/school/class-week-grid";
-import { ClassSelect, forecastLabel, PlanView, RAG, SubjectSelect, useClassSubjectPick, weekLabel } from "@/components/school/plan-shared";
+import { ClassSubjectPicker, useClassSubject } from "@/components/school/class-subject-picker";
+import { forecastLabel, PlanView, RAG, weekLabel } from "@/components/school/plan-shared";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,20 +18,24 @@ function WeekPlanInner() {
   const { me } = useAuth();
   const canEdit = me?.org_role === "admin";
   const { yearId } = useYear();
-  const { classes, classId, setClassId, subjects, csId, setCsId, loading } = useClassSubjectPick(yearId);
+  // The shared picker, for the same reason Timetable and Syllabus use it: the
+  // old one took `classes[0]` in the server's TEXT order, so a school with a
+  // class 11 opened this tab on "11-A" — which in this school has no subjects
+  // at all, giving an empty screen that read as a broken page. This one sorts
+  // numerically and lands on the first class that has subjects.
+  const pick = useClassSubject(yearId, { mine: !canEdit });
+  const { classId, csId, loading } = pick;
   const { data: forecast = [], isLoading: forecastLoading } = useQuery({ queryKey: ["forecast", classId], queryFn: () => schoolApi.forecast(classId), enabled: !!classId });
 
   return (
     <div>
-      {/* One selector row: year · class · subject, all in the same line. */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <PageHeader title="Week plan" subtitle="Week-by-week plan and pace forecast" />
-        <div className="flex flex-wrap items-center gap-2">
-          <YearSwitcher />
-          <ClassSelect classes={classes} classId={classId} onChange={setClassId} />
-          <SubjectSelect subjects={subjects} csId={csId} onChange={setCsId} />
-        </div>
+        <YearSwitcher />
       </div>
+      {/* Same two chip rows as Syllabus and Timetable, so the Plan area is
+          navigated one way rather than three. */}
+      <ClassSubjectPicker pick={pick} yearId={yearId} canAdd={false} />
 
       {loading ? (
         <PageLoading label="Loading the plan…" />

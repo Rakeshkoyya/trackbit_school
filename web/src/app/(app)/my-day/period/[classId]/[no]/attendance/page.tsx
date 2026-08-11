@@ -94,6 +94,19 @@ function AttendanceInner() {
         </Badge>
       </div>
 
+      {/* Once a day: this page is reachable by URL from any period, and the
+          server files the write on the day's register wherever it already is.
+          Say which sheet is actually open, or a teacher who walked in here from
+          P6 believes she is starting a fresh one. */}
+      {sheet.once_per_day ? (
+        <p className="mb-4 rounded-lg border border-border bg-muted/25 px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+          Your school takes <span className="font-medium">one register a day</span>.
+          {sheet.marked
+            ? ` This is today’s, taken at period ${sheet.period_no} — saving replaces it rather than adding a second.`
+            : " This is today’s, whoever takes it and whenever."}
+        </p>
+      ) : null}
+
       <RollCall
         rows={sheet.roster}
         marks={marks}

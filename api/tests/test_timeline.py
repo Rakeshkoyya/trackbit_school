@@ -53,6 +53,12 @@ def test_timeline_renders_periods_with_gaps_and_homework(client, cleanup):
         "admission_no": uuid.uuid4().hex[:10], "full_name": "Aisha", "class_id": klass["id"]}).json()
     _slot(client, h, klass["id"], cs["id"], 1)
     _slot(client, h, klass["id"], cs["id"], 2)
+    # A per-PERIOD timeline is what this test is about, so it needs the mode
+    # that keeps one. Explicit since 2026-08-11, when one register a day became
+    # the default — there the P2 mark is redirected into P1's register and
+    # replaces it, so the child reads present and the two rows become one.
+    client.patch("/api/v1/org/settings", headers=h,
+                 json={"attendance_mode": "every_period"})
 
     # P1: student absent; P2: all present.
     client.post("/api/v1/attendance/mark", headers=h, json={

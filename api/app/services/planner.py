@@ -66,6 +66,7 @@ from app.services.calendar import (
     expand_partial_blocks,
     teaching_days,
 )
+from app.services.periods import assert_can_edit_class_subject
 from app.services.plan_validate import (
     Violation,
     validate_capacity,
@@ -261,6 +262,12 @@ class PlannerService:
 
     def add_unit(self, m: CurrentMember, cs_id: uuid.UUID, title: str,
                  term_id: uuid.UUID | None = None) -> UnitOut:
+        """Record a chapter. Adding one mid-year is a normal teaching act, not a
+        setup act — the board's route is `require_academic` now, so the
+        ownership rule has to live HERE: an in-process service call does not run
+        the route guard, and without this a teacher could post a chapter into a
+        colleague's subject by id."""
+        assert_can_edit_class_subject(self.db, m, cs_id)
         cs = self._class_subject(m.org_id, cs_id)
         if term_id is not None:
             self._term(m.org_id, term_id, self._year_for_cs(cs))
@@ -281,6 +288,7 @@ class PlannerService:
         )
         if unit is None:
             raise NotFoundError("Unit")
+        assert_can_edit_class_subject(self.db, m, unit.class_subject_id)
         topic = SyllabusTopic(org_id=m.org_id, unit_id=unit_id, title=title,
                               est_periods=est, position=len(unit.topics))
         self.db.add(topic)
@@ -297,6 +305,7 @@ class PlannerService:
         if topic is None:
             raise NotFoundError("Topic")
         unit = self.db.get(SyllabusUnit, topic.unit_id)
+        assert_can_edit_class_subject(self.db, m, unit.class_subject_id)
         state = self._approval_state(m.org_id, unit.class_subject_id)
         # Sizing a topic that was NEVER sized is allowed even under a locked
         # baseline — that is how a partially-planned term grows (the new size
@@ -315,6 +324,7 @@ class PlannerService:
         )
         if unit is None:
             raise NotFoundError("Unit")
+        assert_can_edit_class_subject(self.db, m, unit.class_subject_id)
         self.db.delete(unit)
 
     def delete_topic(self, m: CurrentMember, topic_id: uuid.UUID) -> None:
@@ -325,6 +335,9 @@ class PlannerService:
         )
         if topic is None:
             raise NotFoundError("Topic")
+        unit = self.db.get(SyllabusUnit, topic.unit_id)
+        if unit is not None:
+            assert_can_edit_class_subject(self.db, m, unit.class_subject_id)
         self.db.delete(topic)
 
     def split_text(self, text: str) -> list[SplitUnit]:

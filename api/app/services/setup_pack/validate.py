@@ -394,18 +394,25 @@ def _sections_of(known: set[tuple[str, str]], name: str,
 
 # ── assignments ──────────────────────────────────────────────────────────────
 def _assignments(pack: ParsedPack, out: _Report, known: set[tuple[str, str]],
-                 staff: set[str], capacity: int | None,
-                 ) -> dict[tuple[str, str, str], str]:
-    """The (class, section, subject) triples the syllabus and timetable may
-    legitimately refer to, each mapped to how it should be *written* back to the
-    operator. Matching is case-folded; a report that says "6-a science" when the
-    school wrote "6-A Science" looks like a different thing to the person
-    reading it."""
+                 staff: set[str],
+                 ) -> tuple[dict[tuple[str, str, str], str],
+                            dict[tuple[str, str, str], str]]:
+    """`(offered, teachers)`.
+
+    `offered` — the (class, section, subject) triples the syllabus and
+    timetable may legitimately refer to, each mapped to how it should be
+    *written* back to the operator. Matching is case-folded; a report that says
+    "6-a science" when the school wrote "6-A Science" looks like a different
+    thing to the person reading it.
+
+    `teachers` — the same triples mapped to the teacher who owns them, so the
+    Timetable pass can say *"Anita Desai is on the grid 42 times"* without
+    re-reading this sheet.
+    """
     data = pack.sheets["assignments"]
     broken = _required_cells(data, out)
     offered: dict[tuple[str, str, str], str] = {}
-    per_class: defaultdict = defaultdict(int)
-    per_teacher: defaultdict = defaultdict(int)
+    teachers: dict[tuple[str, str, str], str] = {}
     seen: Counter = Counter()
 
     for i, row in enumerate(data.rows):
@@ -443,24 +450,13 @@ def _assignments(pack: ParsedPack, out: _Report, known: set[tuple[str, str]],
                         "handover.",
                     row=data.excel_row(i), rule="assignments:no_teacher")
 
-        ppw = to_int(row.get("periods_per_week"))
-        if row.get("periods_per_week") and ppw is None:
-            out.add(data.title, WARNING,
-                    f"{_label(name, section)} {subject}: periods per week is not a "
-                    f"number, so the plan has no pace to work from.",
-                    fix="Write a whole number, like 6.",
-                    row=data.excel_row(i), rule="assignments:ppw_number")
-        elif ppw is None:
-            out.add(data.title, NOTE,
-                    f"{_label(name, section)} {subject} has no weekly period "
-                    f"budget yet — its plan cannot be paced until it does.",
-                    fix="Fill it in when the school decides.",
-                    row=data.excel_row(i), rule="assignments:no_ppw")
-        elif ppw > 0:
+        # TT-3: no periods/week on this sheet any more. Who teaches what is
+        # recorded here; HOW MUCH is counted off the Timetable sheet, so the
+        # capacity invariants moved there with it. All this pass keeps is the
+        # mapping the timetable needs to attribute a period to a teacher.
+        if teacher:
             for target in targets:
-                per_class[target] += ppw
-            if teacher:
-                per_teacher[teacher.lower()] += ppw * len(targets)
+                teachers[(*target, subject.lower())] = teacher.lower()
 
     for triple, count in seen.items():
         if count > 1:
@@ -477,30 +473,35 @@ def _assignments(pack: ParsedPack, out: _Report, known: set[tuple[str, str]],
                 fix=f"Add {_label(name, section)}'s subjects, or remove the class.",
                 rule="assignments:class_without_subjects")
 
-    _capacity_checks(data.title, out, per_class, per_teacher, capacity)
-    return offered
+    return offered, teachers
 
 
 def _capacity_checks(title: str, out: _Report, per_class: dict, per_teacher: dict,
                      capacity: int | None) -> None:
-    """`new_org` invariants 1 and 2 — the two that make an import land cleanly."""
+    """`new_org` invariants 1 and 2 — the two that make an import land cleanly.
+
+    Counted off the TIMETABLE since TT-3, not off a weekly budget somebody
+    typed. That is a stronger check than the one it replaces: it tests the grid
+    the school will actually run rather than its intention for it, and a
+    double-booked teacher is a real timetable that cannot be taught, not an
+    arithmetic slip on a spreadsheet.
+    """
     if not capacity:
         return
     for (name, section), total in sorted(per_class.items()):
         if total > capacity:
             out.add(title, WARNING,
-                    f"{_label(name, section)} is allocated {total} periods a week "
-                    f"but the timetable only has {capacity} — some subject will "
-                    f"never be taught.",
-                    fix="Reduce the weekly budgets, or add periods per day.",
-                    rule="assignments:class_over_capacity")
+                    f"{_label(name, section)} has {total} periods on the grid but "
+                    f"the week only holds {capacity} — some of them cannot run.",
+                    fix="Remove periods, or raise the periods per day.",
+                    rule="timetable:class_over_capacity")
     for teacher, total in sorted(per_teacher.items()):
         if total > capacity:
             out.add(title, WARNING,
-                    f"{teacher.title()} is assigned {total} periods a week — more "
-                    f"than the {capacity} periods that exist in a week.",
+                    f"{teacher.title()} is on the grid for {total} periods a week "
+                    f"— more than the {capacity} periods that exist in a week.",
                     fix="Spread the subjects across more teachers.",
-                    rule="assignments:teacher_over_capacity")
+                    rule="timetable:teacher_over_capacity")
 
 
 # ── syllabus ─────────────────────────────────────────────────────────────────
@@ -638,13 +639,19 @@ def _students(pack: ParsedPack, out: _Report, known: set[tuple[str, str]]) -> No
 
 
 # ── timetable, calendar, fees ────────────────────────────────────────────────
-def _timetable(pack: ParsedPack, out: _Report, offered: set, known: set,
-               periods_per_day: int | None) -> None:
+def _timetable(pack: ParsedPack, out: _Report, offered: set,
+               teachers: dict[tuple[str, str, str], str], known: set,
+               periods_per_day: int | None, capacity: int | None) -> None:
     data = pack.sheets["timetable"]
     if not data.present or not data.rows:
         return
     broken = _required_cells(data, out)
     slots: Counter = Counter()
+    # TT-3: the grid IS the weekly load, so the capacity invariants are counted
+    # here now rather than summed off a column on Teaching Assignments.
+    per_class: defaultdict = defaultdict(int)
+    per_teacher: defaultdict = defaultdict(int)
+    per_class_subject: defaultdict = defaultdict(int)
 
     for i, row in enumerate(data.rows):
         if i in broken:
@@ -677,6 +684,15 @@ def _timetable(pack: ParsedPack, out: _Report, offered: set, known: set,
         slots[(name.lower(), section.lower(),
                (row.get("day") or "").strip().lower(), period)] += 1
 
+        # One row is one period. Attribute it to the class, and to whoever the
+        # Teaching Assignments sheet says owns that subject on that class.
+        for target in _sections_of(known, name, section):
+            per_class[target] += 1
+            per_class_subject[(*target, subject.lower())] += 1
+            owner = teachers.get((*target, subject.lower()))
+            if owner:
+                per_teacher[owner] += 1
+
     for (name, section, day, period), count in slots.items():
         if count > 1:
             out.add(data.title, BLOCKER,
@@ -684,6 +700,21 @@ def _timetable(pack: ParsedPack, out: _Report, offered: set, known: set,
                     f"{period} on {day.title()}.",
                     fix="One subject per class, per period, per day.",
                     rule="timetable:double_booked")
+
+    # TT-3: a subject the school teaches but never puts on the grid has no
+    # weekly load, so its plan cannot be paced and none of its chapters can be
+    # dated. It replaces the old "no periods per week" note, and it is a NOTE
+    # for the same reason that one was: a school mid-way through building its
+    # timetable must still be handed over (D-3/D-4).
+    for triple, written in sorted(offered.items()):
+        if not per_class_subject.get(triple):
+            out.add(data.title, NOTE,
+                    f"{written} is not on the timetable, so it has no weekly "
+                    f"period count and its plan cannot be paced yet.",
+                    fix="Add its periods to this sheet when the grid is drawn.",
+                    rule="timetable:subject_not_scheduled")
+
+    _capacity_checks(data.title, out, per_class, per_teacher, capacity)
 
 
 def _calendar(pack: ParsedPack, out: _Report) -> None:
@@ -769,10 +800,11 @@ def validate(pack: ParsedPack) -> ValidationReport:
     staff = _staff(pack, out)
     known = _classes(pack, out, staff)
     capacity = _week_capacity(pack)
-    offered = _assignments(pack, out, known, staff, capacity)
+    offered, teachers = _assignments(pack, out, known, staff)
     _syllabus(pack, out, offered, known, set(terms))
     _students(pack, out, known)
-    _timetable(pack, out, offered, known, to_int(pack.setting("periods_per_day")))
+    _timetable(pack, out, offered, teachers, known,
+               to_int(pack.setting("periods_per_day")), capacity)
     _calendar(pack, out)
     _fees(pack, out, known)
 

@@ -32,6 +32,9 @@ from app.schemas.setup_pack import (
     PackReviewOut,
     SheetResultOut,
     SheetSummaryOut,
+    StaffLoginIn,
+    StaffLoginRowOut,
+    StaffLoginsResult,
 )
 from app.services.setup_pack import (
     BLOCKER,
@@ -47,6 +50,7 @@ from app.services.setup_pack import (
     validate,
     welcome_filename,
 )
+from app.services.setup_pack.logins import StaffLoginService
 
 # A whole school in one workbook is small — the biggest realistic pack is a few
 # thousand student rows. Anything far past that is a mistake or an attack, and
@@ -89,6 +93,21 @@ class SchoolSetupService:
             membership.status = "active"
             self.db.flush()
         return CurrentMember(user=operator.user, org=org, membership=membership)
+
+    # ── 1a. the staff logins, before they are handed over ────────────────────
+    # Delegated whole to `setup_pack/logins.py`; what lives here is the org
+    # context — `_context` is what points RLS at the school and what makes the
+    # operator a member of it, and a write done without that is a write the
+    # policies refuse.
+    def staff_logins(self, org_id: uuid.UUID) -> list[StaffLoginRowOut]:
+        self._org(org_id)
+        return StaffLoginService(self.db).list_logins(org_id)
+
+    def save_staff_logins(
+        self, operator: CurrentMember, org_id: uuid.UUID, logins: list[StaffLoginIn]
+    ) -> StaffLoginsResult:
+        member = self._context(operator, org_id)
+        return StaffLoginService(self.db).save(member, org_id, logins)
 
     # ── 1. the blank pack ────────────────────────────────────────────────────
     def template(self, org_id: uuid.UUID) -> tuple[bytes, str]:
@@ -186,6 +205,7 @@ class SchoolSetupService:
                                    updated=s.updated, skipped=s.skipped,
                                    notes=s.notes)
                     for s in result.sheets],
-            credentials=[CredentialOut(name=c["name"], username=c["username"],
+            credentials=[CredentialOut(user_id=c["user_id"], name=c["name"],
+                                       username=c["username"],
                                        password=c["password"])
                          for c in result.credentials])

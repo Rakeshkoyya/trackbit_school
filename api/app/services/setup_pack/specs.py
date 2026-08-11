@@ -268,8 +268,16 @@ ASSIGNMENTS = SheetSpec(
     key="assignments",
     title="Teaching Assignments",
     required=True,
-    blurb="Who teaches what, and how many periods a week it gets. This sheet "
-          "creates the subject list — there is no separate Subjects sheet.",
+    # TT-3: this sheet used to ask for "Periods per week" too. It no longer
+    # does — a school filling the pack in April does not know that Class 5
+    # English will get 13 periods, it finds out when the timetable is drawn in
+    # June. So the column was blank or wrong for most schools, and it is the
+    # divisor the entire planner runs on. It is now COUNTED off the Timetable
+    # sheet (`services/period_load.py`) and re-counted on every later grid
+    # edit, so nobody has to know it in advance and nobody can leave it stale.
+    blurb="Who teaches what. This sheet creates the subject list — there is no "
+          "separate Subjects sheet. Periods a week are counted from the "
+          "Timetable sheet, so there is nothing to fill in for them here.",
     columns=(
         Column("class_name", "Class", ("class", "grade", "standard", "std"),
                "As on the Classes sheet.", "6", required=True),
@@ -283,15 +291,11 @@ ASSIGNMENTS = SheetSpec(
                "The name exactly as on the Staff sheet. Blank means nobody is "
                "assigned yet — that is a state we can hand over with.",
                "Anita Desai"),
-        Column("periods_per_week", "Periods per week",
-               ("periods per week", "periods", "per week", "weekly periods", "ppw"),
-               "The weekly budget the plan paces against. Blank means not decided "
-               "yet — never 0.", "6"),
     ),
     samples=(
-        ("6", "A", "Mathematics", "Anita Desai", "6"),
-        ("6", "A", "Science", "Vikram Rao", "5"),
-        ("6", "B", "Mathematics", "Anita Desai", "6"),
+        ("6", "A", "Mathematics", "Anita Desai"),
+        ("6", "A", "Science", "Vikram Rao"),
+        ("6", "B", "Mathematics", "Anita Desai"),
     ),
 )
 

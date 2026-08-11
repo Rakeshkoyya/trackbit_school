@@ -41,8 +41,14 @@ class Organization(Base, UUIDPKMixin, CreatedAtMixin):
     board: Mapped[str | None] = mapped_column(Text, nullable=True)
     # V1-2 (D-01): how often attendance is taken. Drives what teachers are asked
     # for, what the capture heatmap expects, and what "absent today" means (V1-3).
+    #
+    # The default is `first_period` — ONE register a day (founder, 2026-08-11).
+    # Almost every school takes one roll call and that is what the one-minute
+    # budget (P1v2) is sized for; `every_period` asks a teacher for the register
+    # in all eight periods, which is the shape a school opts INTO, not the shape
+    # it should discover it was already in.
     attendance_mode: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default="every_period")
+        Text, nullable=False, server_default="first_period")
     # V1-2: thresholds the later packets consume — minimum attendance % (V1-3's
     # drifting list) and the homework nothing-checked-for-N-days admin signal
     # (D-85, V1-5). Settings live here so the consumers never hardcode them.

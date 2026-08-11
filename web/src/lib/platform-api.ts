@@ -116,9 +116,33 @@ export interface PackSheetResult {
 
 /** A staff login, shown ONCE — the password is hashed on the way in. */
 export interface PackCredential {
+  user_id: string;
   name: string;
   username: string;
   password: string;
+}
+
+/** One editable row on the logins step. No password: the generated one is
+ *  already unreadable by the time this list is fetched, and a blank field on
+ *  the form means *leave the existing one alone*. */
+export interface StaffLoginRow {
+  user_id: string;
+  name: string;
+  username: string | null;
+  org_role: string;
+}
+
+export interface StaffLoginsResult {
+  saved: number;
+  renamed: number;
+  passwords_set: number;
+  rows: StaffLoginRow[];
+}
+
+export interface UsernameCheck {
+  username: string;
+  available: boolean;
+  reason: string | null;
 }
 
 export interface PackImport {
@@ -194,4 +218,28 @@ export const platformApi = {
     form.append("replace_syllabus", String(replaceSyllabus));
     return api.upload<PackImport>(`/platform/orgs/${orgId}/setup/import`, form);
   },
+
+  // ── the staff logins, between import and handover ────────────────────────
+  /** Every staff account the school has, with the username each signs in with.
+   *  Read back from the server rather than replayed from the import response,
+   *  so a page reload mid-edit does not lose the section. */
+  staffLogins: (orgId: string) =>
+    api.get<StaffLoginRow[]>(`/platform/orgs/${orgId}/setup/logins`),
+
+  /** `users.username` is GLOBAL, so this spans every school. It answers rather
+   *  than erroring — an unavailable name is a normal state of the form.
+   *  `forUserId` excludes the person being edited, or their own username would
+   *  read as taken and no unchanged row could ever be saved. */
+  checkUsername: (username: string, forUserId?: string) =>
+    api.get<UsernameCheck>(
+      `/platform/username-check?username=${encodeURIComponent(username)}${
+        forUserId ? `&for_user_id=${forUserId}` : ""}`),
+
+  /** The whole batch or none of it: half the staff holding logins from a
+   *  handover sheet that is now wrong is worse than a refusal. A blank password
+   *  leaves the existing one alone. */
+  saveStaffLogins: (
+    orgId: string,
+    logins: { user_id: string; username: string; password?: string | null }[],
+  ) => api.post<StaffLoginsResult>(`/platform/orgs/${orgId}/setup/logins`, { logins }),
 };

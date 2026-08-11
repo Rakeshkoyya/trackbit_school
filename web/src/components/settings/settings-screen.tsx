@@ -21,14 +21,21 @@ import type { AttendanceMode, OrgSettings, WorkCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** D-01: how often attendance is taken — drives what teachers are asked for,
- *  what the capture heatmap expects, and what "absent today" means. */
+ *  what the capture heatmap expects, and what "absent today" means.
+ *
+ *  Ordered cheapest-first, and **one register a day leads because it is the
+ *  default** (founder, 2026-08-11). The old order put "Every period" at the top,
+ *  where a first radio reads as the recommendation — and every period is the one
+ *  shape that asks a teacher for the roll eight times a day. */
 const ATTENDANCE_MODES: { value: AttendanceMode; label: string; hint: string }[] = [
-  { value: "every_period", label: "Every period",
-    hint: "A mark per timetabled period — the fullest record." },
-  { value: "first_period", label: "First period only",
-    hint: "One roll call a day, in period 1." },
+  { value: "first_period", label: "Once a day — one register",
+    hint: "One roll call for the whole day. Usually period 1, but whoever takes it "
+      + "first holds it, and anyone editing later edits that same register." },
   { value: "twice_daily", label: "Twice a day",
     hint: "Period 1 and the first period after lunch — catches who left at lunch." },
+  { value: "every_period", label: "Every period",
+    hint: "A mark per timetabled period — the fullest record, and the most asked of "
+      + "teachers." },
 ];
 
 function SchoolSection({ s }: { s: OrgSettings }) {
@@ -228,12 +235,23 @@ function CaptureSection({ s }: { s: OrgSettings }) {
                 <span className={cn("mt-1 h-3 w-3 shrink-0 rounded-full border-2",
                   modeVal === m.value ? "border-primary bg-primary" : "border-muted-foreground/40")} />
                 <span>
-                  <span className="block text-sm font-medium">{m.label}</span>
+                  <span className="block text-sm font-medium">
+                    {m.label}
+                    {m.value === "first_period" ? (
+                      <span className="ml-1.5 rounded-full border border-border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                        default
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="block text-xs text-muted-foreground">{m.hint}</span>
                 </span>
               </button>
             ))}
           </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Changing this changes what teachers are asked for tomorrow. Registers
+            already taken keep the period they were taken on.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>

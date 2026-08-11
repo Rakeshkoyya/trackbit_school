@@ -223,8 +223,16 @@ class OverviewService:
                 teacher_name=names.get(cs.teacher_member_id) if cs.teacher_member_id else None,
                 periods_per_week=cs.periods_per_week,
                 timetabled_periods=grid,
-                # The disagreement that silently corrupts every plan date.
-                periods_mismatch=bool(grid) and grid != cs.periods_per_week,
+                # TT-3: this used to be the disagreement that silently
+                # corrupted every plan date — an entered periods/week against a
+                # grid that said something else. It cannot happen any more:
+                # `periods_per_week` IS the grid count now
+                # (`services/period_load.py`), recomputed on every slot write.
+                # The field stays so consumers keep parsing, and stays FALSE
+                # rather than being recomputed, because a warning that could
+                # only fire on a stale cache would send admins hunting a
+                # mismatch they have no way to fix.
+                periods_mismatch=False,
                 chapters=chapters, topics=topics, est_periods=est,
                 # Weighted by the ONE shared rule: a partly-covered topic is
                 # half, here and on every other screen (`S-51`).

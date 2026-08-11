@@ -162,9 +162,13 @@ def delete_class(class_id: uuid.UUID, m: CurrentMember = Depends(require_operato
 
 # ── class–subjects ───────────────────────────────────────────────────────────
 @router.get("/classes/{class_id}/subjects", response_model=list[ClassSubjectOut])
-def list_class_subjects(class_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
+def list_class_subjects(class_id: uuid.UUID, mine: bool = False,
+                        m: CurrentMember = Depends(require_academic),
                         db: Session = Depends(get_db)):
-    return AcademicService(db).list_class_subjects(m, class_id)
+    """This class's subjects. `mine=true` narrows to the caller's own — the
+    same flag `/academics/classes` carries, so a teacher's pickers are scoped
+    by the SERVER rather than by the browser dropping rows it was sent."""
+    return AcademicService(db).list_class_subjects(m, class_id, mine=mine)
 
 
 @router.get("/class-subjects", response_model=list[ClassSubjectOut])

@@ -29,7 +29,14 @@ from app.schemas.platform import (
     PlatformOrgOut,
     ReadinessOut,
 )
-from app.schemas.setup_pack import PackImportOut, PackReviewOut
+from app.schemas.setup_pack import (
+    PackImportOut,
+    PackReviewOut,
+    StaffLoginRowOut,
+    StaffLoginsIn,
+    StaffLoginsResult,
+    UsernameCheckOut,
+)
 from app.schemas.tiers import (
     AssignPlanIn,
     PlanChangeOut,
@@ -45,6 +52,7 @@ from app.services.observances import ObservanceService
 from app.services.platform import PlatformService
 from app.services.readiness import ReadinessService
 from app.services.school_setup import SchoolSetupService
+from app.services.setup_pack.logins import StaffLoginService
 from app.services.tiers import TierService
 
 router = APIRouter()
@@ -234,6 +242,55 @@ async def setup_import(
     """
     return SchoolSetupService(db).import_pack(
         member, org_id, await file.read(), replace_syllabus=replace_syllabus)
+
+
+# ── the staff logins, between import and handover ────────────────────────────
+# The import generates a username from each person's name and a random password,
+# and shows them once. This is where the operator corrects them — a school's own
+# employee IDs, a misspelt name, a slug that collided — while a password can
+# still be CHOSEN rather than reset.
+@router.get("/orgs/{org_id}/setup/logins", response_model=list[StaffLoginRowOut])
+def staff_logins(
+    org_id: uuid.UUID,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> list[StaffLoginRowOut]:
+    """Re-read from the database, not replayed from the import response: the
+    operator reloads the page, and passwords are already unreadable by then —
+    which is why no password comes back here."""
+    return SchoolSetupService(db).staff_logins(org_id)
+
+
+@router.get("/username-check", response_model=UsernameCheckOut)
+@limiter.limit("120/minute")
+def username_check(
+    request: Request,
+    username: str,
+    for_user_id: uuid.UUID | None = None,
+    _=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> UsernameCheckOut:
+    """What the edit screen calls as the operator types. `users.username` is
+    global, so this spans every school — and it ANSWERS rather than erroring: an
+    unavailable name is a normal state of the form. `for_user_id` excludes the
+    person being edited, so their own username does not read as taken."""
+    return StaffLoginService(db).check_username(username, for_user_id=for_user_id)
+
+
+@router.post("/orgs/{org_id}/setup/logins", response_model=StaffLoginsResult)
+@limiter.limit("30/minute")
+def save_staff_logins(
+    request: Request,
+    org_id: uuid.UUID,
+    body: StaffLoginsIn,
+    member=Depends(require_super_admin),
+    db: Session = Depends(get_db),
+) -> StaffLoginsResult:
+    """The whole batch or none of it — half the staff holding logins from the
+    sheet the operator printed and half not is worse than a refusal. A username
+    taken by another school is a 409 naming it; a user_id belonging to another
+    school is a 404."""
+    return SchoolSetupService(db).save_staff_logins(member, org_id, body.logins)
 
 
 @router.get("/orgs/{org_id}/setup/welcome")

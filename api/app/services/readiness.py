@@ -100,18 +100,22 @@ class ReadinessService:
         classes = self._count(SchoolClass, SchoolClass.org_id == org_id)
         subjects = self._count(Subject, Subject.org_id == org_id)
         cs_total = self._count(ClassSubject, ClassSubject.org_id == org_id)
-        cs_allocated = self._count(
-            ClassSubject, ClassSubject.org_id == org_id,
-            ClassSubject.periods_per_week > 0)
-        ok = classes > 0 and cs_total > 0 and cs_allocated == cs_total
+        # TT-3: this check used to warn until every allocation had a
+        # periods/week, which is no longer something a human fills in — it is
+        # counted off the timetable. Warning about it here would nag a school
+        # about a number it cannot enter and we have not derived yet; the
+        # timetable check is the one that says "no grid".
+        ok = classes > 0 and cs_total > 0
         summary = (f"{classes} classes · {subjects} subjects · "
-                   f"{cs_allocated} of {cs_total} allocations have periods/week")
+                   f"{cs_total} teaching allocation{'' if cs_total == 1 else 's'}")
         if classes == 0:
             summary = "No classes created."
+        elif cs_total == 0:
+            summary = f"{classes} classes · nobody is assigned to teach anything yet."
         return ReadinessCheck(
             key="classes", title="Classes and subjects",
             status="ok" if ok else "warn", summary=summary,
-            count=cs_allocated, total=cs_total, link="/setup")
+            count=cs_total, total=cs_total, link="/setup")
 
     def _teachers(self, org_id) -> ReadinessCheck:
         staff = self._count(Membership, Membership.org_id == org_id,

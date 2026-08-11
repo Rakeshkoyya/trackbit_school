@@ -126,35 +126,49 @@ def get_syllabus(class_subject_id: uuid.UUID, m: CurrentMember = Depends(require
     return PlannerService(db).get_syllabus(m, class_subject_id)
 
 
+# SY-2 — the five writes below were `require_operator`, which freezes them the
+# day a school is handed over (D-1). That is the right rule for the school's
+# STRUCTURE — its classes, its subjects, who teaches what — and the wrong one
+# for the syllabus, which is a live teaching record: a chapter added in
+# September, a chapter sized when its term begins, and a chapter dropped from
+# the board are all things the teacher standing in front of the class does.
+# Freezing them left the Syllabus grid offering an "Add chapter" control that
+# every handed-over school would be refused.
+#
+# So they are `require_academic`, and the narrower question — *is this subject
+# yours* — is asked by `assert_can_edit_class_subject` inside the SERVICE.
+# That placement is deliberate and load-bearing: an in-process service call
+# (Lucy's tools, the setup importer, a future MCP write) does not run a route
+# guard, so a rule living only here would not be a rule at all.
 @router.post("/syllabus/units", response_model=UnitOut)
-def add_unit(body: UnitCreate, m: CurrentMember = Depends(require_operator),
+def add_unit(body: UnitCreate, m: CurrentMember = Depends(require_academic),
              db: Session = Depends(get_db)):
     return PlannerService(db).add_unit(m, body.class_subject_id, body.title, body.term_id)
 
 
 @router.post("/syllabus/topics", response_model=TopicOut)
-def add_topic(body: TopicCreate, m: CurrentMember = Depends(require_operator),
+def add_topic(body: TopicCreate, m: CurrentMember = Depends(require_academic),
               db: Session = Depends(get_db)):
     return PlannerService(db).add_topic(m, body.unit_id, body.title, body.est_periods)
 
 
 @router.put("/syllabus/topics/{topic_id}/estimate", response_model=TopicOut)
 def set_topic_estimate(topic_id: uuid.UUID, body: TopicEstimateIn,
-                       m: CurrentMember = Depends(require_operator),
+                       m: CurrentMember = Depends(require_academic),
                        db: Session = Depends(get_db)):
     """Size a chapter when its term begins — the whole point of term-wise planning."""
     return PlannerService(db).set_topic_estimate(m, topic_id, body.est_periods)
 
 
 @router.delete("/syllabus/units/{unit_id}", response_model=MessageResponse)
-def delete_unit(unit_id: uuid.UUID, m: CurrentMember = Depends(require_operator),
+def delete_unit(unit_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
                 db: Session = Depends(get_db)):
     PlannerService(db).delete_unit(m, unit_id)
     return MessageResponse(message="Chapter removed.")
 
 
 @router.delete("/syllabus/topics/{topic_id}", response_model=MessageResponse)
-def delete_topic(topic_id: uuid.UUID, m: CurrentMember = Depends(require_operator),
+def delete_topic(topic_id: uuid.UUID, m: CurrentMember = Depends(require_academic),
                  db: Session = Depends(get_db)):
     PlannerService(db).delete_topic(m, topic_id)
     return MessageResponse(message="Topic removed.")

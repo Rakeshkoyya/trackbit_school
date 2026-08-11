@@ -8,7 +8,9 @@ endpoint or from a rejected import: the operator is looking at one report either
 way, and two shapes would mean two renderings that drift.
 """
 
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, Field
 
 
 class FindingOut(BaseModel):
@@ -57,9 +59,57 @@ class CredentialOut(BaseModel):
     password is hashed on the way in and cannot be read back afterwards, so a
     lost one is reset, never recovered."""
 
+    user_id: uuid.UUID
     name: str
     username: str
     password: str
+
+
+# ── editing those logins before handover ─────────────────────────────────────
+# The generated username is a slug of the person's name, which is right often
+# enough to be worth generating and wrong often enough to be worth correcting:
+# a school's own employee IDs, a misspelt name in the pack, two teachers the
+# slug collided on. This is the one window where a password can still be CHOSEN
+# rather than reset — after handover it is hashed and gone.
+
+
+class StaffLoginRowOut(BaseModel):
+    """One editable row. Carries no password: the generated one is unreadable by
+    the time this list is fetched, and a blank field means *leave it alone*."""
+
+    user_id: uuid.UUID
+    name: str
+    username: str | None
+    org_role: str
+
+
+class StaffLoginIn(BaseModel):
+    user_id: uuid.UUID
+    # Lowercased and validated in the service, not here — the rules are the
+    # importer's (`_slugify_username`) and belong next to it.
+    username: str = Field(min_length=3, max_length=40)
+    # Omitted or blank = keep the password they already have. A password set
+    # here is still a TEMP one: `must_set_password` stays on, so the teacher
+    # changes it at first sign-in exactly as with a generated one.
+    password: str | None = Field(default=None, max_length=128)
+
+
+class StaffLoginsIn(BaseModel):
+    logins: list[StaffLoginIn] = Field(min_length=1, max_length=500)
+
+
+class StaffLoginsResult(BaseModel):
+    saved: int
+    renamed: int
+    passwords_set: int
+    rows: list[StaffLoginRowOut] = []
+
+
+class UsernameCheckOut(BaseModel):
+    username: str
+    available: bool
+    # Why not, in words the operator can act on — "already taken", "too short".
+    reason: str | None = None
 
 
 class PackImportOut(BaseModel):

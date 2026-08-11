@@ -55,8 +55,8 @@ STAFF_ROWS = [
     ["Anita Desai", "anita@school.example", "Teacher"],
 ]
 ASSIGNMENT_ROWS = [
-    ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-    ["6", "A", "Mathematics", "Anita Desai", 6],
+    ["Class", "Section", "Subject", "Teacher"],
+    ["6", "A", "Mathematics", "Anita Desai"],
 ]
 SYLLABUS_ROWS = [
     ["Class", "Section", "Subject", "Term", "Chapter", "Periods"],
@@ -195,20 +195,39 @@ def test_an_unplanned_term_is_a_note_never_a_blocker():
 
 def test_a_subject_with_no_teacher_is_a_note_never_a_blocker():
     report = validate(_pack(assignments=[
-        ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-        ["6", "A", "Mathematics", "", 6],
+        ["Class", "Section", "Subject", "Teacher"],
+        ["6", "A", "Mathematics", ""],
     ]))
     assert report.ready
     assert "assignments:no_teacher" in _rules(report, NOTE)
 
 
-def test_a_subject_with_no_period_budget_is_a_note():
-    report = validate(_pack(assignments=[
-        ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-        ["6", "A", "Mathematics", "Anita Desai", None],
-    ]))
+def test_a_subject_left_off_the_timetable_is_a_note():
+    """TT-3's replacement for "no periods per week".
+
+    That column is gone, so the state it described — *this subject has no
+    weekly load, its plan cannot be paced* — is now visible as a subject the
+    grid never mentions. Still a NOTE, never a blocker: a school halfway
+    through drawing its timetable must still be handed over (D-3/D-4).
+    """
+    report = validate(_pack(
+        assignments=[
+            ["Class", "Section", "Subject", "Teacher"],
+            ["6", "A", "Mathematics", "Anita Desai"],
+            ["6", "A", "Science", "Anita Desai"]],
+        syllabus=[["Class", "Section", "Subject", "Term", "Chapter", "Periods"],
+                  ["6", "A", "Mathematics", "Term 1", "Integers", 4],
+                  ["6", "A", "Science", "Term 1", "Food", 3]],
+        timetable=[["Class", "Section", "Day", "Period", "Subject"],
+                   ["6", "A", "Monday", 1, "Mathematics"]],
+    ))
     assert report.ready
-    assert "assignments:no_ppw" in _rules(report, NOTE)
+    note = next(f for f in report.findings
+                if f.rule == "timetable:subject_not_scheduled")
+    assert "Science" in note.message
+    # Maths IS on the grid, so it is not reported.
+    assert not any(f.rule == "timetable:subject_not_scheduled"
+                   and "Mathematics" in f.message for f in report.findings)
 
 
 def test_tracking_outside_the_year_warns_but_does_not_block():
@@ -249,7 +268,7 @@ def test_a_class_teacher_who_is_not_on_the_staff_sheet_is_blocked():
 
 def test_an_assignment_naming_an_unknown_teacher_is_blocked():
     report = validate(_pack(assignments=[
-        ["Class", "Section", "Subject", "Teacher", "Periods per week"],
+        ["Class", "Section", "Subject", "Teacher"],
         ["6", "A", "Mathematics", "Ghost Teacher", 6],
     ]))
     assert "assignments:unknown_teacher" in _rules(report, BLOCKER)
@@ -273,8 +292,8 @@ def test_a_blank_section_fans_out_to_every_section_of_the_class():
                  ["6", "A", "Anita Desai"],
                  ["6", "B", "Anita Desai"]],
         assignments=[
-            ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-            ["6", "", "Mathematics", "Anita Desai", 6]],
+            ["Class", "Section", "Subject", "Teacher"],
+            ["6", "", "Mathematics", "Anita Desai"]],
         syllabus=[["Class", "Section", "Subject", "Term", "Chapter", "Periods"],
                   ["6", "", "Mathematics", "Term 1", "Integers", 4]],
     ))
@@ -318,30 +337,53 @@ def test_a_missing_required_sheet_blocks():
 
 
 # ── the new_org invariants ───────────────────────────────────────────────────
-def test_a_class_allocated_more_periods_than_the_week_holds_warns():
-    report = validate(_pack(assignments=[
-        ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-        ["6", "A", "Mathematics", "Anita Desai", 40],
-        ["6", "A", "Science", "Anita Desai", 40],
+# TT-3 moved both of these off Teaching Assignments and onto the Timetable
+# sheet. They used to sum a "Periods per week" column a human typed; that column
+# is gone, because a school filling the pack in April does not know what June's
+# grid will give a subject. Counting the grid is also the stronger check: it
+# tests the timetable the school will actually run, not its intention for one.
+#
+# The pack's week holds 8 periods/day × 6 days = 48.
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+         "Sunday"]
+
+
+def test_a_class_with_more_periods_on_the_grid_than_the_week_holds_warns():
+    report = validate(_pack(timetable=[
+        ["Class", "Section", "Day", "Period", "Subject"],
+        # 7 days × 8 periods = 56, over the 48 the week holds.
+        *[["6", "A", day, period, "Mathematics"]
+          for day in _DAYS for period in range(1, 9)],
     ]))
     warning = next(f for f in report.findings
-                   if f.rule == "assignments:class_over_capacity")
-    assert "never be taught" in warning.message
+                   if f.rule == "timetable:class_over_capacity")
+    assert "cannot run" in warning.message
 
 
-def test_a_teacher_assigned_more_periods_than_exist_warns():
+def test_a_teacher_on_the_grid_more_than_the_week_holds_warns():
+    """Counted across every class she teaches — the case the old column could
+    only catch by adding up numbers nobody had checked against a real grid."""
     report = validate(_pack(
         classes=[["Class", "Section", "Class teacher"],
                  ["6", "A", "Anita Desai"],
                  ["7", "A", "Anita Desai"]],
         assignments=[
-            ["Class", "Section", "Subject", "Teacher", "Periods per week"],
-            ["6", "A", "Mathematics", "Anita Desai", 30],
-            ["7", "A", "Mathematics", "Anita Desai", 30]],
+            ["Class", "Section", "Subject", "Teacher"],
+            ["6", "A", "Mathematics", "Anita Desai"],
+            ["7", "A", "Mathematics", "Anita Desai"]],
         syllabus=[["Class", "Section", "Subject", "Term", "Chapter", "Periods"],
-                  ["6", "A", "Mathematics", "Term 1", "Integers", 4]],
+                  ["6", "A", "Mathematics", "Term 1", "Integers", 4],
+                  ["7", "A", "Mathematics", "Term 1", "Integers", 4]],
+        timetable=[
+            ["Class", "Section", "Day", "Period", "Subject"],
+            # 28 periods in each of two classes — 56 for her, over the 48 that
+            # exist in anybody's week.
+            *[[c, "A", day, period, "Mathematics"]
+              for c in ("6", "7")
+              for day in _DAYS[:4] for period in range(1, 8)],
+        ],
     ))
-    assert "assignments:teacher_over_capacity" in _rules(report, WARNING)
+    assert "timetable:teacher_over_capacity" in _rules(report, WARNING)
 
 
 # ── optional sheets ──────────────────────────────────────────────────────────

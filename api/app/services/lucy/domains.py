@@ -1,4 +1,4 @@
-"""The thirteen toolsets — the scope unit of the agent platform (`D-98`).
+"""The twelve toolsets — the scope unit of the agent platform (`D-98`).
 
 A toolset does three jobs at once, which is why it is one concept and not three
 (MCP-SERVER-PLAN §3.2):
@@ -55,7 +55,6 @@ DOMAINS: tuple[Domain, ...] = (
                    "unless separately opted in — teachers never see fees.",
            admin_only=True, opt_in=True),
     Domain("sessions", "Hostel and activity sessions."),
-    Domain("events", "The calendar's occasions: observances and what's on."),
 )
 
 DOMAIN_NAMES: frozenset[str] = frozenset(d.name for d in DOMAINS)

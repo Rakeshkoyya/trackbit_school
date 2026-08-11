@@ -155,7 +155,11 @@ class McpPrincipal:
     def __init__(self, member, token):
         self.member = member
         self.token = token
-        self.scopes = frozenset(token.scopes or [])
+        # Intersected with the live toolsets on purpose: a credential issued
+        # before a toolset was retired still carries its name, and an unknown
+        # name reaches `resolve_scope` as a ValueError — a 500 on every call
+        # rather than "that toolset is simply not granted".
+        self.scopes = frozenset(token.scopes or []) & domains.DOMAIN_NAMES
         self.can_write = token.mode == "read_write"
 
 

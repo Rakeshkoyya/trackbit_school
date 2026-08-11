@@ -220,3 +220,82 @@ def test_slot_write_is_admin_only(client, cleanup):
     w = client.put("/api/v1/timetable/slot", headers=th, json={
         "class_id": klass["id"], "weekday": 0, "period_no": 1, "class_subject_id": cs["id"]})
     assert w.status_code == 403
+
+
+# ── TT-3: periods/week is counted off the grid, never typed ──────────────────
+def _ppw(client, h, class_id, subject_name):
+    for cs in client.get(f"/api/v1/academics/classes/{class_id}/subjects",
+                         headers=h).json():
+        if cs["subject_name"] == subject_name:
+            return cs["periods_per_week"]
+    raise AssertionError(f"{subject_name} not on the class")
+
+
+def test_periods_per_week_follows_the_timetable(client, cleanup):
+    """The founder's rule: *"there is no way we get this from the school admin,
+    they don't have this data before, we must calculate it."*
+
+    `periods_per_week` is the divisor the entire planner runs on — `distribute`
+    refuses a chapter without it, `exam_fit` cannot answer, `reschedule` 422s.
+    It used to be typed on the setup pack, which meant it was blank or wrong
+    for most schools. It is now the count of the live grid, and this test pins
+    every direction it can move: up as cells are filled, down as one is
+    cleared, and 0 for a subject the grid never mentions.
+    """
+    h, year, mid, make_cs = _setup(client, cleanup)
+    klass, subject, cs = make_cs("6", "Mathematics")
+    # A second subject on the SAME class that never reaches the grid.
+    other = client.post("/api/v1/academics/subjects", headers=h,
+                        json={"name": f"Art {uuid.uuid4().hex[:4]}"}).json()
+    client.post("/api/v1/academics/class-subjects", headers=h,
+                json={"class_id": klass["id"], "subject_id": other["id"],
+                      "teacher_member_id": mid, "periods_per_week": 5})
+
+    # Before any grid exists the seeded numbers stand — there is nothing to
+    # derive from, and zeroing would stop the planner on a half-set-up school.
+    assert _ppw(client, h, klass["id"], "Mathematics") == 5
+    assert _ppw(client, h, klass["id"], other["name"]) == 5
+
+    for weekday, period in ((0, 1), (1, 1), (2, 3)):
+        r = client.put("/api/v1/timetable/slot", headers=h, json={
+            "class_id": klass["id"], "weekday": weekday, "period_no": period,
+            "slot_type": "subject", "class_subject_id": cs["id"],
+            "effective_from": "2026-04-01"})
+        assert r.status_code == 200, r.text
+
+    # Three cells → three periods. And the subject the grid never mentions
+    # drops to 0: once a class HAS a timetable, the timetable is the answer for
+    # every subject in it, not only the ones it happens to name.
+    assert _ppw(client, h, klass["id"], "Mathematics") == 3
+    assert _ppw(client, h, klass["id"], other["name"]) == 0
+
+    # Clearing a cell takes it back down — "any further change will auto
+    # update it" has to include changes that remove periods.
+    r = client.post("/api/v1/timetable/slot/clear", headers=h, json={
+        "class_id": klass["id"], "weekday": 1, "period_no": 1,
+        "effective_from": "2026-04-02"})
+    assert r.status_code == 200, r.text
+    assert _ppw(client, h, klass["id"], "Mathematics") == 2
+
+
+def test_a_block_period_is_not_a_subject_period(client, cleanup):
+    """Assembly is on the grid and is not Maths.
+
+    `periods_per_week` counts `slot_type='subject'` only. Counting blocks would
+    inflate every subject's weekly load with time it never gets, and the plan
+    dates computed from it would run ahead of the real class.
+    """
+    h, year, mid, make_cs = _setup(client, cleanup)
+    klass, subject, cs = make_cs("7", "Science")
+    client.put("/api/v1/timetable/slot", headers=h, json={
+        "class_id": klass["id"], "weekday": 0, "period_no": 1,
+        "slot_type": "subject", "class_subject_id": cs["id"],
+        "effective_from": "2026-04-01"})
+    block = client.post("/api/v1/timetable/blocks", headers=h, json={
+        "name": "Assembly", "kind": "assembly"}).json()
+    client.put("/api/v1/timetable/slot", headers=h, json={
+        "class_id": klass["id"], "weekday": 0, "period_no": 2,
+        "slot_type": "block", "session_id": block["id"],
+        "effective_from": "2026-04-01"})
+
+    assert _ppw(client, h, klass["id"], "Science") == 1

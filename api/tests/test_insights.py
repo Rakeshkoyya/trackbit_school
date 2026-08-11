@@ -117,6 +117,19 @@ def _slot(client, h, ctx, weekday, period_no):
         "class_subject_id": ctx["cs"]["id"], "effective_from": "2026-04-01"})
 
 
+def _every_period(client, h):
+    """Put the org on `every_period` — a register per timetabled period.
+
+    Required explicitly since 2026-08-11, when the default became `first_period`
+    (one register a day). A test that marks two periods and expects two marked
+    periods is testing THIS mode; on the default the second mark is redirected
+    into the first register by design, and the test would be asserting
+    per-period behaviour against a school that does not keep it."""
+    res = client.patch("/api/v1/org/settings", headers=h,
+                       json={"attendance_mode": "every_period"})
+    assert res.status_code == 200, res.text
+
+
 # ── the capture grid ─────────────────────────────────────────────────────────
 def test_capture_grid_separates_unmarked_from_no_lesson(client, cleanup):
     """The tab's whole reason to exist: an empty cell must say WHICH kind of
@@ -124,6 +137,7 @@ def test_capture_grid_separates_unmarked_from_no_lesson(client, cleanup):
     look like it stopped taking attendance after lunch."""
     ctx = _setup(client, cleanup)
     h = ctx["h"]
+    _every_period(client, h)
     today = date.today()
     _slot(client, h, ctx, today.weekday(), 1)
     _slot(client, h, ctx, today.weekday(), 2)
@@ -151,6 +165,7 @@ def test_streak_needs_every_marked_period_and_skips_uncaptured_days(client, clea
         otherwise a school that stops capturing silently clears its red list."""
     ctx = _setup(client, cleanup)
     h, asha, bilal = ctx["h"], ctx["students"][0], ctx["students"][1]
+    _every_period(client, h)
     # The four most recent WORKING days (the year defaults to Mon–Sat). A raw
     # four-day window would silently include a Sunday, which the streak walk
     # correctly skips — and the test would then fail for the right reason at the

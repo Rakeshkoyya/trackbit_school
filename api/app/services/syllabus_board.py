@@ -46,6 +46,7 @@ from app.core.coverage import (
     chapter_status,
     coverage_pct,
     rated_status,
+    shown_chapter_status,
     taught_weight,
 )
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
@@ -308,9 +309,13 @@ class SyllabusBoardService:
                         if baseline_weeks else None)
         actual_end = max(taught_on) if taught_on else None
 
-        status = chapter_status(topics=len(group), taught_full=full,
-                                taught_partial=partial, planned=len(planned_weeks),
-                                excluded=u.not_planned)
+        derived = chapter_status(topics=len(group), taught_full=full,
+                                 taught_partial=partial, planned=len(planned_weeks),
+                                 excluded=u.not_planned)
+        # SY-2 — the shown word. The rule lives in `core/coverage.py` so this
+        # board and the exam map cannot answer it differently; the derived word
+        # travels beside it either way.
+        status = shown_chapter_status(u.manual_status, u.not_planned, derived)
         weighted = sum(taught_weight(t.best) for t in group if t.best)
 
         # Overdue = the plan said it would be finished by now and it is not.
@@ -327,6 +332,11 @@ class SyllabusBoardService:
         # planned". The rule is the state, not the absence of a date.
         overdue = bool(planned_end and planned_end < today
                        and status not in (CHAPTER_COMPLETED, CHAPTER_NOT_SCHEDULED))
+        # Drift compares two OBSERVED dates — when it was actually last taught
+        # against when the plan said it would finish. A typed "completed" has no
+        # actual_end behind it, so `status` here is deliberately the shown word
+        # (a teacher who marked it done and logged nothing simply gets no
+        # drift), and the figure can never be computed from a claim alone.
         drift = ((actual_end - planned_end).days
                  if actual_end and planned_end and status == CHAPTER_COMPLETED else None)
 
@@ -343,7 +353,7 @@ class SyllabusBoardService:
             baseline_start=baseline_start, baseline_end=baseline_end,
             actual_start=min(started_on) if started_on else None,
             actual_end=actual_end,
-            status=status,
+            status=status, derived_status=derived, manual_status=u.manual_status,
             completion_pct=coverage_pct(weighted, len(group)),
             expected_pct=self._expected_pct(planned_start, planned_end, today,
                                             working, blocked),
@@ -425,11 +435,19 @@ class SyllabusBoardService:
     # ── the chapter's own two columns ────────────────────────────────────────
     def patch_chapter(self, m: CurrentMember, unit_id: uuid.UUID,
                       body) -> SyllabusUnit:
-        """Difficulty, remarks, title, term. Written in place — law 3's
-        append-only is for decisions, and a remark is corrected, not superseded.
+        """Title, difficulty, remarks, term, scope, status and periods.
 
-        Who: an admin anywhere, or the subject's own teacher. A chapter remark
-        that only an admin may write is a remark nobody writes."""
+        The chapter's whole editable row (SY-2) — everything the grid's cells
+        write goes through here, so there is one place that decides who may
+        change a chapter and one place that validates the words.
+
+        Written in place: law 3's append-only is for decisions about a PERSON,
+        and a chapter's remark, difficulty or period count is corrected, not
+        superseded.
+
+        Who: an admin anywhere, or the subject's own teacher (or the class
+        teacher of its homeroom). A chapter remark that only an admin may write
+        is a remark nobody writes."""
         u = self.db.scalar(select(SyllabusUnit).where(
             SyllabusUnit.id == unit_id, SyllabusUnit.org_id == m.org_id))
         if u is None:
@@ -456,6 +474,23 @@ class SyllabusBoardService:
             # append-only is for decisions about a PERSON, and this is a
             # decision about a chapter, reversed by ticking the box back.
             u.not_planned = body.not_planned
+        if body.status is not None:
+            # SY-2. "unset" hands the row back to the lesson logs — the same
+            # escape `difficulty` has, and the reason this can be an override
+            # rather than a replacement: a school that never touches the cell is
+            # on exactly the behaviour it had before.
+            if body.status == "unset":
+                u.manual_status = None
+            elif body.status in (CHAPTER_NOT_STARTED, CHAPTER_IN_PROGRESS,
+                                 CHAPTER_COMPLETED):
+                u.manual_status = body.status
+            else:
+                raise ValidationError(
+                    "Status must be not started, in progress or completed.",
+                    code="bad_status")
+        if body.clear_est_periods or body.est_periods is not None:
+            self._set_chapter_periods(
+                u, None if body.clear_est_periods else body.est_periods)
         if body.clear_term:
             u.term_id = None
         elif body.term_id is not None:
@@ -466,6 +501,30 @@ class SyllabusBoardService:
             u.term_id = term.id
         self.db.flush()
         return u
+
+    def _set_chapter_periods(self, u: SyllabusUnit, periods: int | None) -> None:
+        """Size a chapter from its own row.
+
+        Only for the chapter-only shape — one chapter, one topic — which is what
+        every importer produces and what the grid draws as a single line. There
+        the chapter's estimate IS its topic's, and making the row editable saves
+        opening a drawer to type one number.
+
+        A chapter genuinely split into topics is refused rather than guessed at:
+        spreading 8 periods over three topics means choosing 3/3/2 or 2/3/3, and
+        a service inventing that would put an estimate nobody made into the
+        forecast. Those are sized topic by topic, where the person doing it can
+        see what she is dividing.
+        """
+        topics = sorted(u.topics, key=lambda t: (t.position, t.title))
+        if len(topics) != 1:
+            raise ValidationError(
+                f"“{u.title}” has {len(topics)} topics, so its periods are set "
+                "on the topics themselves — open the chapter to size them."
+                if topics else
+                f"“{u.title}” has no topics yet, so there is nothing to size.",
+                code="chapter_not_single_topic")
+        topics[0].est_periods = periods
 
     def _assert_can_edit(self, m: CurrentMember, cs_id: uuid.UUID) -> None:
         if m.is_coordinator_up:

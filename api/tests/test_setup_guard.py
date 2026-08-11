@@ -15,6 +15,11 @@ What each test is defending:
     holiday and collects fees — every one of those still works after handover.
     A setup freeze that stopped admissions would put a support ticket between a
     school and enrolling a child;
+  * **and neither does the syllabus** (SY-2). A chapter added in September is a
+    teaching record, not the school's shape. It used to be frozen with the
+    structure, which left the Syllabus grid offering an "Add chapter" button
+    every live school would be refused. What guards it now is the narrower
+    *is this subject yours*, asked in the service rather than on the route;
   * **the operator is never blocked**, in any school, at any time;
   * **the frozen list is exactly what we think it is.** The last test pins it,
     so a route added to the wrong guard fails here rather than in a school.
@@ -114,11 +119,47 @@ def test_the_timetable_freezes_at_handover(live_school, client):
     assert r.status_code == 403
 
 
-def test_the_syllabus_freezes_at_handover(live_school, client):
+def test_the_syllabus_does_NOT_freeze_at_handover(live_school, client):
+    """SY-2 narrows `D-1` for the syllabus, deliberately.
+
+    The syllabus used to be `require_operator`, so a handed-over school could
+    not add a chapter — and the founder's grid offers exactly that control on
+    every subject. That was the wrong reading of the freeze: a class, a subject
+    and who teaches it are the school's SHAPE and still freeze (the tests above
+    pin them). A chapter added in September is a live teaching record, like an
+    admission or a holiday, and `D-1` never meant to stop those.
+
+    What replaces the freeze is the narrower question — *is this subject
+    yours* — asked in the SERVICE, so it holds for in-process callers too. This
+    test pins both halves: a real subject goes through, a foreign id does not.
+    """
+    year = client.get("/api/v1/academics/years",
+                      headers=_headers(live_school)).json()[0]
+    # Structure is frozen after handover, so build the class-subject the way it
+    # really would be — as the operator.
+    _make_super(live_school["user"]["id"])
+    sub = client.post("/api/v1/academics/subjects", json={"name": "Civics"},
+                      headers=_headers(live_school)).json()
+    klass = client.post("/api/v1/academics/classes",
+                        json={"academic_year_id": year["id"], "name": "9",
+                              "section": "A"},
+                        headers=_headers(live_school)).json()
+    cs = client.post("/api/v1/academics/class-subjects",
+                     json={"class_id": klass["id"], "subject_id": sub["id"],
+                           "periods_per_week": 4},
+                     headers=_headers(live_school)).json()
+
     r = client.post("/api/v1/planner/syllabus/units",
-                    json={"class_subject_id": str(uuid.uuid4()), "title": "New"},
+                    json={"class_subject_id": cs["id"], "title": "New chapter"},
                     headers=_headers(live_school))
-    assert r.status_code == 403
+    assert r.status_code == 200, r.text
+
+    # A class-subject that is not this org's is still refused — the guard moved,
+    # it did not disappear.
+    r = client.post("/api/v1/planner/syllabus/units",
+                    json={"class_subject_id": str(uuid.uuid4()), "title": "Nope"},
+                    headers=_headers(live_school))
+    assert r.status_code == 404, r.text
 
 
 def test_plan_approval_freezes_at_handover(live_school, client):

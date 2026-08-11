@@ -50,6 +50,18 @@ class AttendanceRosterOut(BaseModel):
     # NULL until the period is opened (open-on-action, V2-P6).
     period_id: uuid.UUID | None = None
     marked: bool
+    # Does this school take ONE register a day? The sheet branches on it and
+    # hides its period picker — choosing a period is a question with no meaning
+    # when the register belongs to the day, and offering the choice invites a
+    # teacher to open a second register the server would only redirect anyway.
+    #
+    # This field was computed by the service from the first day of the mode and
+    # passed to this schema, which did not declare it — so Pydantic dropped it
+    # silently on every response and the picker was shown to every once-per-day
+    # school there has ever been. Declared here, and asserted in
+    # `tests/test_once_per_day.py`, because a field the service sets and the
+    # schema omits fails without a single error anywhere.
+    once_per_day: bool = False
     roster: list[AttendanceRosterRow]
     present_count: int
     absent_count: int

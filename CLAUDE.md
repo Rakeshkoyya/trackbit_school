@@ -96,11 +96,26 @@ cannot know some *other* remote URL is precious — it is not a substitute for n
 line. Never point it at a superuser either: a superuser bypasses RLS even with
 `FORCE ROW LEVEL SECURITY`, so `test_rls.py` fails for reasons unrelated to the code.
 
-✅ **`.env` is in `ACTIVE: LOCAL` mode** — switched 2026-08-10, re-verified 2026-08-11.
-`DATABASE_URL` is `trackbit_school_app` (NOBYPASSRLS) on localhost, so **law 2 is genuinely
-live** and anything security-related is testable here. Read the `# --- ACTIVE:` banner in
-`.env` before believing this line; it is switchable and this file has cached the wrong answer
-before.
+🚨 **`.env` is REMOTE right now, and its own banners say otherwise** — checked
+2026-08-11. The top banner reads `ACTIVE: LOCAL` and the block labelled
+`# ── LOCAL (active)` is **commented out**; the block labelled
+`# ── PRODUCTION (inactive …)` is the one actually live. Both `DATABASE_URL` and
+`ADMIN_DATABASE_URL` resolve to `doadmin` @ DigitalOcean, database **`trackbit_prod`** —
+not `trackbit_school`, the documented prod DB — and `alembic current` against it returns
+**nothing at all**, so that database has no `alembic_version` row.
+
+Consequences, until somebody fixes the file:
+
+- **Never run `uv run alembic upgrade head` from `api/` without an override.** It targets a
+  remote DO database with no version row, so it would attempt to build the entire schema
+  there. Use the documented `ALEMBIC_DATABASE_URL=…` form instead.
+- **Law 2 is inert** — `doadmin` has `rolbypassrls = true`. Nothing security-related is
+  testable against `DATABASE_URL` in this state.
+- `TEST_DATABASE_URL` is **still correctly local** (`trackbit_school_test`), so `pytest` is
+  safe and unaffected.
+
+Read the actual uncommented `DATABASE_URL=` lines, not the banners, before believing any of
+this — the banners are what was wrong.
 
 <details><summary>⚠️ If you ever switch it back to <code>ACTIVE: PRODUCTION</code> — read this first</summary>
 
@@ -312,6 +327,15 @@ daily report generation · per-student homework · **Lucy** · the **parent port
   whole graph rather than a duplicate.
 - **Prefer additive migrations.** Prod is migrated before code deploys, so a new column must be
   nullable or carry a server default.
+- **Every table tuple in `core/rls.py` needs a unique name.** Migrations import those tuples and
+  read them **live**, so a second tuple reusing an earlier name silently rebinds it for every
+  migration — including ones that ran dozens of revisions earlier. That is how a fresh
+  `alembic upgrade head` came to die on `relation "exam_portion_units" does not exist` inside
+  `d5b6c7d8e9fa`, a migration written a year before that table existed. Existing databases never
+  notice; only a from-empty upgrade walks the chain in order. `tests/test_rls.py` now asserts it.
+- **Migrate a scratch empty database before shipping migration work.** The test and dev databases
+  are already past every early revision, so they cannot catch a broken from-empty chain — and
+  from-empty is exactly what a new deployment does.
 - **Read the module before designing it.** Half of what gets "designed" already exists and the
   other half is broken in a way nobody knew.
 - **Look at the built screen.** A large share of the defects in the packet log were found by
@@ -323,9 +347,13 @@ daily report generation · per-student homework · **Lucy** · the **parent port
 
 ## Current state and what is next
 
-Schema head is **`c8d9e0f1a2b3`** (`D-129` one student-category vocabulary:
-`sessions.category_id`, replacing the `hostellers_only` boolean and the
-name-matching that resolved it — 2026-08-11). Its parent `b7c8d9e0f1a2` is FE-1
+Schema head is **`a5b6c7d8e9f0`** (one register a day is the default
+`attendance_mode` — the column default moves `every_period` → `first_period`
+**and existing orgs still on the old default move with it**; applied to the
+**test DB only** so far — 2026-08-11). Its parent `c8d9e0f1a2b3` is `D-129`, one
+student-category vocabulary: `sessions.category_id`, replacing the
+`hostellers_only` boolean and the name-matching that resolved it. Its parent
+`b7c8d9e0f1a2` is FE-1
 the fee desk (`fee_events`, `fee_payment_proofs`, `fee_receipt_counters`,
 `installments.is_voided`, `student_fees.closed_*`, `fee_transactions.paid_on`). Applied to the
 **local dev AND test databases** and verified reversible. **Production was NOT checked**

@@ -226,14 +226,32 @@ class AcademicService:
         self.db.delete(self._scoped(SchoolClass, m.org_id, class_id))
 
     # ── class–subjects ───────────────────────────────────────────────────────
-    def list_class_subjects(self, m: CurrentMember, class_id: uuid.UUID) -> list[ClassSubjectOut]:
+    def list_class_subjects(self, m: CurrentMember, class_id: uuid.UUID,
+                            mine: bool = False) -> list[ClassSubjectOut]:
+        """This class's subjects. `mine=True` narrows to the caller's own.
+
+        The same shape `GET /academics/classes?mine=true` already has, and for
+        the same reason: a teacher opening Plan → Syllabus was offered every
+        subject of her class, so five of her six chips led to a board the
+        server correctly refused to fill. Scope is decided HERE, not by the
+        browser filtering a list it should never have been sent.
+
+        Her homeroom is deliberately NOT widened into this: the syllabus board
+        excludes it too (founder, 2026-08-05), so the picker and the board it
+        drives agree about what "mine" means. A class teacher who wants her
+        whole class's syllabus has My Class → Syllabus.
+
+        An admin passing `mine=true` gets her own subjects, which is what the
+        word means; admins simply never ask.
+        """
         self._scoped(SchoolClass, m.org_id, class_id)
-        rows = self.db.execute(
-            select(ClassSubject, Subject.name)
-            .join(Subject, Subject.id == ClassSubject.subject_id)
-            .where(ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id)
-            .order_by(Subject.name)
-        ).all()
+        q = (select(ClassSubject, Subject.name)
+             .join(Subject, Subject.id == ClassSubject.subject_id)
+             .where(ClassSubject.org_id == m.org_id,
+                    ClassSubject.class_id == class_id))
+        if mine:
+            q = q.where(ClassSubject.teacher_member_id == m.membership.id)
+        rows = self.db.execute(q.order_by(Subject.name)).all()
         out: list[ClassSubjectOut] = []
         for cs, subject_name in rows:
             item = ClassSubjectOut.model_validate(cs)

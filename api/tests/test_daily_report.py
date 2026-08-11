@@ -102,6 +102,95 @@ def test_ambiguity_log_without_attendance(client, cleanup):
     assert any("attendance wasn't taken" in a for a in body["highlights"]["ambiguities"])
 
 
+def _attendance_section(body) -> list[str]:
+    return next(s["lines"] for s in body["sections"] if s["heading"] == "Attendance")
+
+
+def test_a_once_a_day_school_is_not_told_it_missed_the_other_registers(client, cleanup):
+    """The denominator is the MODE's (`D-01`), and the briefing was the last
+    attendance consumer that did not know it.
+
+    A `first_period` school takes ONE register per class per day. Counting every
+    timetabled slot as a register it was owed turned a perfectly captured day
+    into *"1 of 4 periods marked · 3 period(s) not marked"* — as the very first
+    sentence on the admin dashboard, every morning, with nothing any teacher
+    could do to clear it."""
+    h, _year, klass, cs = _setup(client, cleanup)
+    _add_student(client, h, klass["id"], "Aisha")
+    for p in (1, 2, 3, 4):
+        _slot(client, h, klass["id"], cs["id"], period_no=p)
+    # The default since 2026-08-11, set explicitly so the test says what it means.
+    client.patch("/api/v1/org/settings", headers=h, json={"attendance_mode": "first_period"})
+    client.post("/api/v1/attendance/mark", headers=h, json={
+        "class_id": klass["id"], "period_no": 1, "class_subject_id": cs["id"],
+        "date": DATE, "exceptions": []})
+
+    lines = _attendance_section(
+        client.post(f"/api/v1/reports/daily/regenerate?on_date={DATE}", headers=h).json())
+    assert lines[0].startswith("1 of 1 registers taken"), lines
+    assert not any("not marked" in ln or "without a register" in ln for ln in lines), lines
+
+
+def test_a_once_a_day_school_names_the_class_that_has_no_register(client, cleanup):
+    """The other half: a register genuinely missing is still said, once — as a
+    CLASS without a register, not as N unmarked periods."""
+    h, _year, klass, cs = _setup(client, cleanup)
+    _add_student(client, h, klass["id"], "Aisha")
+    for p in (1, 2, 3):
+        _slot(client, h, klass["id"], cs["id"], period_no=p)
+    client.patch("/api/v1/org/settings", headers=h, json={"attendance_mode": "first_period"})
+
+    lines = _attendance_section(
+        client.post(f"/api/v1/reports/daily/regenerate?on_date={DATE}", headers=h).json())
+    assert lines[0].startswith("0 of 1 registers taken"), lines
+    assert any("1 class(es) without a register" in ln and "6-A" in ln for ln in lines), lines
+
+
+def test_every_period_still_counts_every_period(client, cleanup):
+    """The mode-aware denominator must not quietly become "one a day" for the
+    schools that chose the fullest record."""
+    h, _year, klass, cs = _setup(client, cleanup)
+    _add_student(client, h, klass["id"], "Aisha")
+    for p in (1, 2, 3):
+        _slot(client, h, klass["id"], cs["id"], period_no=p)
+    client.patch("/api/v1/org/settings", headers=h, json={"attendance_mode": "every_period"})
+    client.post("/api/v1/attendance/mark", headers=h, json={
+        "class_id": klass["id"], "period_no": 1, "class_subject_id": cs["id"],
+        "date": DATE, "exceptions": []})
+
+    lines = _attendance_section(
+        client.post(f"/api/v1/reports/daily/regenerate?on_date={DATE}", headers=h).json())
+    assert lines[0].startswith("1 of 3 periods marked"), lines
+    assert any("2 period(s) not marked" in ln for ln in lines), lines
+
+
+def test_a_subject_logged_after_the_register_is_not_flagged(client, cleanup):
+    """Once-per-day noise, removed. "Science was logged but attendance wasn't
+    taken" fired on every afternoon subject in the school, because the register
+    it was looking for belonged to the class's morning, not to Science."""
+    h, _year, klass, cs = _setup(client, cleanup)
+    _add_student(client, h, klass["id"], "Aisha")
+    _slot(client, h, klass["id"], cs["id"], period_no=1)
+    other = client.post("/api/v1/academics/subjects", headers=h, json={"name": "Music"}).json()
+    cs2 = client.post("/api/v1/academics/class-subjects", headers=h, json={
+        "class_id": klass["id"], "subject_id": other["id"],
+        "teacher_member_id": cs["teacher_member_id"], "periods_per_week": 2}).json()
+    _slot(client, h, klass["id"], cs2["id"], period_no=5)
+    client.patch("/api/v1/org/settings", headers=h, json={"attendance_mode": "first_period"})
+
+    # The class teacher takes the day's register at period 1; Music is taught
+    # and logged at period 5 and takes no register of its own — correctly.
+    client.post("/api/v1/attendance/mark", headers=h, json={
+        "class_id": klass["id"], "period_no": 1, "class_subject_id": cs["id"],
+        "date": DATE, "exceptions": []})
+    client.post("/api/v1/classroom/lesson-logs", headers=h, json={
+        "class_subject_id": cs2["id"], "coverage": "full", "date": DATE})
+
+    body = client.post(f"/api/v1/reports/daily/regenerate?on_date={DATE}", headers=h).json()
+    assert not any("attendance wasn't taken" in a
+                   for a in body["highlights"]["ambiguities"]), body["highlights"]
+
+
 def test_repeat_absentee_is_flagged_as_risk(client, cleanup):
     h, _year, klass, cs = _setup(client, cleanup)
     s = _add_student(client, h, klass["id"], "Bala")
