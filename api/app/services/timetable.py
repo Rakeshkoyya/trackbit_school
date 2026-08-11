@@ -75,6 +75,7 @@ from app.schemas.timetable import (
 from app.services import bell
 from app.services.ai import parse_timetable
 from app.services.ai.timetable import ParsedSubject
+from app.services.period_load import recompute_periods_per_week
 
 
 def _label(klass: SchoolClass) -> str:
@@ -84,15 +85,17 @@ def _label(klass: SchoolClass) -> str:
 class BlockMeta:
     """Everything the grid needs to render one block, resolved once per request."""
 
-    __slots__ = ("active", "hostellers_only", "kind", "name", "owner_member_id",
-                 "staff_ids", "staff_names")
+    __slots__ = ("active", "category_id", "category_name", "kind", "name",
+                 "owner_member_id", "staff_ids", "staff_names")
 
-    def __init__(self, name: str, kind: str, hostellers_only: bool, active: bool,
+    def __init__(self, name: str, kind: str, category_id: uuid.UUID | None,
+                 category_name: str | None, active: bool,
                  owner_member_id: uuid.UUID | None,
                  staff_ids: list[uuid.UUID], staff_names: list[str]):
         self.name = name
         self.kind = kind
-        self.hostellers_only = hostellers_only
+        self.category_id = category_id
+        self.category_name = category_name
         self.active = active
         self.owner_member_id = owner_member_id
         self.staff_ids = staff_ids
@@ -163,6 +166,11 @@ class TimetableService:
         # otherwise assigning a second teacher would silently drop the first.
         owner_names = self._member_names(
             org_id, {s.owner_member_id for s in sessions if s.owner_member_id})
+        # `D-129`: the block names the category it serves, so every screen can
+        # say "Hostellers" (or "Transport") rather than a bare checked box.
+        cat_ids = {s.category_id for s in sessions if s.category_id}
+        cat_names = {c.id: c.name for c in self.db.scalars(
+            select(StudentCategory).where(StudentCategory.id.in_(cat_ids)))} if cat_ids else {}
         out: dict[uuid.UUID, BlockMeta] = {}
         for s in sessions:
             pairs = list(by_session.get(s.id, []))
@@ -170,7 +178,8 @@ class TimetableService:
                 pairs.insert(0, (s.owner_member_id,
                                  owner_names.get(s.owner_member_id, "—")))
             out[s.id] = BlockMeta(
-                name=s.name, kind=s.kind, hostellers_only=s.hostellers_only,
+                name=s.name, kind=s.kind, category_id=s.category_id,
+                category_name=cat_names.get(s.category_id),
                 active=s.active, owner_member_id=s.owner_member_id,
                 staff_ids=[p[0] for p in pairs], staff_names=[p[1] for p in pairs])
         return out
@@ -272,7 +281,8 @@ class TimetableService:
                 block_name=meta.name if meta else "(removed block)",
                 block_kind=meta.kind if meta else None,
                 block_kind_label=day_shape.label_for(meta.kind) if meta else None,
-                hostellers_only=meta.hostellers_only if meta else False,
+                category_id=meta.category_id if meta else None,
+                category_name=meta.category_name if meta else None,
                 staff_member_ids=list(meta.staff_ids) if meta else [],
                 staff_names=list(meta.staff_names) if meta else [],
                 effective_from=s.effective_from, effective_to=s.effective_to)
@@ -408,6 +418,11 @@ class TimetableService:
         if session_id:
             self._link_block_class(m.org_id, session_id, body.class_id)
             self.db.flush()
+        # TT-3: the grid IS the weekly load. Recomputed here rather than left to
+        # a nightly job, so the planner can use the new number on the very next
+        # request — a teacher who fills her Tuesday expects her plan to move.
+        # `set_slots_bulk` routes through this method, so it is covered too.
+        recompute_periods_per_week(self.db, m.org_id, [body.class_id])
         return self._grid(m, klass, eff)
 
     def set_slots_bulk(self, m: CurrentMember, body: SlotBulkIn) -> SlotBulkOut:
@@ -444,6 +459,8 @@ class TimetableService:
         if session_id:
             self._unlink_block_class_if_unused(m.org_id, session_id, body.class_id)
             self.db.flush()
+        # Emptying a cell lowers that subject's weekly load by one (TT-3).
+        recompute_periods_per_week(self.db, m.org_id, [body.class_id])
         return self._grid(m, klass, eff)
 
     def validate_grid(self, m: CurrentMember, on_date: date | None = None) -> list[Clash]:
@@ -562,6 +579,10 @@ class TimetableService:
                 s.effective_to = eff
         if orphans:
             self.db.flush()
+            # Shortening the day genuinely removes periods from the week, so
+            # the weekly load has to follow it down (TT-3). Missing this would
+            # leave the planner pacing against periods the school no longer has.
+            recompute_periods_per_week(self.db, org_id, class_ids)
 
     def bell_history(self, m: CurrentMember, year_id: uuid.UUID) -> BellHistoryOut:
         year = self._year_by_id(m.org_id, year_id)
@@ -607,7 +628,8 @@ class TimetableService:
                    slot_counts: dict[uuid.UUID, int]) -> BlockOut:
         return BlockOut(
             id=s.id, name=s.name, kind=s.kind, kind_label=day_shape.label_for(s.kind),
-            hostellers_only=s.hostellers_only, active=s.active,
+            category_id=s.category_id, category_name=meta.category_name,
+            active=s.active,
             owner_member_id=s.owner_member_id,
             staff_member_ids=list(meta.staff_ids), staff_names=list(meta.staff_names),
             class_ids=[sc.class_id for sc in s.classes],
@@ -621,21 +643,20 @@ class TimetableService:
         if not class_ids:
             return {s.id: len(s.students) for s in sessions}
         per_class: dict[uuid.UUID, set[uuid.UUID]] = {}
-        per_class_hostel: dict[uuid.UUID, set[uuid.UUID]] = {}
-        for class_id, student_id, cat in self.db.execute(
-                select(Student.class_id, Student.id, StudentCategory.name)
-                .outerjoin(StudentCategory, StudentCategory.id == Student.category_id)
+        per_class_cat: dict[tuple[uuid.UUID, uuid.UUID], set[uuid.UUID]] = {}
+        for class_id, student_id, cat_id in self.db.execute(
+                select(Student.class_id, Student.id, Student.category_id)
                 .where(Student.org_id == org_id, Student.class_id.in_(class_ids),
                        Student.status == "active")):
             per_class.setdefault(class_id, set()).add(student_id)
-            if (cat or "").lower() == "hosteller":
-                per_class_hostel.setdefault(class_id, set()).add(student_id)
+            if cat_id:
+                per_class_cat.setdefault((cat_id, class_id), set()).add(student_id)
         out: dict[uuid.UUID, int] = {}
         for s in sessions:
             ids = {ss.student_id for ss in s.students}
-            source = per_class_hostel if s.hostellers_only else per_class
             for sc in s.classes:
-                ids |= source.get(sc.class_id, set())
+                ids |= (per_class_cat.get((s.category_id, sc.class_id), set())
+                        if s.category_id else per_class.get(sc.class_id, set()))
             out[s.id] = len(ids)
         return out
 
@@ -694,7 +715,7 @@ class TimetableService:
         s = SessionModel(
             org_id=m.org_id, name=body.name, kind=body.kind,
             owner_member_id=self._resolve_owner(m, body.owner_member_id),
-            hostellers_only=body.hostellers_only,
+            category_id=body.category_id,
             # `D-113` — a block placed on the grid takes its schedule from the
             # grid. It gets no weekdays or clock of its own.
             weekdays=[], time=None, end_time=None)
@@ -729,10 +750,13 @@ class TimetableService:
         s = self._block(m.org_id, block_id)
         if body.owner_member_id is not None:
             s.owner_member_id = self._resolve_owner(m, body.owner_member_id)
-        for field in ("name", "kind", "hostellers_only", "active"):
+        for field in ("name", "kind", "active"):
             v = getattr(body, field)
             if v is not None:
                 setattr(s, field, v)
+        # NULL is meaningful here — it reopens the block to the whole class.
+        if "category_id" in body.model_fields_set:
+            s.category_id = body.category_id
         if body.staff_member_ids is not None:
             self._set_block_staff(m, s, body.staff_member_ids)
         if body.class_ids is not None:
@@ -938,6 +962,8 @@ class TimetableService:
                     class_subject_id=c.class_subject_id,
                     effective_from=eff, effective_to=None))
             self.db.flush()
+            # A whole-school grid replaces every class's week at once (TT-3).
+            recompute_periods_per_week(self.db, m.org_id, class_ids)
 
         return OrgGenerateOut(
             academic_year_id=year.id, classes=len(classes), cells=cells,

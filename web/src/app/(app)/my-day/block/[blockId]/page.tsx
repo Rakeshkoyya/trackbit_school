@@ -441,8 +441,10 @@ function BlockInner() {
           <span>{meeting.kind_label}</span>
           <span>·</span>
           <span>{meeting.date}</span>
-          {meeting.hostellers_only ? (
-            <Badge tone="neutral"><Home className="h-3 w-3" /> hostellers only</Badge>
+          {meeting.category_name ? (
+            <Badge tone="neutral">
+              <Home className="h-3 w-3" /> {meeting.category_name.toLowerCase()}s only
+            </Badge>
           ) : null}
         </p>
       </div>

@@ -151,11 +151,12 @@ class SessionService:
             q = select(Student).where(
                 Student.org_id == org_id, Student.class_id.in_(class_ids),
                 Student.status == "active")
-            if s.hostellers_only:
-                # Category is org-editable data; the convention is the seeded
-                # "Hosteller" name (case-insensitive).
-                q = q.join(StudentCategory, StudentCategory.id == Student.category_id).where(
-                    func.lower(StudentCategory.name) == "hosteller")
+            if s.category_id:
+                # `D-129`: a reference, not a name match. The previous version
+                # resolved this block's category by comparing the category NAME
+                # to the literal "hosteller", so renaming it in Settings emptied
+                # every hosteller roster in the school.
+                q = q.where(Student.category_id == s.category_id)
             for st in self.db.scalars(q):
                 by_id[st.id] = (st, False)
         if explicit_ids:
@@ -205,24 +206,34 @@ class SessionService:
             .options(selectinload(Membership.user)))} if owner_ids else {}
 
         # Per-class active-student id sets (both filters), then union per session.
+        # Category names for display, one query. The block says WHICH category
+        # it serves on every screen that lists it — "hostellers only" was the
+        # only thing the old boolean could ever say.
+        cat_ids = {s.category_id for s in sessions if s.category_id}
+        cat_names = {c.id: c.name for c in self.db.scalars(
+            select(StudentCategory).where(StudentCategory.id.in_(cat_ids)))} if cat_ids else {}
+
+        # `D-129`: indexed by (category, class) rather than a single
+        # hostellers-only set, so a block can be restricted to ANY category the
+        # school has defined — and no join is needed at all now that the filter
+        # is an id rather than a name.
         per_class: dict[uuid.UUID, set[uuid.UUID]] = {}
-        per_class_hostel: dict[uuid.UUID, set[uuid.UUID]] = {}
+        per_class_cat: dict[tuple[uuid.UUID, uuid.UUID], set[uuid.UUID]] = {}
         if class_ids:
-            for class_id, student_id, cat in self.db.execute(
-                    select(Student.class_id, Student.id, StudentCategory.name)
-                    .outerjoin(StudentCategory, StudentCategory.id == Student.category_id)
+            for class_id, student_id, cat_id in self.db.execute(
+                    select(Student.class_id, Student.id, Student.category_id)
                     .where(Student.org_id == m.org_id, Student.class_id.in_(class_ids),
                            Student.status == "active")):
                 per_class.setdefault(class_id, set()).add(student_id)
-                if (cat or "").lower() == "hosteller":
-                    per_class_hostel.setdefault(class_id, set()).add(student_id)
+                if cat_id:
+                    per_class_cat.setdefault((cat_id, class_id), set()).add(student_id)
 
         out = []
         for s in sessions:
             ids = {ss.student_id for ss in s.students}
-            source = per_class_hostel if s.hostellers_only else per_class
             for sc in s.classes:
-                ids |= source.get(sc.class_id, set())
+                ids |= (per_class_cat.get((s.category_id, sc.class_id), set())
+                        if s.category_id else per_class.get(sc.class_id, set()))
             labels = []
             for sc in s.classes:
                 c = classes.get(sc.class_id)
@@ -230,7 +241,8 @@ class SessionService:
                     labels.append(f"{c.name}{c.section or ''}")
             out.append(SessionOut(
                 id=s.id, name=s.name, weekdays=s.weekdays, time=s.time, end_time=s.end_time,
-                kind=s.kind, hostellers_only=s.hostellers_only, active=s.active,
+                kind=s.kind, category_id=s.category_id,
+                category_name=cat_names.get(s.category_id), active=s.active,
                 roster_count=len(ids), class_labels=sorted(labels),
                 teacher_name=owners.get(s.owner_member_id),
                 owner_member_id=s.owner_member_id))
@@ -280,7 +292,7 @@ class SessionService:
         s = SessionModel(org_id=m.org_id, name=body.name,
                          owner_member_id=self._resolve_owner(m, body.owner_member_id),
                          weekdays=body.weekdays, time=body.time, end_time=body.end_time,
-                         kind=body.kind, hostellers_only=body.hostellers_only)
+                         kind=body.kind, category_id=body.category_id)
         self.db.add(s)
         self.db.flush()
         self._set_links(m, s, body.student_ids, body.class_ids)
@@ -294,10 +306,15 @@ class SessionService:
         self._own(m, s)
         if body.owner_member_id is not None:
             s.owner_member_id = self._resolve_owner(m, body.owner_member_id)
-        for field in ("name", "weekdays", "time", "end_time", "kind", "hostellers_only", "active"):
+        for field in ("name", "weekdays", "time", "end_time", "kind", "active"):
             v = getattr(body, field)
             if v is not None:
                 setattr(s, field, v)
+        # `category_id` is the one field whose NULL is meaningful — clearing it
+        # means "open this block to the whole class again". `is not None` above
+        # cannot express that, so it is set from what the caller actually sent.
+        if "category_id" in body.model_fields_set:
+            s.category_id = body.category_id
         self._set_links(m, s, body.student_ids, body.class_ids)
         self.db.flush()
         self.db.refresh(s)
@@ -398,7 +415,7 @@ class SessionService:
                           evidence_url=meeting.evidence_url, roster=roster,
                           media=self._media_out([md for md in media if md.student_id is None]),
                           session_name=s.name, kind_label=cap.label, note=meeting.note,
-                          hostellers_only=s.hostellers_only,
+                          category_id=s.category_id,
                           class_options=class_options,
                           capture=CaptureFlags(
                               roll=cap.roll, class_log=cap.class_log,

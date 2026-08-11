@@ -57,7 +57,10 @@ def test_multiclass_roster_hosteller_filter_and_zero_touch_growth(client, cleanu
     created = client.post("/api/v1/sessions", headers=h, json={
         "name": "Evening prep", "kind": "study", "weekdays": [0, 1, 2, 3, 4],
         "time": "18:00", "end_time": "19:30",
-        "class_ids": [c6["id"], c7["id"]], "hostellers_only": True})
+        # `D-129`: the block names the CATEGORY it serves, by id. The old
+        # `hostellers_only: True` resolved the same thing by matching the
+        # category's NAME against the literal "hosteller".
+        "class_ids": [c6["id"], c7["id"]], "category_id": hosteller})
     assert created.status_code == 200, created.text
     sess = created.json()
     # 3 hostellers across both classes; day scholars filtered out.

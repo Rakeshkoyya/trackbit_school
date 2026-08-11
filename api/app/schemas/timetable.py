@@ -76,7 +76,8 @@ class BlockOut(BaseModel):
     name: str
     kind: str = DEFAULT_BLOCK_KIND
     kind_label: str
-    hostellers_only: bool = False
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
     active: bool = True
     owner_member_id: uuid.UUID | None = None
     staff_member_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -92,7 +93,8 @@ class BlockOut(BaseModel):
 class BlockIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     kind: str = Field(default=DEFAULT_BLOCK_KIND, pattern=_BLOCK_KIND)
-    hostellers_only: bool = False
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
     # Everyone who may run it. Empty = just the owner. Assembly and yoga are
     # taken by whoever is free, which is the whole reason this is a list.
     staff_member_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
@@ -103,7 +105,7 @@ class BlockIn(BaseModel):
 class BlockUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     kind: str | None = Field(default=None, pattern=_BLOCK_KIND)
-    hostellers_only: bool | None = None
+    category_id: uuid.UUID | None = None
     staff_member_ids: list[uuid.UUID] | None = Field(default=None, max_length=30)
     class_ids: list[uuid.UUID] | None = Field(default=None, max_length=30)
     owner_member_id: uuid.UUID | None = None
@@ -127,7 +129,8 @@ class SlotOut(BaseModel):
     block_name: str | None = None
     block_kind: str | None = None
     block_kind_label: str | None = None
-    hostellers_only: bool = False
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
     staff_member_ids: list[uuid.UUID] = Field(default_factory=list)
     staff_names: list[str] = Field(default_factory=list)
     effective_from: date

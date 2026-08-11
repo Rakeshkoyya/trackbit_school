@@ -174,7 +174,9 @@ export function TimetableGrid({ classId, canEdit }: { classId: string; canEdit: 
                                   {blocks.filter(live).map((b) => (
                                     <option key={b.id} value={`${BLOCK_PREFIX}${b.id}`}>
                                       {b.name} · {b.kind_label}
-                                      {b.hostellers_only ? " · hostellers" : ""}
+                                      {b.category_name
+                                        ? ` · ${b.category_name.toLowerCase()}s`
+                                        : ""}
                                     </option>
                                   ))}
                                 </optgroup>
@@ -191,8 +193,9 @@ export function TimetableGrid({ classId, canEdit }: { classId: string; canEdit: 
                             >
                               <span className="inline-flex items-center gap-1">
                                 {cellText(slot)}
-                                {slot?.hostellers_only ? (
-                                  <Home className="h-3 w-3 opacity-60" aria-label="Hostellers only" />
+                                {slot?.category_id ? (
+                                  <Home className="h-3 w-3 opacity-60"
+                                    aria-label={`${slot.category_name ?? "One category"} only`} />
                                 ) : null}
                               </span>
                             </div>

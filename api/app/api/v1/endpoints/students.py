@@ -28,7 +28,7 @@ from app.core.database import get_db
 from app.core.dependencies import (
     feature_gate,
     get_current_member,
-    require_coordinator_up,
+    require_admin,
 )
 from app.core.features import Feature
 from app.schemas.common import MessageResponse
@@ -38,6 +38,7 @@ from app.schemas.student_records import StudentRecordsOut
 from app.schemas.students import (
     CategoryCreate,
     CategoryOut,
+    CategoryUpdate,
     GuardianCreate,
     GuardianOut,
     GuardianUpdate,
@@ -126,7 +127,7 @@ def student_analysis(student_id: uuid.UUID, m: CurrentMember = Depends(get_curre
 
 # ── roster xlsx import (SPRD §5.6) ───────────────────────────────────────────
 @router.get("/import/template")
-def import_template(_: CurrentMember = Depends(require_coordinator_up)):
+def import_template(_: CurrentMember = Depends(require_admin)):
     """V1-2 §6 ②: the blank template the school fills in — generated from the
     importer's own field list, so it can never drift from what commit accepts."""
     return Response(
@@ -137,12 +138,12 @@ def import_template(_: CurrentMember = Depends(require_coordinator_up)):
 
 @router.post("/import/analyze", response_model=RosterAnalyzeOut)
 async def import_analyze(file: UploadFile = File(...),
-                         _: CurrentMember = Depends(require_coordinator_up)):
+                         _: CurrentMember = Depends(require_admin)):
     return roster_import.analyze(await file.read())
 
 
 @router.post("/import/commit", response_model=RosterCommitOut)
-def import_commit(body: RosterCommitIn, m: CurrentMember = Depends(require_coordinator_up),
+def import_commit(body: RosterCommitIn, m: CurrentMember = Depends(require_admin),
                   db: Session = Depends(get_db)):
     return RosterImporter(db).commit(
         m, mapping=body.mapping, rows=body.rows, academic_year_id=body.academic_year_id)
@@ -155,22 +156,36 @@ def list_categories(m: CurrentMember = Depends(get_current_member), db: Session 
 
 
 @router.post("/categories", response_model=CategoryOut)
-def create_category(body: CategoryCreate, m: CurrentMember = Depends(require_coordinator_up),
+def create_category(body: CategoryCreate, m: CurrentMember = Depends(require_admin),
                     db: Session = Depends(get_db)):
     return StudentService(db).create_category(m, body)
 
 
 @router.post("/categories/seed-defaults", response_model=list[CategoryOut])
-def seed_default_categories(m: CurrentMember = Depends(require_coordinator_up),
+def seed_default_categories(m: CurrentMember = Depends(require_admin),
                             db: Session = Depends(get_db)):
     return StudentService(db).ensure_default_categories(m)
 
 
-@router.delete("/categories/{category_id}", response_model=MessageResponse)
-def delete_category(category_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+@router.patch("/categories/{category_id}", response_model=CategoryOut)
+def rename_category(category_id: uuid.UUID, body: CategoryUpdate,
+                    m: CurrentMember = Depends(require_admin),
                     db: Session = Depends(get_db)):
-    StudentService(db).delete_category(m, category_id)
-    return MessageResponse(message="Category deleted.")
+    """`D-129`: renaming is safe because everything references the category by
+    id. Before it, a block serving hostellers found them by matching this very
+    string, so a rename here emptied every hostel roster in the school."""
+    return StudentService(db).rename_category(m, category_id, body.name)
+
+
+@router.delete("/categories/{category_id}", response_model=MessageResponse)
+def delete_category(category_id: uuid.UUID, force: bool = False,
+                    m: CurrentMember = Depends(require_admin),
+                    db: Session = Depends(get_db)):
+    """Refused with a 409 and the counts while the category is still in use;
+    `?force=true` is the confirmed removal, which un-assigns every student on it
+    and reopens every block restricted to it."""
+    StudentService(db).delete_category(m, category_id, force=force)
+    return MessageResponse(message="Category removed.")
 
 
 # ── students ─────────────────────────────────────────────────────────────────
@@ -185,7 +200,7 @@ def list_students(
 
 
 @router.post("", response_model=StudentDetailOut)
-def create_student(body: StudentCreate, m: CurrentMember = Depends(require_coordinator_up),
+def create_student(body: StudentCreate, m: CurrentMember = Depends(require_admin),
                    db: Session = Depends(get_db)):
     return StudentService(db).create_student(m, body)
 
@@ -198,12 +213,12 @@ def get_student(student_id: uuid.UUID, m: CurrentMember = Depends(get_current_me
 
 @router.patch("/{student_id}", response_model=StudentDetailOut)
 def update_student(student_id: uuid.UUID, body: StudentUpdate,
-                   m: CurrentMember = Depends(require_coordinator_up), db: Session = Depends(get_db)):
+                   m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return StudentService(db).update_student(m, student_id, body)
 
 
 @router.delete("/{student_id}", response_model=MessageResponse)
-def delete_student(student_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+def delete_student(student_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                    db: Session = Depends(get_db)):
     StudentService(db).delete_student(m, student_id)
     return MessageResponse(message="Student removed.")
@@ -212,18 +227,18 @@ def delete_student(student_id: uuid.UUID, m: CurrentMember = Depends(require_coo
 # ── guardians ────────────────────────────────────────────────────────────────
 @router.post("/{student_id}/guardians", response_model=GuardianOut)
 def add_guardian(student_id: uuid.UUID, body: GuardianCreate,
-                 m: CurrentMember = Depends(require_coordinator_up), db: Session = Depends(get_db)):
+                 m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return StudentService(db).add_guardian(m, student_id, body)
 
 
 @router.patch("/guardians/{guardian_id}", response_model=GuardianOut)
 def update_guardian(guardian_id: uuid.UUID, body: GuardianUpdate,
-                    m: CurrentMember = Depends(require_coordinator_up), db: Session = Depends(get_db)):
+                    m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return StudentService(db).update_guardian(m, guardian_id, body)
 
 
 @router.delete("/guardians/{guardian_id}", response_model=MessageResponse)
-def delete_guardian(guardian_id: uuid.UUID, m: CurrentMember = Depends(require_coordinator_up),
+def delete_guardian(guardian_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
                     db: Session = Depends(get_db)):
     StudentService(db).delete_guardian(m, guardian_id)
     return MessageResponse(message="Guardian removed.")

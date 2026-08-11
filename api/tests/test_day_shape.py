@@ -137,7 +137,10 @@ def test_a_day_out_of_order_is_refused(client, cleanup):
 def test_a_block_can_hold_a_period_and_pulls_the_class_in(client, cleanup):
     s = _school(client, cleanup)
     _set_day(client, s)
-    b = _block(client, s, hostellers_only=True)
+    cats = client.post("/api/v1/students/categories/seed-defaults",
+                       headers=s["h"]).json()
+    hosteller = next(c["id"] for c in cats if c["name"] == "Hosteller")
+    b = _block(client, s, category_id=hosteller)
     assert b["kind_label"] == "Homework class"
 
     grid = client.put("/api/v1/timetable/slot", headers=s["h"], json={
@@ -147,7 +150,10 @@ def test_a_block_can_hold_a_period_and_pulls_the_class_in(client, cleanup):
     slot = next(x for x in grid.json()["slots"] if x["period_no"] == 3)
     assert slot["slot_type"] == "block"
     assert slot["block_name"] == "Homework class"
-    assert slot["hostellers_only"] is True
+    # `D-129`: the slot names the category rather than carrying a boolean, so
+    # the grid can say "Hostellers" — or "Transport" — instead of a checked box.
+    assert slot["category_id"] == hosteller
+    assert slot["category_name"] == "Hosteller"
     # The grid says which classes are in the block — no second place to say it.
     assert s["class"]["id"] in client.get(
         f"/api/v1/timetable/blocks/{b['id']}", headers=s["h"]).json()["class_ids"]

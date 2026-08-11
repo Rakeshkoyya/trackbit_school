@@ -56,7 +56,17 @@ class Session(Base, UUIDPKMixin, CreatedAtMixin):
     # widened this from study|homework|activity; never branch on the string here
     # or in a service, read `day_shape.capture_for(kind)`.
     kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="study")
-    # When class-linked: restrict the computed roster to the "Hosteller" category.
+    # `D-129` — when class-linked, restrict the computed roster to ONE student
+    # category. A reference, not a flag: the school edits its categories in
+    # Settings, and a block that means "hostellers" must keep meaning it after
+    # somebody renames the category to "Hostel". NULL = the whole class.
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("student_categories.id", ondelete="SET NULL"),
+        nullable=True, index=True)
+    # ⚠️ FROZEN (`c8d9e0f1a2b3`). Superseded by `category_id`; kept only so the
+    # migration can run ahead of the code deploy. Nothing reads or writes it —
+    # do not reintroduce it, and drop the column once no deployed build selects
+    # it.
     hostellers_only: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")

@@ -7,12 +7,20 @@ opt-out consent flag honoured by all outbound messaging (SPRD §3.4 / §7).
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.context import CurrentMember
-from app.core.exceptions import ConflictError, NotFoundError
-from app.models import Guardian, SchoolClass, Student, StudentCategory
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.models import (
+    Guardian,
+    SchoolClass,
+    Student,
+    StudentCategory,
+)
+from app.models import (
+    Session as SessionModel,
+)
 from app.schemas.students import (
     CategoryCreate,
     CategoryOut,
@@ -42,11 +50,67 @@ class StudentService:
 
     # ── categories ───────────────────────────────────────────────────────────
     def list_categories(self, m: CurrentMember) -> list[CategoryOut]:
-        rows = self.db.scalars(
+        """Every category the school has, with what currently depends on it.
+
+        The counts are not decoration: Settings has to be able to say *"12
+        students and 2 blocks use this"* **before** somebody removes it, because
+        removing one silently un-assigns every student on it (`D-129`).
+        """
+        rows = list(self.db.scalars(
             select(StudentCategory).where(StudentCategory.org_id == m.org_id)
             .order_by(StudentCategory.name)
+        ))
+        ids = [r.id for r in rows]
+        students: dict[uuid.UUID, int] = {}
+        blocks: dict[uuid.UUID, int] = {}
+        if ids:
+            # Two grouped queries, never one per row — the DB may be remote.
+            for cid, n in self.db.execute(
+                    select(Student.category_id, func.count(Student.id))
+                    .where(Student.org_id == m.org_id,
+                           Student.category_id.in_(ids),
+                           Student.status == "active")
+                    .group_by(Student.category_id)).all():
+                students[cid] = n
+            for cid, n in self.db.execute(
+                    select(SessionModel.category_id, func.count(SessionModel.id))
+                    .where(SessionModel.org_id == m.org_id,
+                           SessionModel.category_id.in_(ids))
+                    .group_by(SessionModel.category_id)).all():
+                blocks[cid] = n
+        return [
+            CategoryOut(id=r.id, name=r.name,
+                        student_count=students.get(r.id, 0),
+                        block_count=blocks.get(r.id, 0))
+            for r in rows
+        ]
+
+    def rename_category(self, m: CurrentMember, category_id: uuid.UUID,
+                        name: str) -> CategoryOut:
+        """Rename in place — every reference is by id, so nothing breaks.
+
+        This is the whole point of `D-129`. Before it, a block that served
+        hostellers found them by matching the category NAME against the literal
+        "hosteller", so this rename would have emptied every hostel roster in
+        the school without a word.
+        """
+        cat = self.db.scalar(
+            select(StudentCategory).where(
+                StudentCategory.id == category_id, StudentCategory.org_id == m.org_id
+            )
         )
-        return [CategoryOut.model_validate(r) for r in rows]
+        if cat is None:
+            raise NotFoundError("Category")
+        name = name.strip()
+        clash = self.db.scalar(
+            select(StudentCategory.id).where(
+                StudentCategory.org_id == m.org_id, StudentCategory.name == name,
+                StudentCategory.id != category_id))
+        if clash:
+            raise ConflictError(f"“{name}” already exists.", code="duplicate")
+        cat.name = name
+        self.db.flush()
+        return CategoryOut.model_validate(cat)
 
     def ensure_default_categories(self, m: CurrentMember) -> list[CategoryOut]:
         """Idempotently seed the two default fee categories for a new org."""
@@ -74,7 +138,16 @@ class StudentService:
         self.db.flush()
         return CategoryOut.model_validate(cat)
 
-    def delete_category(self, m: CurrentMember, category_id: uuid.UUID) -> None:
+    def delete_category(self, m: CurrentMember, category_id: uuid.UUID,
+                        force: bool = False) -> None:
+        """Remove a category. Refused while it is in use, unless forced.
+
+        The FK is ON DELETE SET NULL, so deleting one quietly un-assigns every
+        student on it and reopens every block restricted to it. That is a fine
+        thing to allow and a terrible thing to do by accident, so a category
+        that is in use needs `force` — and the error carries the counts, which
+        is what the confirmation on screen is built from.
+        """
         cat = self.db.scalar(
             select(StudentCategory).where(
                 StudentCategory.id == category_id, StudentCategory.org_id == m.org_id
@@ -82,6 +155,24 @@ class StudentService:
         )
         if cat is None:
             raise NotFoundError("Category")
+        if not force:
+            students = self.db.scalar(
+                select(func.count(Student.id)).where(
+                    Student.org_id == m.org_id, Student.category_id == category_id,
+                    Student.status == "active")) or 0
+            blocks = self.db.scalar(
+                select(func.count(SessionModel.id)).where(
+                    SessionModel.org_id == m.org_id,
+                    SessionModel.category_id == category_id)) or 0
+            if students or blocks:
+                bits = []
+                if students:
+                    bits.append(f"{students} student{'' if students == 1 else 's'}")
+                if blocks:
+                    bits.append(f"{blocks} block{'' if blocks == 1 else 's'}")
+                raise ConflictError(
+                    f"“{cat.name}” is still used by {' and '.join(bits)}. "
+                    "Removing it un-assigns them.", code="category_in_use")
         self.db.delete(cat)  # students.category_id -> NULL via FK ON DELETE SET NULL
 
     # ── students ─────────────────────────────────────────────────────────────
@@ -97,16 +188,24 @@ class StudentService:
         q = q.order_by(Student.full_name)
         return [StudentOut.model_validate(r) for r in self.db.scalars(q)]
 
-    def create_student(self, m: CurrentMember, body: StudentCreate) -> StudentDetailOut:
-        dup = self.db.scalar(
-            select(Student.id).where(
-                Student.org_id == m.org_id, Student.admission_no == body.admission_no
-            )
+    def _assert_admission_free(
+        self, org_id: uuid.UUID, admission_no: str, *, exclude: uuid.UUID | None = None
+    ) -> None:
+        """`(org_id, admission_no)` is unique, so both the create and the
+        correction have to ask. `exclude` is the student being edited — without
+        it, re-saving a record with its own number reads as a clash."""
+        q = select(Student.id).where(
+            Student.org_id == org_id, Student.admission_no == admission_no
         )
-        if dup:
+        if exclude is not None:
+            q = q.where(Student.id != exclude)
+        if self.db.scalar(q):
             raise ConflictError(
-                f"Admission no. {body.admission_no} is already used.", code="duplicate"
+                f"Admission no. {admission_no} is already used.", code="duplicate"
             )
+
+    def create_student(self, m: CurrentMember, body: StudentCreate) -> StudentDetailOut:
+        self._assert_admission_free(m.org_id, body.admission_no)
         if body.class_id is not None:
             self._scoped_class(m.org_id, body.class_id)
         if body.category_id is not None:
@@ -128,6 +227,18 @@ class StudentService:
     ) -> StudentDetailOut:
         student = self._student(m.org_id, student_id)
         data = body.model_dump(exclude_unset=True)
+        # A correction, not a rename with consequences: every foreign key in the
+        # product points at `students.id`. The one thing that does follow the
+        # number is the parent portal sign-in, which looks a child up by it
+        # (`services/parent_auth.py`) — hence the warning on the edit form.
+        if data.get("admission_no") is not None:
+            data["admission_no"] = data["admission_no"].strip()
+            if not data["admission_no"]:
+                raise ValidationError("An admission number cannot be blank.")
+            if data["admission_no"] != student.admission_no:
+                self._assert_admission_free(
+                    m.org_id, data["admission_no"], exclude=student_id
+                )
         if data.get("class_id") is not None:
             self._scoped_class(m.org_id, data["class_id"])
         if data.get("category_id") is not None:

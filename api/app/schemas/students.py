@@ -13,10 +13,18 @@ class CategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
 
 
+class CategoryUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+
+
 class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     name: str
+    # What depends on this category right now. Settings shows both before
+    # offering to remove one (`D-129`); zero is a real answer, not missing data.
+    student_count: int = 0
+    block_count: int = 0
 
 
 # ── Guardian ─────────────────────────────────────────────────────────────────
@@ -60,6 +68,11 @@ class StudentCreate(BaseModel):
 
 
 class StudentUpdate(BaseModel):
+    # Correctable in place, deliberately: an admission number is transcribed from
+    # a paper register at import and a wrong one is a typo, not a decision, so
+    # law 3's append-only rule does not apply. `update_student` re-checks it
+    # against the org's unique constraint — without that the PATCH is a 500.
+    admission_no: str | None = Field(default=None, min_length=1, max_length=32)
     full_name: str | None = Field(default=None, min_length=1, max_length=120)
     class_id: uuid.UUID | None = None
     roll_no: str | None = Field(default=None, max_length=16)

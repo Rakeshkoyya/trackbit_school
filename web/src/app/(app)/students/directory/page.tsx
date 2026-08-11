@@ -93,6 +93,15 @@ function AddStudentSheet({ open, onOpenChange }: { open: boolean; onOpenChange: 
               <option value="">—</option>
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {categories.length === 0 ? (
+              // The real reason a student's category reads "—" is almost always
+              // that the school has not defined any yet. Say that, and say where
+              // to fix it, rather than rendering an empty dropdown (`D-129`).
+              <p className="mt-1 text-xs text-muted-foreground">
+                No categories yet — add them in{" "}
+                <Link href="/setup/settings" className="underline">Settings</Link>.
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="rounded-md border border-border p-3">

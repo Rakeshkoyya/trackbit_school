@@ -5,6 +5,7 @@ import { Copy, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { StudentCategoriesSection } from "@/components/settings/student-categories-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -758,6 +759,11 @@ export function SettingsScreen() {
       <SchoolSection s={s} />
       <ParentPortalSection s={s} />
       <CaptureSection s={s} />
+      {/* `D-129` — the ONE student-category vocabulary. Sits beside the other
+          school-wide vocabularies (exam types, timesheet categories) because it
+          is the same kind of thing: a list the school owns, referenced by id
+          from students, fee structures and timetable blocks. */}
+      <StudentCategoriesSection />
       <ExamTypesSection />
       <BandSetupSection />
       <WorkCategoriesSection s={s} />

@@ -46,9 +46,12 @@ function BlockSheet({ open, onOpenChange, editing }: {
   const [endTime, setEndTime] = useState(editing?.end_time ?? "19:00");
   const [owner, setOwner] = useState<string>(editing?.owner_member_id ?? "");
   const [classIds, setClassIds] = useState<Set<string>>(new Set());
-  const [hostellersOnly, setHostellersOnly] = useState(editing?.hostellers_only ?? true);
+  const [categoryId, setCategoryId] = useState<string>(editing?.category_id ?? "");
   const [loadedDetail, setLoadedDetail] = useState(false);
 
+  // `D-129`: one category list, shared with Settings, students and fees.
+  const { data: categories = [] } = useQuery({
+    queryKey: ["categories"], queryFn: schoolApi.categories });
   const { data: classes = [] } = useQuery({
     queryKey: ["classes", yearId], queryFn: () => schoolApi.classes(yearId || undefined), enabled: open });
   const { data: membersRes } = useQuery({
@@ -66,7 +69,7 @@ function BlockSheet({ open, onOpenChange, editing }: {
 
   const body = () => ({
     name: name.trim(), kind, weekdays: days, time, end_time: endTime,
-    class_ids: [...classIds], hostellers_only: hostellersOnly,
+    class_ids: [...classIds], category_id: categoryId || null,
     owner_member_id: owner || null,
   });
   const done = (msg: string) => {
@@ -150,9 +153,15 @@ function BlockSheet({ open, onOpenChange, editing }: {
               </button>
             ))}
           </div>
-          <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm">
-            <input type="checkbox" checked={hostellersOnly} onChange={(e) => setHostellersOnly(e.target.checked)} />
-            Hostellers only
+          <label className="mt-2 block text-sm">
+            <span className="mb-1 block text-muted-foreground">Who it is for</span>
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
+                    className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm">
+              <option value="">Everyone in the class</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>Only {c.name.toLowerCase()}s</option>
+              ))}
+            </select>
           </label>
           <p className="mt-1 text-xs text-muted-foreground">
             The roster follows the class list — new admissions join automatically.

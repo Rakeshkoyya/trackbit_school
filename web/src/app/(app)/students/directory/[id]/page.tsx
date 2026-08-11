@@ -83,13 +83,15 @@ function IdentityBlock({ data, canEdit }: { data: StudentDetail; canEdit: boolea
     queryKey: ["categories"], queryFn: schoolApi.categories, enabled: editing,
   });
   const [form, setForm] = useState({
-    full_name: data.full_name, roll_no: data.roll_no ?? "",
+    admission_no: data.admission_no, full_name: data.full_name,
+    roll_no: data.roll_no ?? "",
     class_id: data.class_id ?? "", category_id: data.category_id ?? "",
     date_of_birth: data.date_of_birth ?? "", status: data.status,
   });
 
   const save = useMutation({
     mutationFn: () => schoolApi.updateStudent(data.id, {
+      admission_no: form.admission_no.trim(),
       full_name: form.full_name.trim(), roll_no: form.roll_no.trim() || null,
       class_id: form.class_id || null, category_id: form.category_id || null,
       date_of_birth: form.date_of_birth || null, status: form.status,
@@ -135,11 +137,27 @@ function IdentityBlock({ data, canEdit }: { data: StudentDetail; canEdit: boolea
       </Button>
     }>
       <form className="space-y-3" onSubmit={(e) => {
-        e.preventDefault(); if (form.full_name.trim()) save.mutate();
+        e.preventDefault();
+        if (form.full_name.trim() && form.admission_no.trim()) save.mutate();
       }}>
-        <div><Label>Full name</Label>
-          <Input value={form.full_name} required
-            onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label>Admission no.</Label>
+            <Input value={form.admission_no} required maxLength={32}
+              onChange={(e) => setForm({ ...form, admission_no: e.target.value })} />
+          </div>
+          <div><Label>Full name</Label>
+            <Input value={form.full_name} required
+              onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></div>
+        </div>
+        {form.admission_no.trim() !== data.admission_no ? (
+          // The one thing downstream of this number: the parent portal looks a
+          // child up by it to sign in. Nothing else does — every foreign key in
+          // the product points at the student's id.
+          <p className="text-xs text-warning">
+            This is what a parent types to sign in — tell them the new number.
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-2">
           <div><Label>Roll no.</Label>
             <Input value={form.roll_no}
@@ -175,6 +193,15 @@ function IdentityBlock({ data, canEdit }: { data: StudentDetail; canEdit: boolea
               <option value="">—</option>
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {categories.length === 0 ? (
+              // The real reason a student's category reads "—" is almost always
+              // that the school has not defined any yet. Say that, and say where
+              // to fix it, rather than rendering an empty dropdown (`D-129`).
+              <p className="mt-1 text-xs text-muted-foreground">
+                No categories yet — add them in{" "}
+                <Link href="/setup/settings" className="underline">Settings</Link>.
+              </p>
+            ) : null}
           </div>
         </div>
         <div>
@@ -187,7 +214,7 @@ function IdentityBlock({ data, canEdit }: { data: StudentDetail; canEdit: boolea
           </select>
         </div>
         <Button type="submit" className="w-full"
-          disabled={save.isPending || !form.full_name.trim()}>
+          disabled={save.isPending || !form.full_name.trim() || !form.admission_no.trim()}>
           {save.isPending ? "Saving…" : "Save changes"}
         </Button>
       </form>

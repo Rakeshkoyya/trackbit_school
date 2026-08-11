@@ -2,12 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Sparkles, Upload } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { BellEditor } from "@/components/school/bell-editor";
-import { ClassSelect, useClassSubjectPick } from "@/components/school/plan-shared";
+import {
+  ClassTabs,
+  useClassSubject,
+} from "@/components/school/class-subject-picker";
 import { TeacherWeekGrid, TimetableGrid } from "@/components/school/timetable-grid";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Button } from "@/components/ui/button";
@@ -27,8 +31,10 @@ import type { TimetableBlock } from "@/lib/school-types";
  *  A block carries no weekdays or times of its own: the grid says when it runs
  *  (`D-113`). What it needs from the admin is what it *is* (the kind, which
  *  decides what the teacher is asked to capture), who may run it, and whether
- *  it is only for hostellers — which is the whole day-scholar / hosteller split
- *  in one checkbox.
+ *  and **which students it is for** — a category from the school's own list
+ *  (`D-129`), not a hostellers-only checkbox. The checkbox could ask exactly one
+ *  question; a school with a Transport or Staff-ward category could not restrict
+ *  a block to it at all.
  */
 function BlockSheet({ open, onOpenChange, editing }: {
   open: boolean; onOpenChange: (v: boolean) => void; editing: TimetableBlock | null;
@@ -36,7 +42,7 @@ function BlockSheet({ open, onOpenChange, editing }: {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [kind, setKind] = useState<string>(DEFAULT_BLOCK_KIND);
-  const [hostellersOnly, setHostellersOnly] = useState(false);
+  const [categoryId, setCategoryId] = useState<string>("");
   const [staff, setStaff] = useState<Set<string>>(new Set());
   const [seeded, setSeeded] = useState<string | null>(null);
 
@@ -48,13 +54,17 @@ function BlockSheet({ open, onOpenChange, editing }: {
     if (open) {
       setName(editing?.name ?? "");
       setKind(editing?.kind ?? DEFAULT_BLOCK_KIND);
-      setHostellersOnly(editing?.hostellers_only ?? false);
+      setCategoryId(editing?.category_id ?? "");
       setStaff(new Set(editing?.staff_member_ids ?? []));
     }
   }
 
   const { data: membersRes } = useQuery({
     queryKey: ["members"], queryFn: appApi.members, enabled: open });
+  // `D-129`: the ONE category list. The same rows the fee structures and the
+  // student directory read — add one in Settings and it appears here.
+  const { data: categories = [] } = useQuery({
+    queryKey: ["categories"], queryFn: schoolApi.categories, enabled: open });
   const teachers = (membersRes?.members ?? []).filter((m) => m.status === "active" && m.member_id);
 
   const done = (msg: string) => {
@@ -64,7 +74,7 @@ function BlockSheet({ open, onOpenChange, editing }: {
     onOpenChange(false);
   };
   const body = () => ({
-    name: name.trim(), kind, hostellers_only: hostellersOnly,
+    name: name.trim(), kind, category_id: categoryId || null,
     staff_member_ids: [...staff],
   });
   const create = useMutation({
@@ -107,14 +117,20 @@ function BlockSheet({ open, onOpenChange, editing }: {
             The teacher will be asked for {asks.join(", ")}.
           </span>
         </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" checked={hostellersOnly} className="mt-0.5"
-                 onChange={(e) => setHostellersOnly(e.target.checked)} />
-          <span>
-            Hostellers only
-            <span className="block text-xs text-muted-foreground">
-              Day scholars go home; only hostellers appear on the roll.
-            </span>
+        <label className="block text-sm">
+          <span className="mb-1 block text-muted-foreground">Who it is for</span>
+          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
+                  className="w-full rounded-md border border-border bg-card px-2 py-2 text-sm">
+            <option value="">Everyone in the class</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>Only {c.name.toLowerCase()}s</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {categoryId
+              ? "Only students in this category appear on the roll — it stays right when somebody is admitted, and when the category is renamed."
+              : "Every student in the classes on the grid appears on the roll."}
+            {" "}Categories are edited in Settings.
           </span>
         </label>
         <div className="text-sm">
@@ -199,7 +215,7 @@ function BlocksPanel() {
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {b.kind_label}
-                  {b.hostellers_only ? " · hostellers only" : ""}
+                  {b.category_name ? ` · ${b.category_name.toLowerCase()}s only` : ""}
                   {b.slot_count
                     ? ` · ${b.slot_count} period${b.slot_count === 1 ? "" : "s"} on the grid`
                     : " · not on the grid yet"}
@@ -371,7 +387,13 @@ function ClashBanner() {
 
 function TimetableAdmin() {
   const { yearId } = useYear();
-  const { classes, classId, setClassId } = useClassSubjectPick(yearId);
+  // The shared picker, not `useClassSubjectPick`: that one takes `classes[0]`
+  // in the SERVER's order, which is text — so a school with a class 11 and a
+  // class 3 opened Timetable on "11-A", and this school's 11-A has no subjects
+  // at all. Every period dropdown then offered only blocks, and the screen read
+  // as a timetable with no classes in it. This hook sorts numerically AND
+  // lands on the first class that actually has subjects to place.
+  const { classes, classId, setClassId, subjects, loading } = useClassSubject(yearId);
   const qc = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
@@ -397,13 +419,35 @@ function TimetableAdmin() {
           title="Timetable"
           subtitle="The shape of the day, and what runs in each period"
         />
-        <div className="flex items-center gap-2">
-          <YearSwitcher />
-          {tab === "grid" ? (
-            <ClassSelect classes={classes} classId={classId} onChange={setClassId} />
-          ) : null}
-        </div>
+        <YearSwitcher />
       </div>
+
+      {/* The class picker was a `<select>` narrow enough that a school could
+          not see how many classes it had, and reaching one meant opening a
+          menu that read in string order (11, 12, 3, 5). The grid below is the
+          whole screen, so the control that chooses WHICH grid should read like
+          a tab bar — the same chips Plan → Syllabus uses, so the two tabs
+          navigate identically. It sits on its own row because it scopes
+          everything under it. */}
+      {tab === "grid" ? (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-card p-2">
+          <span className="w-14 shrink-0 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+            Class
+          </span>
+          {/* The row must never be a labelled EMPTY box. `ClassTabs` renders
+              nothing when it has no classes, and the classes arrive a moment
+              after the grid does (different query) — so for that moment this
+              read as "the class picker is missing" rather than "still
+              loading", which is exactly how it was reported. Say which it is. */}
+          {classes.length ? (
+            <ClassTabs classes={classes} classId={classId} onChange={setClassId} />
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {loading ? "Loading classes…" : "No classes in this year yet."}
+            </span>
+          )}
+        </div>
+      ) : null}
 
       <div className="mb-4 flex gap-1 border-b border-border">
         {([
@@ -443,6 +487,20 @@ function TimetableAdmin() {
             </Button>
           </div>
           <ClashBanner />
+          {/* A class with no subjects has a grid whose every dropdown offers
+              only blocks — which reads as "the timetable is broken" rather than
+              "nobody has said what this class studies". Three of this school's
+              seven classes are in that state, so it is not an edge case. */}
+          {subjects.length === 0 ? (
+            <p className="mb-3 rounded-lg border border-dashed border-warning bg-warning-soft/30 px-4 py-3 text-sm text-warning">
+              This class has no subjects yet, so there is nothing to put in its
+              periods.{" "}
+              <Link href="/plan/syllabus" className="underline">
+                Add its subjects
+              </Link>{" "}
+              and they appear in every dropdown below.
+            </p>
+          ) : null}
           <TimetableGrid classId={classId} canEdit />
           <ImportSheet classId={classId} open={importOpen} onOpenChange={setImportOpen} />
           {yearId ? <GenerateSheet yearId={yearId} open={generateOpen} onOpenChange={setGenerateOpen} /> : null}

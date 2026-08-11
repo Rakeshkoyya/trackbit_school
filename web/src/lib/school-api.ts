@@ -709,7 +709,14 @@ export const schoolApi = {
   categories: () => api.get<StudentCategory[]>("/students/categories"),
   seedCategories: () => api.post<StudentCategory[]>("/students/categories/seed-defaults"),
   createCategory: (name: string) => api.post<StudentCategory>("/students/categories", { name }),
-  deleteCategory: (id: string) => api.del<{ message: string }>(`/students/categories/${id}`),
+  /** `D-129`: renaming is safe — everything references the category by id. */
+  renameCategory: (id: string, name: string) =>
+    api.patch<StudentCategory>(`/students/categories/${id}`, { name }),
+  /** 409 with the counts while it is still in use; `force` is the confirmed
+   *  removal, which un-assigns every student on it. */
+  deleteCategory: (id: string, force = false) =>
+    api.del<{ message: string }>(
+      `/students/categories/${id}${force ? "?force=true" : ""}`),
 
   students: (p: { class_id?: string; q?: string } = {}) =>
     api.get<StudentListItem[]>(`/students${qs({ class_id: p.class_id, q: p.q })}`),
@@ -794,11 +801,11 @@ export const schoolApi = {
   // ── TT-2: blocks (a period that is not a subject) ─────────────────────────
   blocks: () => api.get<import("@/lib/school-types").TimetableBlock[]>("/timetable/blocks"),
   createBlock: (b: {
-    name: string; kind: string; hostellers_only?: boolean;
+    name: string; kind: string; category_id?: string | null;
     staff_member_ids?: string[]; class_ids?: string[]; owner_member_id?: string | null;
   }) => api.post<import("@/lib/school-types").TimetableBlock>("/timetable/blocks", b),
   updateBlock: (id: string, b: {
-    name?: string; kind?: string; hostellers_only?: boolean;
+    name?: string; kind?: string; category_id?: string | null;
     staff_member_ids?: string[]; class_ids?: string[];
     owner_member_id?: string | null; active?: boolean;
   }) => api.patch<import("@/lib/school-types").TimetableBlock>(`/timetable/blocks/${id}`, b),

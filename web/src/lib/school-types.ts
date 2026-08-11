@@ -288,7 +288,11 @@ export interface TimetableSlot {
   block_name: string | null;
   block_kind: string | null;
   block_kind_label: string | null;
-  hostellers_only: boolean;
+  /** `D-129` — the student category this block serves, or null for the whole
+   *  class. Replaces the old `hostellers_only` boolean, which could only ask
+   *  one question and resolved it by matching the category NAME. */
+  category_id: string | null;
+  category_name: string | null;
   staff_member_ids: string[];
   staff_names: string[];
   effective_from: string;
@@ -378,7 +382,11 @@ export interface TimetableBlock {
   name: string;
   kind: string;
   kind_label: string;
-  hostellers_only: boolean;
+  /** `D-129` — the student category this block serves, or null for the whole
+   *  class. Replaces the old `hostellers_only` boolean, which could only ask
+   *  one question and resolved it by matching the category NAME. */
+  category_id: string | null;
+  category_name: string | null;
   active: boolean;
   owner_member_id: string | null;
   staff_member_ids: string[];
@@ -477,7 +485,11 @@ export interface SessionSummary {
   time: string | null;
   end_time: string | null;
   kind: SessionKind;
-  hostellers_only: boolean;
+  /** `D-129` — the student category this block serves, or null for the whole
+   *  class. Replaces the old `hostellers_only` boolean, which could only ask
+   *  one question and resolved it by matching the category NAME. */
+  category_id: string | null;
+  category_name: string | null;
   active: boolean;
   roster_count: number;
   class_labels: string[];
@@ -499,7 +511,7 @@ export interface SessionWrite {
   kind?: SessionKind;
   student_ids?: string[];
   class_ids?: string[];
-  hostellers_only?: boolean;
+  category_id?: string | null;
   owner_member_id?: string | null;
 }
 
@@ -747,7 +759,11 @@ export interface Meeting {
   kind_label: string;
   /** The block's class log ("what we covered"), on the kinds that keep one. */
   note: string | null;
-  hostellers_only: boolean;
+  /** `D-129` — the student category this block serves, or null for the whole
+   *  class. Replaces the old `hostellers_only` boolean, which could only ask
+   *  one question and resolved it by matching the category NAME. */
+  category_id: string | null;
+  category_name: string | null;
   /** Prefer this over the client-side table: the server knows the real kind. */
   capture: CaptureFlags;
   /** Classes present tonight — the homework screen's first row of tabs. */
@@ -1206,9 +1222,16 @@ export interface ClassAllocation {
   rows: AllocationRow[];
 }
 
+/** `D-129` — the ONE student-category vocabulary: hosteller, day scholar, and
+ *  whatever else a school defines. Edited in Settings, referenced by id from
+ *  students, fee structures and timetable blocks alike. */
 export interface StudentCategory {
   id: string;
   name: string;
+  /** What depends on it right now — Settings shows both before offering to
+   *  remove one. Zero is a real answer, not missing data. */
+  student_count: number;
+  block_count: number;
 }
 
 export interface Guardian {

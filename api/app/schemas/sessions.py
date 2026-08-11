@@ -20,7 +20,8 @@ class SessionCreate(BaseModel):
     kind: str = Field(default="study", pattern=_KIND)
     student_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)
     class_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
-    hostellers_only: bool = False
+    # `D-129`: restrict the computed roster to one student category. NULL = all.
+    category_id: uuid.UUID | None = None
     # Admin assigns the teacher who runs the block; non-admins always own their own.
     owner_member_id: uuid.UUID | None = None
 
@@ -33,7 +34,7 @@ class SessionUpdate(BaseModel):
     kind: str | None = Field(default=None, pattern=_KIND)
     student_ids: list[uuid.UUID] | None = Field(default=None, max_length=200)
     class_ids: list[uuid.UUID] | None = Field(default=None, max_length=30)
-    hostellers_only: bool | None = None
+    category_id: uuid.UUID | None = None
     owner_member_id: uuid.UUID | None = None
     active: bool | None = None
 
@@ -45,7 +46,8 @@ class SessionOut(BaseModel):
     time: str | None
     end_time: str | None = None
     kind: str = "study"
-    hostellers_only: bool = False
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
     active: bool
     roster_count: int
     class_labels: list[str] = Field(default_factory=list)
@@ -140,7 +142,8 @@ class MeetingOut(BaseModel):
     kind_label: str = ""
     #: The block's class log ("what we covered"), where the kind keeps one.
     note: str | None = None
-    hostellers_only: bool = False
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
     capture: CaptureFlags = Field(default_factory=CaptureFlags)
     class_options: list[ClassOption] = Field(default_factory=list)
 
