@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthShell } from "@/components/auth/auth-shell";
+import { landingForRole } from "@/components/layout/nav-items";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,7 +48,10 @@ export default function SetPasswordPage() {
     setBusy(true);
     try {
       await setPassword(pw, name);
-      router.replace("/tasks");
+      // `me` is already loaded — this screen cannot be reached without it —
+      // so the first thing a teacher sees after choosing her password is her
+      // own day, not the task board.
+      router.replace(landingForRole(me?.org_role, me?.is_super_admin));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not set password.");
     } finally {

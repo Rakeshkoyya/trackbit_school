@@ -7,10 +7,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { landingForRole } from "@/components/layout/nav-items";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api-client";
 import { appApi } from "@/lib/app-api";
 
@@ -182,6 +184,7 @@ function FirstTaskStep({ onNext }: { onNext: () => void }) {
 
 function DoneStep() {
   const router = useRouter();
+  const { me } = useAuth();
   return (
     <div className="text-center">
       <div className="tb-pop-in mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#e7efe9]">
@@ -189,9 +192,12 @@ function DoneStep() {
       </div>
       <h1 className="mt-5 text-2xl font-semibold tracking-tight">You&apos;re all set</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Your team and tasks live on your Home screen. That&apos;s where the day starts.
+        {me?.org_role === "teacher"
+          ? "My Day is where your day starts — every period, in order."
+          : "The dashboard is where the day starts — it opens with today's report."}
       </p>
-      <Button size="lg" className="mt-8" onClick={() => router.replace("/tasks")}>
+      <Button size="lg" className="mt-8"
+        onClick={() => router.replace(landingForRole(me?.org_role, me?.is_super_admin))}>
         Get started <ArrowRight className="h-4 w-4" />
       </Button>
     </div>

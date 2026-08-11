@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthShell } from "@/components/auth/auth-shell";
+import { landingForRole } from "@/components/layout/nav-items";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -33,7 +34,9 @@ export function ResetClient({ token }: { token: string }) {
     try {
       const session = await authApi.resetPassword(token, pw);
       consumeSession(session);
-      router.replace("/tasks");
+      // The reset response IS a session, so the role is in hand — land where
+      // this person's day starts rather than on a fixed module.
+      router.replace(landingForRole(session.org_role, session.is_super_admin));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "This link could not be used.");
     } finally {
