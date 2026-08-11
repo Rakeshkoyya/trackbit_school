@@ -323,9 +323,11 @@ daily report generation · per-student homework · **Lucy** · the **parent port
 
 ## Current state and what is next
 
-Schema head is **`b7c8d9e0f1a2`** (FE-1 the fee desk: `fee_events`,
-`fee_payment_proofs`, `fee_receipt_counters`, `installments.is_voided`,
-`student_fees.closed_*`, `fee_transactions.paid_on` — 2026-08-11). Applied to the
+Schema head is **`c8d9e0f1a2b3`** (`D-129` one student-category vocabulary:
+`sessions.category_id`, replacing the `hostellers_only` boolean and the
+name-matching that resolved it — 2026-08-11). Its parent `b7c8d9e0f1a2` is FE-1
+the fee desk (`fee_events`, `fee_payment_proofs`, `fee_receipt_counters`,
+`installments.is_voided`, `student_fees.closed_*`, `fee_transactions.paid_on`). Applied to the
 **local dev AND test databases** and verified reversible. **Production was NOT checked**
 (the founder asked that this work stay local), and was last confirmed at
 `d7e8f9a0b1c2` on 2026-08-08 — so run `alembic current` against prod before deploying
