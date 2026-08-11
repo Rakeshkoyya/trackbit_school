@@ -5,12 +5,15 @@
  *
  * The wizard drew the year on a calendar; the moment setup ended the admin lost it
  * and got a text list back. This is the same artifact, permanently: drag across days
- * to add a holiday or an exam, watch teaching days recompute, and tie each exam to
- * the chapters it examines.
+ * to add a holiday or an exam, and watch teaching days recompute.
  *
- * That last control is what lets the planner say the sentence it exists for —
- * "Chapter 5 lands after the exam that examines it" — so it belongs on the screen
- * where exams live, not only inside a one-time wizard.
+ * What this screen is NOT (founder, 2026-08-11): where a portion is decided or a
+ * fit is judged. It carried both — an exam-portions picker and a "does it fit"
+ * panel — from the days before the syllabus board existed. Plan → Syllabus →
+ * Exams now owns the portion AND the verdict on the same table, against the
+ * chapters themselves; two screens asking the same question is how the two
+ * answers start to differ. The calendar still invalidates `exam-fit`, because
+ * moving an exam changes every verdict that screen draws.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,9 +25,7 @@ import { toast } from "sonner";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { ApproveDateSheet, SuggestionList } from "@/components/school/approve-date";
 import { EventsBrowser } from "@/components/school/events-browser";
-import { ExamFitPanel } from "@/components/school/exam-fit-panel";
 import { YearSwitcher } from "@/components/school/year-switcher";
-import { ExamPortions } from "@/components/wizard/exam-portions";
 import {
   CalendarLegend,
   YearCalendar,
@@ -80,11 +81,6 @@ function PlanYearInner() {
   const { data: summary } = useQuery({
     queryKey: ["calendar", yearId],
     queryFn: () => schoolApi.calendarSummary(yearId!),
-    enabled: !!yearId,
-  });
-  const { data: classes } = useQuery({
-    queryKey: ["classes", yearId],
-    queryFn: () => schoolApi.classes(yearId!),
     enabled: !!yearId,
   });
   // The approval sheet offers periods to lock (D-58's middle level), so it
@@ -166,7 +162,6 @@ function PlanYearInner() {
     kind: e.type as PaintKind,
     title: e.title,
   }));
-  const exams = summary.events.filter((e) => e.type === "exam_block");
 
   // Only the ones that land inside the year being drawn. A suggestion outside
   // it has no cell to sit on, and passing it would silently do nothing.
@@ -300,8 +295,6 @@ function PlanYearInner() {
                             onSeeAll={() => setBrowsing(true)} />
           ) : null}
 
-          {canEdit ? <ExamPortions exams={exams} classes={classes ?? []} /> : null}
-
           <div>
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {summary.events.length} entries
@@ -396,9 +389,6 @@ function PlanYearInner() {
               if (full) setDecide(full);
             }}
           />
-          <div className="mt-6">
-            <ExamFitPanel yearId={yearId} />
-          </div>
         </div>
       </div>
 
