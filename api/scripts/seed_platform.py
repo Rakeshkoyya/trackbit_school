@@ -22,17 +22,30 @@ Usage (PowerShell), from api/:
     $env:SUPER_ADMIN_EMAIL = 'you@yourdomain.com'      # optional
     $env:SUPER_ADMIN_PASSWORD = 'choose-a-strong-one'  # optional; generated if unset
     uv run python -m scripts.seed_platform
+
+Or put the same names in `api/.env` and just run the last line. That works only
+because of the `load_dotenv()` below: the app reads `.env` through
+pydantic-settings, which populates the `Settings` object and **not** `os.environ`
+— so without this, every `os.environ.get` here would miss a value sitting in
+`.env` and silently fall back to the default email and a *generated* password.
+A real shell variable still wins over `.env`, which is what you want when
+overriding a stored default for one run.
 """
 
 import os
 import secrets
 from datetime import UTC, datetime
 
+from dotenv import load_dotenv
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.core.security import hash_password
 from app.models import Board, BoardMember, Membership, Organization, User
+
+# Before the reads below, after the imports (E402). `override=False`: an
+# explicitly-exported shell variable still beats the one stored in `.env`.
+load_dotenv(".env", override=False)
 
 EMAIL = os.environ.get("SUPER_ADMIN_EMAIL", "super@trackbit.app")
 NAME = os.environ.get("SUPER_ADMIN_NAME", "TrackBit Ops")
