@@ -126,7 +126,14 @@ SCHOOL_EXAM_TABLES = (
 # SY-1 the syllabus board — engaged in migration e4f5a6b7c8d9. The chapters an
 # exam actually examines, as a SET: the prefix `upto_topic_id` could not say
 # "1, 2, 3 and 5, with 4 held over to Term 2".
-SCHOOL_SYLLABUS_TABLES = (
+#
+# ⚠️ This tuple was originally ALSO called `SCHOOL_SYLLABUS_TABLES` and silently
+# shadowed the P1-B/C one above. Because migrations read these tuples *live* at
+# import time, `d5b6c7d8e9fa` — which runs long before this table exists — was
+# handed `("exam_portion_units",)` and a fresh `alembic upgrade head` died with
+# `relation "exam_portion_units" does not exist`. Every name in this module must
+# be unique; `tests/test_rls.py` now asserts it.
+SCHOOL_EXAM_PORTION_UNIT_TABLES = (
     "exam_portion_units",
 )
 

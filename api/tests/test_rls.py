@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 
+from app.core import rls
 from app.core.database import SessionLocal
 from app.models import Board, FeeEvent, Organization, TaskInstance, User
 from tests.conftest import AdminSession
@@ -140,3 +141,32 @@ def test_rls_hides_another_orgs_fee_events():
     finally:
         db.rollback()
         db.close()
+
+
+def test_rls_table_tuples_have_unique_names():
+    """No two table tuples in `core/rls.py` may share a name.
+
+    The tuples are read *live* by the migrations that engage RLS, so a duplicate
+    name silently rebinds the earlier one for every migration — including ones
+    that ran years of revisions earlier. That is exactly how `d5b6c7d8e9fa`
+    (syllabus + plans) came to run `ALTER TABLE exam_portion_units ENABLE ROW
+    LEVEL SECURITY` and kill `alembic upgrade head` on any fresh database: the
+    SY-1 tuple, added much later, had been given the same name.
+    """
+    import ast
+    import collections
+    import pathlib
+
+    source = pathlib.Path(rls.__file__).read_text(encoding="utf-8")
+    assigned = [
+        target.id
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    ]
+    duplicates = sorted(n for n, count in collections.Counter(assigned).items() if count > 1)
+    assert not duplicates, (
+        f"core/rls.py rebinds {duplicates} — a later definition silently shadows "
+        "the earlier one for every migration that imports it"
+    )

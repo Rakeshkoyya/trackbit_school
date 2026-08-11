@@ -43,7 +43,7 @@ import sqlalchemy as sa
 from alembic import op
 
 from app.core.rls import (
-    SCHOOL_SYLLABUS_TABLES,
+    SCHOOL_EXAM_PORTION_UNIT_TABLES,
     disable_rls_sql,
     enable_rls_sql,
 )
@@ -108,12 +108,12 @@ def upgrade() -> None:
                     ["portion_id"])
     op.create_index("ix_exam_portion_units_unit_id", "exam_portion_units", ["unit_id"])
 
-    for stmt in enable_rls_sql(SCHOOL_SYLLABUS_TABLES):
+    for stmt in enable_rls_sql(SCHOOL_EXAM_PORTION_UNIT_TABLES):
         op.execute(stmt)
 
 
 def downgrade() -> None:
-    for stmt in disable_rls_sql(SCHOOL_SYLLABUS_TABLES):
+    for stmt in disable_rls_sql(SCHOOL_EXAM_PORTION_UNIT_TABLES):
         op.execute(stmt)
     op.drop_table("exam_portion_units")
     # A portion that only ever had explicit chapters has no prefix to fall back
