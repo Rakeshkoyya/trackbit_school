@@ -263,3 +263,78 @@ def test_a_teacher_cannot_read_or_lock_a_fee(client, cleanup):
     assert client.post("/api/v1/fees/setup/preview", headers=th, json={
         "student_id": ctx["student"]["id"],
         "academic_year_id": ctx["year"]["id"]}).status_code == 403
+
+
+# ── the sheet must always let you finish (founder, 2026-08-14) ───────────────
+def test_a_student_with_no_class_can_still_be_set_up(client, cleanup):
+    """The bug the founder hit on production: seven children had no class at
+    all, so `structure_for_student` correctly found nothing — and the sheet then
+    refused to open, leaving no route to bill them by. An unpriced class is a
+    prompt for the total, never a wall."""
+    ctx = _school(client, cleanup)
+    loose = client.post("/api/v1/students", headers=ctx["h"], json={
+        "admission_no": "S7", "full_name": "Classless Child"}).json()
+
+    body = _setup(client, ctx, loose).json()
+    assert body["structure"] is None
+    assert body["class_label"] is None  # what the sheet branches on
+
+    # …and the office types the fee itself.
+    p = client.post("/api/v1/fees/setup/preview", headers=ctx["h"], json={
+        "student_id": loose["id"], "academic_year_id": ctx["year"]["id"],
+        "total_fee": "24000", "num_installments": 3}).json()
+    assert p["warning"] is None
+    assert p["net_fee"] == "24000.00"
+    assert [i["amount"] for i in p["installments"]] == [
+        "8000.00", "8000.00", "8000.00"]
+
+    locked = client.post("/api/v1/fees/student-fees", headers=ctx["h"], json={
+        "student_id": loose["id"], "academic_year_id": ctx["year"]["id"],
+        "total_fee": "24000", "num_installments": 3})
+    assert locked.status_code == 200, locked.text
+    assert locked.json()["net_fee"] == "24000.00"
+    assert len(locked.json()["installments"]) == 3
+
+
+def test_the_instalment_amounts_themselves_can_be_edited(client, cleanup):
+    """Founder: *"I want flexibility for editing the instalment amounts also"*.
+    A family paying ₹30,000 in June and the rest across the year is not an even
+    split, and it should not have to be fixed afterwards row by row."""
+    ctx = _school(client, cleanup)
+    r = client.post("/api/v1/fees/student-fees", headers=ctx["h"], json={
+        "student_id": ctx["student"]["id"],
+        "academic_year_id": ctx["year"]["id"],
+        "fee_structure_id": ctx["structure"]["id"],
+        "total_fee": "60000", "discount": "10000",
+        "use_custom_schedule": True,
+        "installments": [
+            {"installment_number": 1, "label": "On admission",
+             "amount": "30000", "due_date": "2026-06-01"},
+            {"installment_number": 2, "label": "Rest",
+             "amount": "20000", "due_date": "2026-11-01"},
+        ]})
+    assert r.status_code == 200, r.text
+    detail = r.json()
+    assert detail["net_fee"] == "50000.00"
+    assert [i["amount"] for i in detail["installments"]] == ["30000.00", "20000.00"]
+    assert [i["label"] for i in detail["installments"]] == ["On admission", "Rest"]
+    assert detail["installments"][0]["due_date"] == "2026-06-01"
+
+
+def test_an_edited_schedule_that_does_not_add_up_is_refused(client, cleanup):
+    """The rows are the office's, so the server checks them the other way round:
+    they must SUM to the net. The sheet says the same number before it saves, so
+    this error should be unreachable — but it is the authority."""
+    ctx = _school(client, cleanup)
+    r = client.post("/api/v1/fees/student-fees", headers=ctx["h"], json={
+        "student_id": ctx["student"]["id"],
+        "academic_year_id": ctx["year"]["id"],
+        "fee_structure_id": ctx["structure"]["id"],
+        "total_fee": "60000", "discount": "10000",
+        "use_custom_schedule": True,
+        "installments": [
+            {"installment_number": 1, "amount": "30000"},
+            {"installment_number": 2, "amount": "15000"},
+        ]})
+    assert r.status_code == 422, r.text
+    assert "must equal net payable" in r.json()["error"]["message"]

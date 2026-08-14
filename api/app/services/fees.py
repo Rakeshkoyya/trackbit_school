@@ -343,9 +343,12 @@ class FeeService:
         net = q(total - discount)
         warning: str | None = None
         if fs is None and body.total_fee is None:
-            warning = ("This class has no fee structure yet, so there is no price "
-                       "to start from. Set the class structure first, or type the "
-                       "total for this student.")
+            # Not a refusal — a prompt. FE-2 first shipped with this as a dead
+            # end, and a school with an unpriced class (or a student not yet in
+            # one) could not set that child up at all, which is exactly the
+            # family standing at the counter with cash.
+            warning = ("This class has no fee structure yet — type the total for "
+                       "this student, or price the class first.")
         elif net < 0:
             warning = (f"A discount of ₹{discount:,.0f} is more than the fee of "
                        f"₹{total:,.0f}.")
