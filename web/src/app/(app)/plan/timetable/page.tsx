@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Sparkles, Upload } from "lucide-react";
+import { Link2, Plus, Sparkles, Upload } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -357,9 +357,26 @@ const WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
  *  classes and leaves the fix to the person who knows which one moves.
  */
 function ClashBanner() {
+  const qc = useQueryClient();
   const { data: clashes = [] } = useQuery({
     queryKey: ["timetable-clashes"],
     queryFn: schoolApi.validateTimetable,
+  });
+  // TT-4 — the warning names its own fix. A teacher in two rooms at once is
+  // usually a mistake, but often enough it is a school saying "these two small
+  // classes sit together for Maths" in the only words the grid used to have.
+  // Combining is that sentence, said properly: the clash goes, the teacher gets
+  // one card, and each class keeps its own register and its own syllabus.
+  const combine = useMutation({
+    mutationFn: (c: import("@/lib/school-types").TimetableClash) =>
+      schoolApi.combinePeriods({
+        weekday: c.weekday, period_no: c.period_no, class_ids: c.class_ids }),
+    onSuccess: (combo) => {
+      qc.invalidateQueries({ queryKey: ["timetable-clashes"] });
+      qc.invalidateQueries({ queryKey: ["timetable"] });
+      toast.success(`${combo.label} now sit together in this period`);
+    },
+    onError: (e) => showApiError(e, "Could not combine these classes"),
   });
   if (clashes.length === 0) return null;
   return (
@@ -369,17 +386,33 @@ function ClashBanner() {
           ? "One teacher is in two rooms at once"
           : `${clashes.length} periods put a teacher in two rooms at once`}
       </p>
-      <ul className="mt-1.5 space-y-0.5">
+      <ul className="mt-1.5 space-y-1">
         {clashes.slice(0, 6).map((c, i) => (
-          <li key={i} className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{c.teacher_name ?? "A teacher"}</span>
-            {" · "}{WEEKDAY[c.weekday] ?? `Day ${c.weekday}`} period {c.period_no}
-            {" · "}{c.class_labels.join(" and ")}
+          <li key={i} className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              <span className="font-medium text-foreground">{c.teacher_name ?? "A teacher"}</span>
+              {" · "}{WEEKDAY[c.weekday] ?? `Day ${c.weekday}`} period {c.period_no}
+              {" · "}{c.class_labels.join(" and ")}
+            </span>
+            {c.combinable ? (
+              <button type="button" disabled={combine.isPending}
+                onClick={() => combine.mutate(c)}
+                title="One teacher, one room, both classes — each keeps its own register and syllabus"
+                className="inline-flex items-center gap-1 rounded-full border border-warning/50 bg-card px-2 py-0.5 font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60">
+                <Link2 className="h-3 w-3" /> Combine these classes
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>
       {clashes.length > 6 ? (
         <p className="mt-1 text-xs text-muted-foreground">…and {clashes.length - 6} more</p>
+      ) : null}
+      {clashes.some((c) => c.combinable) ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          Combining is for classes genuinely taught together. The teacher then
+          sees one period, takes one roll call, and it is filed to each class.
+        </p>
       ) : null}
     </div>
   );

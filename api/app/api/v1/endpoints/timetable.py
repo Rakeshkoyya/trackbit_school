@@ -35,6 +35,8 @@ from app.schemas.timetable import (
     BlockOut,
     BlockUpdate,
     Clash,
+    CombinedOut,
+    CombineIn,
     DraftOut,
     GridOut,
     ImportAnalyzeOut,
@@ -48,6 +50,7 @@ from app.schemas.timetable import (
     SlotClearIn,
     SlotIn,
     TeacherWeekOut,
+    UncombineIn,
 )
 from app.services.timetable import TimetableService
 
@@ -78,6 +81,29 @@ def set_slots_bulk(body: SlotBulkIn, m: CurrentMember = Depends(require_admin),
 def clear_slot(body: SlotClearIn, m: CurrentMember = Depends(require_admin),
                db: Session = Depends(get_db)):
     return TimetableService(db).clear_slot(m, body)
+
+
+# ── combined periods: two classes, one meeting (TT-4) ────────────────────────
+@router.get("/combined", response_model=list[CombinedOut])
+def list_combined(on_date: date | None = None,
+                  m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    return TimetableService(db).list_combinations(m, on_date)
+
+
+@router.post("/combine", response_model=CombinedOut)
+def combine(body: CombineIn, m: CurrentMember = Depends(require_admin),
+            db: Session = Depends(get_db)):
+    """"These classes sit together in this period." Silences their clash, gives
+    the teacher one card, and writes her capture to each class's own record."""
+    return TimetableService(db).combine(m, body)
+
+
+@router.post("/uncombine", response_model=list[CombinedOut])
+def uncombine(body: UncombineIn, m: CurrentMember = Depends(require_admin),
+              db: Session = Depends(get_db)):
+    """Split it back up — one class out, or the whole arrangement."""
+    return TimetableService(db).uncombine(m, body)
 
 
 @router.get("/validate", response_model=list[Clash])

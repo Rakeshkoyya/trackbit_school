@@ -287,6 +287,9 @@ export const schoolApi = {
   addHomework: (b: {
     class_subject_id: string; text: string; due_date?: string | null;
     student_id?: string | null; student_ids?: string[];
+    /** TT-4: the other classes of a combined period — one row each, never a
+     *  shared one. Ignored when the homework names particular children. */
+    also_class_subject_ids?: string[];
   }) => api.post<{ id: string; notified_count: number; created_ids: string[] }>(
     "/classroom/homework", b),
   // HW-1: capture-by-exception. An empty `results` list means everyone did it.
@@ -353,6 +356,9 @@ export const schoolApi = {
     class_subject_id?: string | null;
     date?: string | null;
     exceptions: { student_id: string; status: "absent" | "late"; late_minutes?: number | null }[];
+    /** TT-4: the whole combined room. Writes ONE register PER CLASS — the
+     *  exceptions are split by whose roster each child is on. */
+    class_ids?: string[];
   }) => api.post<import("@/lib/school-types").AttendanceMarkResult>("/attendance/mark", b),
 
   // V1-3 — reasons (D-02), informed absence (S-24), My Class (D-03)
@@ -779,6 +785,20 @@ export const schoolApi = {
     api.post<import("@/lib/school-types").TimetableGrid>("/timetable/slot/clear", b),
   validateTimetable: () =>
     api.get<import("@/lib/school-types").TimetableClash[]>("/timetable/validate"),
+  // ── TT-4: classes taught together as one meeting ──────────────────────────
+  combinedPeriods: (onDate?: string) =>
+    api.get<import("@/lib/school-types").CombinedPeriod[]>(
+      `/timetable/combined${qs({ on_date: onDate })}`),
+  /** "These classes sit together in this period." Silences their clash, gives
+   *  the teacher one card, and writes her capture to each class's own record. */
+  combinePeriods: (b: {
+    weekday: number; period_no: number; class_ids: string[];
+    note?: string | null; effective_from?: string;
+  }) => api.post<import("@/lib/school-types").CombinedPeriod>("/timetable/combine", b),
+  /** Split it back up — pass `class_ids` for one class, omit for the lot. */
+  uncombinePeriod: (b: {
+    combined_id: string; class_ids?: string[]; effective_from?: string;
+  }) => api.post<import("@/lib/school-types").CombinedPeriod[]>("/timetable/uncombine", b),
   myWeek: () => api.get<import("@/lib/school-types").TeacherWeek>("/timetable/my-week"),
   periodConfig: (yearId: string) =>
     api.get<import("@/lib/school-types").PeriodConfig>(`/timetable/period-config${qs({ year_id: yearId })}`),

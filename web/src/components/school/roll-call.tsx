@@ -25,6 +25,10 @@ export type RollRow = {
   student_id: string;
   full_name: string;
   roll_no?: string | null;
+  /** TT-4: which class the child is in. Null on an ordinary sheet; set on a
+   *  combined period's, where the sheet groups by it — a teacher scanning
+   *  eighty names for one child needs the room split the way the room is. */
+  class_label?: string | null;
 };
 
 export type RollMark = { status: RollStatus; late_minutes: number | null };
@@ -101,6 +105,17 @@ export function RollCall({
     );
   }
 
+  // TT-4 — one sheet, grouped by class when the room holds more than one. The
+  // groups keep their server order so the sheet reads the same on every visit.
+  const groups: { label: string | null; rows: RollRow[] }[] = [];
+  for (const r of rows) {
+    const label = r.class_label ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.rows.push(r);
+    else groups.push({ label, rows: [r] });
+  }
+  const grouped = groups.length > 1;
+
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -123,8 +138,18 @@ export function RollCall({
         </div>
       </div>
 
+      {groups.map((g, gi) => (
+        <div key={g.label ?? gi}>
+          {grouped ? (
+            <p className="mb-1 mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground first:mt-0">
+              {g.label ?? "Class"}
+              <span className="ml-1.5 normal-case tracking-normal opacity-70">
+                {g.rows.length} student{g.rows.length === 1 ? "" : "s"}
+              </span>
+            </p>
+          ) : null}
       <div className="grid gap-1 sm:grid-cols-2">
-        {rows.map((r) => {
+        {g.rows.map((r) => {
           const m = marks[r.student_id] ?? { status: "present" as RollStatus, late_minutes: null };
           const present = m.status !== "absent";
           return (
@@ -164,6 +189,8 @@ export function RollCall({
           );
         })}
       </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -44,8 +44,17 @@ class MyDayPeriod(BaseModel):
     slot_type: str = "subject"
     class_subject_id: uuid.UUID | None = None
     class_id: uuid.UUID
+    # TT-4: on a combined period this is the ROOM — "5-A + 6-A" — because that is
+    # what the teacher is walking into. `class_id` stays the one class the row
+    # navigates by, so every existing link keeps working.
     class_label: str
     subject_name: str | None = None
+    # TT-4 — empty on an ordinary period. Set on a combined one (and on a block
+    # that runs across several classes), so the row can say how many classes it
+    # is really about without the client re-deriving it from the label string.
+    combined_id: uuid.UUID | None = None
+    combined_class_ids: list[uuid.UUID] = []
+    combined_class_labels: list[str] = []
     # Block payload (null on a subject period).
     session_id: uuid.UUID | None = None
     block_name: str | None = None
@@ -148,6 +157,12 @@ class HomeworkIn(BaseModel):
     # reader (the check sheet, the parent portal, the streak) keeps working
     # unchanged and a child's history stays one row per piece of work.
     student_ids: list[uuid.UUID] = []
+    # TT-4: the other classes of a combined period. One form, one act — and one
+    # ordinary assignment row per class, so nothing downstream learns a new
+    # shape. Ignored when the homework names particular children: they are all in
+    # one class, and copying their note to another class's parents would be a
+    # message about somebody else's child.
+    also_class_subject_ids: list[uuid.UUID] = []
 
 
 class HomeworkOut(BaseModel):

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, ChevronRight, ClipboardCheck, ListTodo, Moon, Send, Users } from "lucide-react";
+import { BookOpen, Check, ChevronRight, ClipboardCheck, Link2, ListTodo, Moon, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -61,6 +61,9 @@ function HomeworkSheet({ target, onClose }: { target: HwTarget | null; onClose: 
  */
 function PeriodRow({ p }: { p: MyDayPeriod }) {
   const isBlock = p.slot_type === "block";
+  // TT-4 — one row per MEETING. Two classes taught together are one lesson, and
+  // every count on this row is the whole room's.
+  const combined = (p.combined_class_ids?.length ?? 0) > 1;
   // Once a day (founder, 2026-08-11): the register is the DAY's, so a period
   // that is not being asked for one is not an unfinished period. Reading `done`
   // as "attendance_marked && logged" left every afternoon period grey in a
@@ -85,14 +88,21 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
         P{p.period_no}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold">
-          {isBlock
-            ? `${p.block_name ?? "Block"} · ${p.class_label}`
-            : `${p.class_label}${p.subject_name ? ` · ${p.subject_name}` : ""}`}
+        <p className="flex items-center gap-1 truncate text-sm font-semibold">
+          {/* TT-4: `class_label` IS the room — "5-A + 6-A" — because that is what
+              she is walking into. The link mark says it is deliberate, not a
+              rendering accident. */}
+          {combined ? <Link2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden /> : null}
+          <span className="min-w-0 truncate">
+            {isBlock
+              ? `${p.block_name ?? "Block"} · ${p.class_label}`
+              : `${p.class_label}${p.subject_name ? ` · ${p.subject_name}` : ""}`}
+          </span>
         </p>
         <p className="truncate text-xs text-muted-foreground">
           {clock ? <span className="tabular-nums">{clock}</span> : null}
           {clock ? " · " : ""}
+          {combined && !isBlock ? `${p.combined_class_ids.length} classes together · ` : ""}
           {isBlock
             ? p.block_kind_label ?? captureFor(p.block_kind).label
             : p.status === "not_held" ? "Not held"

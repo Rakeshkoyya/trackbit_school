@@ -31,6 +31,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
     ClassSubject,
+    CombinedPeriod,
     Membership,
     SchoolClass,
     SessionClass,
@@ -50,6 +51,9 @@ from app.schemas.timetable import (
     BlockOut,
     BlockUpdate,
     Clash,
+    CombinedClassOut,
+    CombinedOut,
+    CombineIn,
     DraftOut,
     GridBreak,
     GridOut,
@@ -71,6 +75,7 @@ from app.schemas.timetable import (
     SlotOut,
     TeacherSlot,
     TeacherWeekOut,
+    UncombineIn,
 )
 from app.services import bell
 from app.services.ai import parse_timetable
@@ -80,6 +85,16 @@ from app.services.period_load import recompute_periods_per_week
 
 def _label(klass: SchoolClass) -> str:
     return klass.name + (f"-{klass.section}" if klass.section else "")
+
+
+def combined_label(class_labels: list[str]) -> str:
+    """How a combined meeting names itself: "5-A + 6-A" (TT-4).
+
+    One function, because this string appears on the grid chip, on My Day, on the
+    period card and on the attendance sheet — and a room the teacher recognises
+    on one screen has to be the same room on the next.
+    """
+    return " + ".join(class_labels)
 
 
 class BlockMeta:
@@ -222,6 +237,13 @@ class TimetableService:
         so. One assembly block placed on twenty classes is a single engagement —
         the teacher stands in one hall — so it must not read as nineteen clashes.
         Two different class-subjects at one time are two engagements and do.
+
+        TT-4 adds the third case and it is the same idea: classes taught together
+        are **one** engagement, keyed on the combination rather than on the
+        class. That is the whole mechanism by which combining a period silences
+        its clash — no rule anywhere else changes, and a genuine third booking
+        elsewhere in the school still reports, because it is still a second
+        engagement.
         """
         if slot.slot_type == "block":
             meta = block_meta.get(slot.session_id) if slot.session_id else None
@@ -231,6 +253,8 @@ class TimetableService:
         _sname, tmid, _tname = cs_meta.get(slot.class_subject_id, (None, None, None))
         if tmid is None:
             return []
+        if slot.combined_id is not None:
+            return [(tmid, ("combined", slot.combined_id))]
         return [(tmid, ("subject", slot.class_id))]
 
     # ── clash validator (deterministic — §5.2 pipeline V-checks) ─────────────
@@ -266,13 +290,46 @@ class TimetableService:
                 classes.update(by_class)
             if only_class is not None and only_class not in classes:
                 continue
+            # TT-4: is this a mistake, or an arrangement the grid cannot say yet?
+            # Every engagement being a subject (or an existing combination this
+            # would grow) means "these classes could simply sit together", which
+            # is usually the true fix and is one tap from the banner. A block in
+            # the bucket is neither: a block already spans classes on its own.
+            combinable = all(e[0] in ("subject", "combined") for e in engagements)
+            ordered = sorted(classes.items(), key=lambda kv: kv[1])
             clashes.append(Clash(
                 weekday=weekday, period_no=period_no, teacher_member_id=tmid,
-                teacher_name=teacher_names.get(tmid), class_labels=sorted(classes.values())))
+                teacher_name=teacher_names.get(tmid),
+                class_labels=[label for _cid, label in ordered],
+                class_ids=[cid for cid, _label in ordered],
+                combinable=combinable))
         return clashes
 
+    # ── combined periods (TT-4) ──────────────────────────────────────────────
+    def _combined_members(
+        self, slots: list[TimetableSlot], class_labels: dict[uuid.UUID, str],
+    ) -> dict[uuid.UUID, list[tuple[uuid.UUID, str]]]:
+        """combined_id → its live member classes, ordered by label.
+
+        Derived from the slots on every read rather than stored: the membership
+        IS the set of live cells, so there is nothing to keep in step.
+        """
+        out: dict[uuid.UUID, dict[uuid.UUID, str]] = {}
+        for s in slots:
+            if s.combined_id is None:
+                continue
+            out.setdefault(s.combined_id, {})[s.class_id] = class_labels.get(s.class_id, "?")
+        return {cid: sorted(members.items(), key=lambda kv: kv[1])
+                for cid, members in out.items()}
+
     def _slot_out(self, s: TimetableSlot, cs_meta: dict,
-                  block_meta: dict[uuid.UUID, BlockMeta]) -> SlotOut:
+                  block_meta: dict[uuid.UUID, BlockMeta],
+                  combined: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] | None = None,
+                  ) -> SlotOut:
+        combined_with = [
+            label for cid, label in (combined or {}).get(s.combined_id, [])
+            if cid != s.class_id
+        ] if s.combined_id else []
         if s.slot_type == "block":
             meta = block_meta.get(s.session_id) if s.session_id else None
             return SlotOut(
@@ -291,6 +348,7 @@ class TimetableService:
             id=s.id, class_id=s.class_id, weekday=s.weekday, period_no=s.period_no,
             slot_type="subject", class_subject_id=s.class_subject_id, subject_name=sname,
             teacher_member_id=tmid, teacher_name=tname,
+            combined_id=s.combined_id, combined_with=combined_with,
             effective_from=s.effective_from, effective_to=s.effective_to)
 
     def _grid(self, m: CurrentMember, klass: SchoolClass, on_date: date) -> GridOut:
@@ -300,13 +358,14 @@ class TimetableService:
         block_meta = self._block_meta(m.org_id)
         class_labels = self._class_labels(m.org_id)
         class_slots = self._class_slots(m.org_id, klass.id, on_date)
+        org_slots = self._org_slots(m.org_id, on_date)
+        combined = self._combined_members(org_slots, class_labels)
         clashes = self._clashes(
-            self._org_slots(m.org_id, on_date), cs_meta, class_labels, block_meta,
-            only_class=klass.id)
+            org_slots, cs_meta, class_labels, block_meta, only_class=klass.id)
         return GridOut(
             class_id=klass.id, class_label=_label(klass),
             weekdays=list(year.working_weekdays), periods_per_day=shape.periods_per_day,
-            slots=[self._slot_out(s, cs_meta, block_meta) for s in class_slots],
+            slots=[self._slot_out(s, cs_meta, block_meta, combined) for s in class_slots],
             clashes=clashes,
             periods=[GridPeriod(period_no=p.period_no, start=p.start, end=p.end)
                      for p in shape.periods],
@@ -395,12 +454,14 @@ class TimetableService:
             m, body.class_id, body.slot_type, body.class_subject_id, body.session_id)
 
         current = self._current_slot(m.org_id, body.class_id, body.weekday, body.period_no)
+        old_combined: uuid.UUID | None = None
         if current is not None:
             if (current.slot_type == body.slot_type
                     and current.class_subject_id == cs_id
                     and current.session_id == session_id):
                 return self._grid(m, klass, eff)  # no-op
             old_session = current.session_id
+            old_combined = current.combined_id
             # Close the old assignment as of the edit date (append-only history).
             if current.effective_from >= eff:
                 self.db.delete(current)
@@ -409,12 +470,18 @@ class TimetableService:
             self.db.flush()
             if old_session:
                 self._unlink_block_class_if_unused(m.org_id, old_session, body.class_id)
+        # TT-4: the new cell is NOT combined. Changing what a class studies in a
+        # period is precisely the act that takes it out of a shared lesson, and
+        # carrying the combination across would leave 6-A silently attending a
+        # Maths meeting it now has Hindi in.
         self.db.add(TimetableSlot(
             org_id=m.org_id, class_id=body.class_id, weekday=body.weekday,
             period_no=body.period_no, slot_type=body.slot_type,
             class_subject_id=cs_id, session_id=session_id,
             effective_from=eff, effective_to=None))
         self.db.flush()
+        if old_combined is not None:
+            self._settle_combination(m.org_id, old_combined, eff)
         if session_id:
             self._link_block_class(m.org_id, session_id, body.class_id)
             self.db.flush()
@@ -450,6 +517,7 @@ class TimetableService:
         if current is None:
             raise NotFoundError("Slot")
         session_id = current.session_id
+        combined_id = current.combined_id
         # Closing on its own start date means it never applied — delete it; else close.
         if current.effective_from >= eff:
             self.db.delete(current)
@@ -459,9 +527,230 @@ class TimetableService:
         if session_id:
             self._unlink_block_class_if_unused(m.org_id, session_id, body.class_id)
             self.db.flush()
+        if combined_id is not None:
+            self._settle_combination(m.org_id, combined_id, eff)
         # Emptying a cell lowers that subject's weekly load by one (TT-3).
         recompute_periods_per_week(self.db, m.org_id, [body.class_id])
         return self._grid(m, klass, eff)
+
+    # ── combining classes into one meeting (TT-4) ────────────────────────────
+    def _live_slots_at(self, org_id: uuid.UUID, weekday: int, period_no: int,
+                       on_date: date) -> list[TimetableSlot]:
+        return list(self.db.scalars(
+            select(TimetableSlot).where(
+                TimetableSlot.org_id == org_id, TimetableSlot.weekday == weekday,
+                TimetableSlot.period_no == period_no, self._current_at(on_date))))
+
+    def _members_of(self, org_id: uuid.UUID, combined_id: uuid.UUID,
+                    on_date: date) -> list[TimetableSlot]:
+        return list(self.db.scalars(
+            select(TimetableSlot).where(
+                TimetableSlot.org_id == org_id,
+                TimetableSlot.combined_id == combined_id,
+                self._current_at(on_date))))
+
+    def _restamp(self, slot: TimetableSlot, eff: date,
+                 combined_id: uuid.UUID | None) -> None:
+        """Move one cell into or out of a combination, append-only.
+
+        A row that has already been live for a while is CLOSED and replaced, so
+        the register and the day-book can still answer "was 6-A sitting with 5-A
+        in August". A row that has not started applying yet is simply amended —
+        there is no history to protect, and closing it at its own start date
+        would leave a zero-length row in the grid.
+        """
+        if slot.combined_id == combined_id:
+            return
+        if slot.effective_from >= eff:
+            slot.combined_id = combined_id
+            self.db.flush()
+            return
+        slot.effective_to = eff
+        self.db.add(TimetableSlot(
+            org_id=slot.org_id, class_id=slot.class_id, weekday=slot.weekday,
+            period_no=slot.period_no, slot_type=slot.slot_type,
+            class_subject_id=slot.class_subject_id, session_id=slot.session_id,
+            combined_id=combined_id, effective_from=eff, effective_to=None))
+        self.db.flush()
+
+    def _settle_combination(self, org_id: uuid.UUID, combined_id: uuid.UUID,
+                            eff: date) -> None:
+        """A combination of one is not a combination — split the survivor out.
+
+        Called whenever a member cell is cleared or given something else to do.
+        Without it, the last class left behind would keep a `combined_id` and go
+        on rendering "taught with —", and its clash would stay silenced against
+        a partner that no longer exists.
+
+        The `combined_periods` row itself is never deleted: closed slots still
+        point at it, and the FK is SET NULL, so deleting it would quietly erase
+        the fact from history.
+        """
+        survivors = self._members_of(org_id, combined_id, eff)
+        if len(survivors) >= 2:
+            return
+        for s in survivors:
+            self._restamp(s, eff, None)
+
+    def combine(self, m: CurrentMember, body: CombineIn) -> CombinedOut:
+        """"These classes sit together in this period."
+
+        Validated hard, because a combination that is not really one meeting is
+        worse than the clash it replaces: it would hide a genuine double-booking
+        AND write one teacher's capture into two classes' records.
+
+        Three rules, each with a sentence the admin can act on:
+        every named class must actually have this cell filled; every one of them
+        must be running a SUBJECT (a block already spans classes on its own — put
+        the block on both grids instead); and they must share ONE teacher,
+        because "one meeting" means one person standing in one room.
+        """
+        eff = body.effective_from or self._today(m)
+        class_ids = list(dict.fromkeys(body.class_ids))
+        if len(class_ids) < 2:
+            raise ValidationError("Pick at least two classes to combine.")
+        labels = self._class_labels(m.org_id)
+        for cid in class_ids:
+            if cid not in labels:
+                raise NotFoundError("Class")
+
+        live = {s.class_id: s for s in self._live_slots_at(
+            m.org_id, body.weekday, body.period_no, eff) if s.class_id in class_ids}
+        missing = [labels[c] for c in class_ids if c not in live]
+        if missing:
+            raise ValidationError(
+                f"{', '.join(missing)} has nothing in this period yet — put the "
+                f"subject in the cell first, then combine.")
+
+        blocks = [labels[c] for c, s in live.items() if s.slot_type != "subject"]
+        if blocks:
+            raise ValidationError(
+                f"{', '.join(sorted(blocks))} runs a block in this period. A block "
+                f"already runs across classes — put the same block on each grid "
+                f"instead of combining.")
+
+        cs_meta = self._cs_meta(m.org_id)
+        teachers: dict[uuid.UUID | None, list[str]] = {}
+        for cid, s in live.items():
+            _sname, tmid, _tname = cs_meta.get(s.class_subject_id, (None, None, None))
+            teachers.setdefault(tmid, []).append(labels[cid])
+        if None in teachers:
+            raise ValidationError(
+                f"{', '.join(sorted(teachers[None]))} has no teacher on this "
+                f"subject. Assign one, then combine.")
+        if len(teachers) > 1:
+            names = self._member_names(m.org_id, set(teachers))
+            named = "; ".join(
+                f"{', '.join(sorted(v))} → {names.get(t) or 'another teacher'}"
+                for t, v in teachers.items())
+            raise ValidationError(
+                f"A combined period is one teacher in one room, and these are "
+                f"taught by different people ({named}). Give them the same "
+                f"teacher first.")
+
+        # Growing an existing combination rather than starting a second one:
+        # otherwise adding a third class would leave two combinations at one
+        # cell, each silencing half of the clash.
+        existing = {s.combined_id for s in live.values() if s.combined_id}
+        if len(existing) > 1:
+            raise ValidationError(
+                "These classes are already in two different combined periods. "
+                "Split them first, then combine.")
+        if existing:
+            combo = self.db.get(CombinedPeriod, next(iter(existing)))
+        else:
+            combo = CombinedPeriod(org_id=m.org_id, note=body.note)
+            self.db.add(combo)
+            self.db.flush()
+        if body.note is not None:
+            combo.note = body.note
+
+        for s in live.values():
+            self._restamp(s, eff, combo.id)
+        self.db.flush()
+        return self._combined_out(m, combo, eff)
+
+    def uncombine(self, m: CurrentMember, body: UncombineIn) -> list[CombinedOut]:
+        """Split a combined meeting — one class out of it, or the whole thing."""
+        eff = body.effective_from or self._today(m)
+        combo = self.db.scalar(select(CombinedPeriod).where(
+            CombinedPeriod.id == body.combined_id, CombinedPeriod.org_id == m.org_id))
+        if combo is None:
+            raise NotFoundError("Combined period")
+        members = self._members_of(m.org_id, combo.id, eff)
+        if not members:
+            return self.list_combinations(m, eff)
+        targets = ([s for s in members if s.class_id in set(body.class_ids)]
+                   if body.class_ids else members)
+        for s in targets:
+            self._restamp(s, eff, None)
+        self._settle_combination(m.org_id, combo.id, eff)
+        return self.list_combinations(m, eff)
+
+    def _combined_out(self, m: CurrentMember, combo: CombinedPeriod,
+                      on_date: date, members: list[TimetableSlot] | None = None,
+                      cs_meta: dict | None = None,
+                      labels: dict[uuid.UUID, str] | None = None) -> CombinedOut:
+        members = members if members is not None else self._members_of(
+            m.org_id, combo.id, on_date)
+        cs_meta = cs_meta if cs_meta is not None else self._cs_meta(m.org_id)
+        labels = labels if labels is not None else self._class_labels(m.org_id)
+        rows = sorted(members, key=lambda s: labels.get(s.class_id, "?"))
+        teacher_id = teacher_name = None
+        classes: list[CombinedClassOut] = []
+        for s in rows:
+            sname, tmid, tname = cs_meta.get(s.class_subject_id, (None, None, None))
+            if teacher_id is None:
+                teacher_id, teacher_name = tmid, tname
+            classes.append(CombinedClassOut(
+                class_id=s.class_id, class_label=labels.get(s.class_id, "?"),
+                class_subject_id=s.class_subject_id, subject_name=sname))
+        return CombinedOut(
+            id=combo.id,
+            weekday=rows[0].weekday if rows else 0,
+            period_no=rows[0].period_no if rows else 0,
+            note=combo.note, teacher_member_id=teacher_id, teacher_name=teacher_name,
+            classes=classes, label=combined_label([c.class_label for c in classes]))
+
+    def combined_meeting(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
+                         on_date: date) -> CombinedOut | None:
+        """The combined meeting this class's period belongs to, if any (TT-4).
+
+        The one lookup every capture surface uses — My Day, the period card, the
+        attendance sheet — so "who is in this room" has a single answer.
+        """
+        slot = self.db.scalar(select(TimetableSlot).where(
+            TimetableSlot.org_id == m.org_id, TimetableSlot.class_id == class_id,
+            TimetableSlot.weekday == on_date.weekday(),
+            TimetableSlot.period_no == period_no,
+            TimetableSlot.combined_id.is_not(None),
+            self._current_at(on_date)))
+        if slot is None:
+            return None
+        combo = self.db.get(CombinedPeriod, slot.combined_id)
+        if combo is None or combo.org_id != m.org_id:
+            return None
+        members = self._members_of(m.org_id, combo.id, on_date)
+        if len(members) < 2:
+            return None
+        return self._combined_out(m, combo, on_date, members)
+
+    def list_combinations(self, m: CurrentMember,
+                          on_date: date | None = None) -> list[CombinedOut]:
+        d = on_date or self._today(m)
+        slots = [s for s in self._org_slots(m.org_id, d) if s.combined_id]
+        if not slots:
+            return []
+        by_combo: dict[uuid.UUID, list[TimetableSlot]] = {}
+        for s in slots:
+            by_combo.setdefault(s.combined_id, []).append(s)
+        combos = {c.id: c for c in self.db.scalars(
+            select(CombinedPeriod).where(CombinedPeriod.id.in_(by_combo)))}
+        cs_meta = self._cs_meta(m.org_id)
+        labels = self._class_labels(m.org_id)
+        out = [self._combined_out(m, combos[cid], d, members, cs_meta, labels)
+               for cid, members in by_combo.items() if cid in combos]
+        return sorted(out, key=lambda c: (c.weekday, c.period_no, c.label))
 
     def validate_grid(self, m: CurrentMember, on_date: date | None = None) -> list[Clash]:
         d = on_date or self._today(m)
@@ -488,22 +777,45 @@ class TimetableService:
             if any(tmid == target for tmid, _e in self._commitments(s, cs_meta, block_meta))
         ]
 
-        slots: list[TeacherSlot] = []
-        for s in sorted(mine, key=lambda s: (s.weekday, s.period_no)):
-            start, end = clock.get(s.period_no, ("", ""))
+        # One row per MEETING (TT-4). A block on twenty classes and a combined
+        # lesson on two are each one place this teacher stands, and the whole
+        # point of `_commitments` saying so for the clash validator is lost if
+        # her own week then draws them twenty and two times. A plain period keys
+        # on its own slot id, so it can never merge with anything.
+        groups: dict[tuple, list[TimetableSlot]] = {}
+        for s in mine:
             if s.slot_type == "block":
-                meta = block_meta.get(s.session_id) if s.session_id else None
+                key = (s.weekday, s.period_no, "block", s.session_id)
+            elif s.combined_id is not None:
+                key = (s.weekday, s.period_no, "combined", s.combined_id)
+            else:
+                key = (s.weekday, s.period_no, "slot", s.id)
+            groups.setdefault(key, []).append(s)
+
+        slots: list[TeacherSlot] = []
+        for (weekday, period_no, kind, _key), members in groups.items():
+            members = sorted(members, key=lambda s: class_labels.get(s.class_id, "?"))
+            first = members[0]
+            ids = [s.class_id for s in members]
+            names = [class_labels.get(s.class_id, "?") for s in members]
+            start, end = clock.get(period_no, ("", ""))
+            if kind == "block":
+                meta = block_meta.get(first.session_id) if first.session_id else None
                 slots.append(TeacherSlot(
-                    weekday=s.weekday, period_no=s.period_no, class_id=s.class_id,
-                    class_label=class_labels.get(s.class_id, "?"), slot_type="block",
-                    session_id=s.session_id, block_name=meta.name if meta else None,
-                    block_kind=meta.kind if meta else None, start=start, end=end))
+                    weekday=weekday, period_no=period_no, class_id=first.class_id,
+                    class_label=names[0], slot_type="block",
+                    session_id=first.session_id, block_name=meta.name if meta else None,
+                    block_kind=meta.kind if meta else None, start=start, end=end,
+                    class_ids=ids, class_labels=names))
             else:
                 slots.append(TeacherSlot(
-                    weekday=s.weekday, period_no=s.period_no, class_id=s.class_id,
-                    class_label=class_labels.get(s.class_id, "?"), slot_type="subject",
-                    subject_name=cs_meta.get(s.class_subject_id, (None, None, None))[0],
-                    class_subject_id=s.class_subject_id, start=start, end=end))
+                    weekday=weekday, period_no=period_no, class_id=first.class_id,
+                    class_label=names[0], slot_type="subject",
+                    subject_name=cs_meta.get(first.class_subject_id, (None, None, None))[0],
+                    class_subject_id=first.class_subject_id, start=start, end=end,
+                    class_ids=ids, class_labels=names,
+                    combined_id=first.combined_id))
+        slots.sort(key=lambda s: (s.weekday, s.period_no, s.class_label))
         return TeacherWeekOut(
             member_id=target, weekdays=weekdays, periods_per_day=shape.periods_per_day,
             slots=slots,
@@ -572,6 +884,7 @@ class TimetableService:
                 TimetableSlot.class_id.in_(class_ids),
                 TimetableSlot.period_no > periods_per_day,
                 TimetableSlot.effective_to.is_(None))))
+        dissolved = {s.combined_id for s in orphans if s.combined_id}
         for s in orphans:
             if s.effective_from >= eff:
                 self.db.delete(s)
@@ -579,6 +892,10 @@ class TimetableService:
                 s.effective_to = eff
         if orphans:
             self.db.flush()
+            # A shortened day takes whole cells away, so a combination can lose
+            # a member here just as surely as through the cell editor (TT-4).
+            for combined_id in dissolved:
+                self._settle_combination(org_id, combined_id, eff)
             # Shortening the day genuinely removes periods from the week, so
             # the weekly load has to follow it down (TT-3). Missing this would
             # leave the planner pacing against periods the school no longer has.
@@ -947,14 +1264,23 @@ class TimetableService:
                                f"elsewhere or the week is full"))
 
         if body.apply:
+            dissolved: set[uuid.UUID] = set()
             for s in live:
                 if s.class_id not in class_ids or s.slot_type == "block":
                     continue
+                if s.combined_id:
+                    dissolved.add(s.combined_id)
                 if s.effective_from >= eff:
                     self.db.delete(s)
                 else:
                     s.effective_to = eff
             self.db.flush()
+            # Regenerating the year rebuilds every subject cell from scratch, so
+            # any combination those cells were in is gone with them (TT-4). The
+            # generator knows nothing about shared lessons; leaving the ids on
+            # would have the new grid claim arrangements nobody asked for.
+            for combined_id in dissolved:
+                self._settle_combination(m.org_id, combined_id, eff)
             for c in cells:
                 self.db.add(TimetableSlot(
                     org_id=m.org_id, class_id=c.class_id, weekday=c.weekday,

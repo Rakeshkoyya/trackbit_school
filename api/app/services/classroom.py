@@ -63,6 +63,7 @@ from app.schemas.classroom import (
     ObservationStudentOut,
 )
 from app.schemas.periods import (
+    CombinedClassCard,
     PeriodCardOut,
     PeriodEventOut,
     PeriodHomeworkOut,
@@ -251,7 +252,13 @@ class ClassroomService:
         day_slots = [ts for ts in day_slots if ts.slot_type != "block"]
 
         att_service = AttendanceService(self.db)
-        class_ids = list({ts.class_id for ts in day_slots})
+        # TT-4: a combined row is one meeting over several classes, and every
+        # class in it still keeps its own register — so the state lookup has to
+        # cover the whole room, not just the class the row is keyed on.
+        members_of = {
+            (ts.class_id, ts.period_no): (list(ts.class_ids) or [ts.class_id])
+            for ts in day_slots}
+        class_ids = list({cid for ids in members_of.values() for cid in ids})
         att = att_service.period_states(m.org_id, class_ids, today)
         roster_sizes = att_service.roster_sizes(m.org_id, class_ids)
 
@@ -299,26 +306,55 @@ class ClassroomService:
         for ts in day_slots:
             state = att.get((ts.class_id, ts.period_no), {})
             topic_id, topic_title, _unit, logged = assignment[(ts.class_id, ts.period_no)]
+            members = members_of.get((ts.class_id, ts.period_no)) or [ts.class_id]
+            # TT-4 — one row for the whole room. Every count is the sum, and
+            # every "done" is an ALL: a lesson where 5-A's register is in and
+            # 6-A's is not has not been captured, and a green tick there would
+            # lose a class's day quietly, which is the one thing this row must
+            # never do. Absent numbers stay absent (`present_count=None`) until
+            # the whole room is marked — a half-marked room has no honest
+            # present count to show.
+            states = [att.get((cid, ts.period_no), {}) for cid in members]
+            combined = len(members) > 1
+            marked_all = all(s.get("marked", False) for s in states)
+            if combined:
+                # Same ALL rule for the topic: each class keeps its own syllabus,
+                # so the room is logged only when every class in it is.
+                logged = all(
+                    s.get("period_id") is not None and s["period_id"] in logs_by_period
+                    for s in states)
+            roster_count = sum(
+                s.get("roster_count", roster_sizes.get(cid, 0))
+                for cid, s in zip(members, states, strict=True))
             periods.append(MyDayPeriod(
                 period_no=ts.period_no, class_subject_id=ts.class_subject_id,
-                class_id=ts.class_id, class_label=ts.class_label, subject_name=ts.subject_name,
+                class_id=ts.class_id,
+                class_label=" + ".join(ts.class_labels) if combined else ts.class_label,
+                subject_name=ts.subject_name,
+                combined_id=ts.combined_id,
+                combined_class_ids=members if combined else [],
+                combined_class_labels=list(ts.class_labels) if combined else [],
                 planned_topic=topic_title, planned_topic_id=topic_id, logged=logged,
                 period_id=state.get("period_id"),
                 status=state.get("status", "held"),
                 opened=state.get("period_id") is not None,
                 closed=state.get("closed", False),
-                attendance_marked=state.get("marked", False),
+                attendance_marked=marked_all,
                 marks_attendance=(
                     # Once a day: ask wherever it is still owed, nowhere once it
                     # is done. The period holding the register keeps the row so
                     # the person who took it can still correct it.
-                    (ts.class_id not in day_taken or state.get("marked", False))
+                    (any(cid not in day_taken for cid in members) or marked_all)
                     if once else (not marking or ts.period_no in marking)),
-                day_attendance_taken=(ts.class_id in day_taken) if once else None,
-                roster_count=state.get("roster_count", roster_sizes.get(ts.class_id, 0)),
-                present_count=state.get("present_count"),
-                absent_count=state.get("absent_count"),
-                late_count=state.get("late_count"),
+                day_attendance_taken=(
+                    all(cid in day_taken for cid in members)) if once else None,
+                roster_count=roster_count,
+                present_count=sum(s.get("present_count") or 0
+                                  for s in states) if marked_all else None,
+                absent_count=sum(s.get("absent_count") or 0
+                                 for s in states) if marked_all else None,
+                late_count=sum(s.get("late_count") or 0
+                               for s in states) if marked_all else None,
                 homework_set=ts.class_subject_id in hw_cs,
                 substituting=(ts.class_id, ts.period_no) in covering_by_slot,
                 covering_for=covering_by_slot.get((ts.class_id, ts.period_no)),
@@ -329,9 +365,13 @@ class ClassroomService:
         # it, so there is nothing to count here and nothing to pre-create. The
         # row is a doorway, and `block_kind` is what the doorway leads to.
         for ts in block_slots:
+            block_classes = list(ts.class_labels) or [ts.class_label]
             periods.append(MyDayPeriod(
                 period_no=ts.period_no, slot_type="block", class_subject_id=None,
-                class_id=ts.class_id, class_label=ts.class_label,
+                class_id=ts.class_id, class_label=" + ".join(block_classes),
+                combined_class_ids=(list(ts.class_ids)
+                                    if len(block_classes) > 1 else []),
+                combined_class_labels=block_classes if len(block_classes) > 1 else [],
                 session_id=ts.session_id, block_name=ts.block_name,
                 block_kind=ts.block_kind,
                 block_kind_label=day_shape.label_for(ts.block_kind),
@@ -800,6 +840,68 @@ class ClassroomService:
             can_write=self._may_write(m, cs))
 
     # ── the period card (V2-P6) ──────────────────────────────────────────────
+    def _subject_name(self, cs_id: uuid.UUID | None) -> str | None:
+        if cs_id is None:
+            return None
+        return self.db.scalar(
+            select(Subject.name).join(ClassSubject, ClassSubject.subject_id == Subject.id)
+            .where(ClassSubject.id == cs_id))
+
+    def _plan_and_homework(
+        self, m: CurrentMember, class_id: uuid.UUID, cs_id: uuid.UUID | None,
+        period_no: int, d: date, monday: date, period: ClassPeriod | None,
+    ) -> tuple[PeriodPlanOut, list[PeriodHomeworkOut]]:
+        """One class's plan and homework for one period.
+
+        Lifted out of `period_card` unchanged so a combined period can render the
+        same two things for every class in the room (TT-4) without a second copy
+        of the topic-assignment rules — which is exactly how two definitions of
+        "what was planned here" would have got into the codebase.
+        """
+        if cs_id is None:
+            return PeriodPlanOut(), []
+        slots = self._slots_for_cs(m.org_id, cs_id, d)
+        period_ids = {
+            (p.class_id, p.period_no): p.id for p in self.db.scalars(
+                select(ClassPeriod).where(
+                    ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == class_id,
+                    ClassPeriod.date == d))}
+        day_logs = list(self.db.scalars(
+            select(LessonLog).where(
+                LessonLog.org_id == m.org_id, LessonLog.class_subject_id == cs_id,
+                LessonLog.date == d, LessonLog.period_id.is_not(None))
+            .order_by(LessonLog.created_at)))
+        logs_by_period = {log.period_id: log for log in day_logs}
+        assignment = self._assign_topics(m.org_id, monday, slots, period_ids, logs_by_period)
+        topic_id, title, unit, logged = assignment.get(
+            (class_id, period_no), (None, None, None, False))
+        log = logs_by_period.get(period.id) if period else None
+        progress = PlannerService(self.db).topic_progress(m, cs_id)
+        titles = {r.topic_id: r.topic_title for r in progress}
+        # ALL topics taught this period — a period can hold several, and a
+        # topic continued from yesterday shows up again here (partial → full).
+        period_logs = [x for x in day_logs if period and x.period_id == period.id]
+        plan = PeriodPlanOut(
+            planned_topic_id=None if logged else topic_id,
+            planned_topic_title=None if logged else title,
+            planned_unit_title=None if logged else unit,
+            logged_topic_id=log.topic_id if log else None,
+            logged_coverage=log.coverage if log else None,
+            logged=[PeriodLogOut(
+                id=x.id, topic_id=x.topic_id,
+                topic_title=titles.get(x.topic_id) if x.topic_id else None,
+                coverage=x.coverage, note=x.note) for x in period_logs],
+            progress=progress)
+        homework = [
+            PeriodHomeworkOut(id=h.id, text=h.text, student_id=h.student_id,
+                              due_date=h.due_date)
+            for h in self.db.scalars(
+                select(HomeworkAssignment).where(
+                    HomeworkAssignment.org_id == m.org_id,
+                    HomeworkAssignment.class_subject_id == cs_id,
+                    HomeworkAssignment.date == d).order_by(HomeworkAssignment.created_at))]
+        return plan, homework
+
     def period_card(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
                     on_date: date | None = None) -> PeriodCardOut:
         """Everything the period-detail page needs, in one call. Purely a read —
@@ -818,55 +920,33 @@ class ClassroomService:
                     TimetableSlot.effective_from <= d,
                     or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d)))
 
-        sheet = AttendanceService(self.db).roster(m, class_id, period_no, d)
+        sheet = AttendanceService(self.db).roster(m, class_id, period_no, d, combined=False)
         marks_attendance, day_taken = self._marks_attendance(m, period_no, class_id, d)
-        subject_name = self.db.scalar(
-            select(Subject.name).join(ClassSubject, ClassSubject.subject_id == Subject.id)
-            .where(ClassSubject.id == cs_id)) if cs_id else None
+        subject_name = self._subject_name(cs_id)
+        plan, homework = self._plan_and_homework(
+            m, class_id, cs_id, period_no, d, monday, period)
 
-        plan = PeriodPlanOut()
-        homework: list[PeriodHomeworkOut] = []
-        if cs_id is not None:
-            slots = self._slots_for_cs(m.org_id, cs_id, d)
-            period_ids = {
-                (p.class_id, p.period_no): p.id for p in self.db.scalars(
-                    select(ClassPeriod).where(
-                        ClassPeriod.org_id == m.org_id, ClassPeriod.class_id == class_id,
-                        ClassPeriod.date == d))}
-            day_logs = list(self.db.scalars(
-                select(LessonLog).where(
-                    LessonLog.org_id == m.org_id, LessonLog.class_subject_id == cs_id,
-                    LessonLog.date == d, LessonLog.period_id.is_not(None))
-                .order_by(LessonLog.created_at)))
-            logs_by_period = {log.period_id: log for log in day_logs}
-            assignment = self._assign_topics(m.org_id, monday, slots, period_ids, logs_by_period)
-            topic_id, title, unit, logged = assignment.get(
-                (class_id, period_no), (None, None, None, False))
-            log = logs_by_period.get(period.id) if period else None
-            progress = PlannerService(self.db).topic_progress(m, cs_id)
-            titles = {r.topic_id: r.topic_title for r in progress}
-            # ALL topics taught this period — a period can hold several, and a
-            # topic continued from yesterday shows up again here (partial → full).
-            period_logs = [x for x in day_logs if period and x.period_id == period.id]
-            plan = PeriodPlanOut(
-                planned_topic_id=None if logged else topic_id,
-                planned_topic_title=None if logged else title,
-                planned_unit_title=None if logged else unit,
-                logged_topic_id=log.topic_id if log else None,
-                logged_coverage=log.coverage if log else None,
-                logged=[PeriodLogOut(
-                    id=x.id, topic_id=x.topic_id,
-                    topic_title=titles.get(x.topic_id) if x.topic_id else None,
-                    coverage=x.coverage, note=x.note) for x in period_logs],
-                progress=progress)
-            homework = [
-                PeriodHomeworkOut(id=h.id, text=h.text, student_id=h.student_id,
-                                  due_date=h.due_date)
-                for h in self.db.scalars(
-                    select(HomeworkAssignment).where(
-                        HomeworkAssignment.org_id == m.org_id,
-                        HomeworkAssignment.class_subject_id == cs_id,
-                        HomeworkAssignment.date == d).order_by(HomeworkAssignment.created_at))]
+        # TT-4 — the rest of the room. Built from the same two helpers as this
+        # class's own half, so a combined card cannot drift from an ordinary one.
+        combo = TimetableService(self.db).combined_meeting(m, class_id, period_no, d)
+        combined_cards: list[CombinedClassCard] = []
+        if combo is not None:
+            att = AttendanceService(self.db)
+            for c in combo.classes:
+                other = find_period(self.db, m.org_id, c.class_id, d, period_no)
+                one_sheet = att.roster(m, c.class_id, period_no, d, combined=False)
+                c_plan, c_hw = self._plan_and_homework(
+                    m, c.class_id, c.class_subject_id, period_no, d, monday, other)
+                combined_cards.append(CombinedClassCard(
+                    class_id=c.class_id, class_label=c.class_label,
+                    class_subject_id=c.class_subject_id, subject_name=c.subject_name,
+                    period_id=other.id if other else None,
+                    attendance_marked=one_sheet.marked,
+                    roster_count=len(one_sheet.roster),
+                    present_count=one_sheet.present_count if one_sheet.marked else None,
+                    absent_count=one_sheet.absent_count if one_sheet.marked else None,
+                    late_count=one_sheet.late_count if one_sheet.marked else None,
+                    plan=c_plan, homework=c_hw))
 
         # V1-7 `S-147`/`S-145`: the day's approved events, which are both the
         # reason picker behind "not held, because" and the answer to whether
@@ -881,6 +961,9 @@ class ClassroomService:
         return PeriodCardOut(
             class_id=class_id, class_label=sheet.class_label, period_no=period_no, date=d,
             class_subject_id=cs_id, subject_name=subject_name,
+            combined_id=combo.id if combo else None,
+            combined_label=combo.label if combo else None,
+            combined=combined_cards,
             period_id=period.id if period else None,
             status=period.status if period else "held",
             not_held_reason=period.not_held_reason if period else None,
@@ -1032,7 +1115,30 @@ class ClassroomService:
         parent portal, the report card — keys on (assignment, student), so a
         shared row would have needed all of them taught a second shape, and a
         child's history would stop being one row per piece of work.
+
+        TT-4: `also_class_subject_ids` sets the SAME homework in the other
+        classes of a combined period — one form, one act, one assignment row per
+        class. Same reasoning as `student_ids` above: the rows stay ordinary, so
+        the check sheet, the parent portal and the syllabus board learn nothing
+        new. A per-student note never fans out; those children are in one class.
         """
+        also = [cs_id for cs_id in dict.fromkeys(body.also_class_subject_ids)
+                if cs_id != body.class_subject_id]
+        if also and not (body.student_id or body.student_ids):
+            first = self._add_homework_one(m, body)
+            notified = first.notified_count
+            created = list(first.created_ids)
+            for cs_id in also:
+                extra = self._add_homework_one(
+                    m, body.model_copy(update={
+                        "class_subject_id": cs_id, "also_class_subject_ids": []}))
+                notified += extra.notified_count
+                created.extend(extra.created_ids)
+            return first.model_copy(update={
+                "notified_count": notified, "created_ids": created})
+        return self._add_homework_one(m, body)
+
+    def _add_homework_one(self, m: CurrentMember, body: HomeworkIn) -> HomeworkOut:
         cs = self._cs(m.org_id, body.class_subject_id)
         self._can_capture(m, cs)
         d = body.date or self._today(m)

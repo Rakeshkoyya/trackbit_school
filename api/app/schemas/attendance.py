@@ -24,6 +24,12 @@ class AttendanceMarkIn(BaseModel):
     class_subject_id: uuid.UUID | None = None
     date: Date | None = None
     exceptions: list[AttendanceExceptionIn] = []
+    # TT-4: a combined period is one roll call over several classes. Sending the
+    # room's classes here writes ONE register PER CLASS — never a shared one, so
+    # every existing reader (the month register, the report card, the absence
+    # alert) keeps working on a class at a time and nothing downstream learns a
+    # new shape. Exceptions are split by whose roster each child is on.
+    class_ids: list[uuid.UUID] = Field(default_factory=list, max_length=12)
 
 
 class AttendanceRosterRow(BaseModel):
@@ -33,6 +39,11 @@ class AttendanceRosterRow(BaseModel):
     # Current exception state for the capture sheet (None = present).
     status: str | None = None
     late_minutes: int | None = None
+    # TT-4: which class this child is in. Null on an ordinary single-class sheet;
+    # set on a combined one, where the sheet has to group the room by class or
+    # the teacher cannot find a name in eighty.
+    class_id: uuid.UUID | None = None
+    class_label: str | None = None
 
 
 class AttendanceRosterOut(BaseModel):
@@ -66,6 +77,12 @@ class AttendanceRosterOut(BaseModel):
     present_count: int
     absent_count: int
     late_count: int
+    # TT-4 — the combined meeting this sheet covers, if any. `class_ids` is what
+    # the save posts back; `combined_label` ("5-A + 6-A") is the room's name, and
+    # it is the same string My Day and the period card use.
+    combined_id: uuid.UUID | None = None
+    combined_class_ids: list[uuid.UUID] = Field(default_factory=list)
+    combined_label: str | None = None
 
 
 class AttendanceMarkOut(BaseModel):

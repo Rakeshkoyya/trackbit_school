@@ -10,7 +10,7 @@
 // only.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, UserCheck } from "lucide-react";
+import { ArrowLeft, Link2, Loader2, UserCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -59,6 +59,10 @@ function AttendanceInner() {
   const save = useMutation({
     mutationFn: () => schoolApi.markAttendance({
       class_id: classId, period_no: periodNo,
+      // TT-4 — one roll call over the room writes one register PER CLASS. The
+      // server splits the exceptions by whose roster each child is on, so
+      // nothing downstream of attendance sees a new shape.
+      class_ids: sheet!.combined_class_ids ?? [],
       exceptions: Object.entries(marks!).flatMap(
         ([student_id, m]): { student_id: string; status: "absent" | "late"; late_minutes?: number | null }[] => {
           if (m.status === "absent") return [{ student_id, status: "absent" }];
@@ -93,6 +97,20 @@ function AttendanceInner() {
           {counts.present}/{counts.total} present
         </Badge>
       </div>
+
+      {/* TT-4 — say the room out loud. A teacher who opened 5-A's period and is
+          handed eighty names needs to know why before she starts tapping, and
+          she needs to know the save reaches both registers. */}
+      {sheet.combined_label ? (
+        <p className="mb-3 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+          <Link2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+          <span>
+            <span className="font-medium text-foreground">{sheet.combined_label}</span> are
+            taught together in this period. Take the roll once — it is filed to each
+            class&rsquo;s own register.
+          </span>
+        </p>
+      ) : null}
 
       {/* Once a day: this page is reachable by URL from any period, and the
           server files the write on the day's register wherever it already is.

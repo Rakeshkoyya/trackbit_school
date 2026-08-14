@@ -112,7 +112,7 @@ from app.models.tiers import (
     UpgradeRequest,
     UpgradeRequestNote,
 )
-from app.models.timetable import BellSchedule, TimetableSlot
+from app.models.timetable import BellSchedule, CombinedPeriod, TimetableSlot
 from app.models.user import User
 
 __all__ = [
@@ -136,6 +136,7 @@ __all__ = [
     "CheckResult",
     "ClassPeriod",
     "ClassSubject",
+    "CombinedPeriod",
     "DailyCheck",
     "DailyReport",
     "DemoRequest",

@@ -6,8 +6,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BookOpen, Camera, Check, ChevronDown, ChevronRight, ListChecks, Plus,
-  Send, UserCheck, Users, X,
+  ArrowLeft, BookOpen, Camera, Check, ChevronDown, ChevronRight, Link2, ListChecks,
+  Plus, Send, UserCheck, Users, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type { DailyCheck, ObservationSection, PeriodCard } from "@/lib/school-types";
+import type { DailyCheck, ObservationSection, PeriodCard, PeriodPlan } from "@/lib/school-types";
 
 function Section({ title, icon, children, aside }: {
   title: string; icon: React.ReactNode; children: React.ReactNode; aside?: React.ReactNode;
@@ -40,7 +40,31 @@ function Section({ title, icon, children, aside }: {
 }
 
 // ── 1 · attendance — a tappable row that opens the roll-call page ────────────
+/** TT-4: on a combined period the counts are the ROOM's, summed from each
+ *  class's own register, and "marked" is ALL of them. A half-marked room shown
+ *  as done would lose a class's day quietly. */
+function roomCounts(card: PeriodCard) {
+  const parts = card.combined ?? [];
+  if (parts.length < 2) {
+    return {
+      marked: card.attendance_marked, roster: card.roster_count,
+      present: card.present_count, absent: card.absent_count, late: card.late_count,
+    };
+  }
+  const marked = parts.every((c) => c.attendance_marked);
+  const sum = (pick: (c: (typeof parts)[number]) => number | null) =>
+    parts.reduce((n, c) => n + (pick(c) ?? 0), 0);
+  return {
+    marked,
+    roster: sum((c) => c.roster_count),
+    present: marked ? sum((c) => c.present_count) : null,
+    absent: marked ? sum((c) => c.absent_count) : null,
+    late: marked ? sum((c) => c.late_count) : null,
+  };
+}
+
 function AttendanceSection({ card }: { card: PeriodCard }) {
+  const room = roomCounts(card);
   // Founder, 2026-08-05 — once a day means once a day. In a school on
   // `first_period` the register belongs to the DAY, so a period that is not
   // asking is not asking for one of two very different reasons, and the teacher
@@ -88,26 +112,33 @@ function AttendanceSection({ card }: { card: PeriodCard }) {
   return (
     <Link href={`/my-day/period/${card.class_id}/${card.period_no}/attendance`}
       className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 active:scale-[0.995]">
-      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${card.attendance_marked ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]" : "bg-muted text-muted-foreground"}`}>
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${room.marked ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]" : "bg-muted text-muted-foreground"}`}>
         <Users className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">Attendance</p>
+        <p className="text-sm font-semibold">
+          Attendance
+          {card.combined_label ? (
+            <span className="ml-1.5 font-normal text-muted-foreground">· {card.combined_label}</span>
+          ) : null}
+        </p>
         <p className="truncate text-xs text-muted-foreground">
-          {card.roster_count === 0 ? "No students on the roster yet"
-            : card.attendance_marked
+          {room.roster === 0 ? "No students on the roster yet"
+            : room.marked
               ? card.roster.filter((r) => r.status).map((r) =>
                   `${r.full_name} ${r.status}${r.late_minutes ? ` ${r.late_minutes}m` : ""}`).join(" · ") || "Everyone present"
-              : "Not taken yet — tap to call the roll"}
+              : card.combined_label
+                ? "One roll call for both classes — tap to take it"
+                : "Not taken yet — tap to call the roll"}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        {card.attendance_marked ? (
+        {room.marked ? (
           <>
-            <Badge tone={card.absent_count ? "warning" : "success"}>
-              <UserCheck className="h-3 w-3" /> {card.present_count}/{card.roster_count}
+            <Badge tone={room.absent ? "warning" : "success"}>
+              <UserCheck className="h-3 w-3" /> {room.present}/{room.roster}
             </Badge>
-            {card.late_count ? <Badge tone="warning">{card.late_count} late</Badge> : null}
+            {room.late ? <Badge tone="warning">{room.late} late</Badge> : null}
           </>
         ) : (
           <Badge tone="neutral">take now</Badge>
@@ -119,12 +150,22 @@ function AttendanceSection({ card }: { card: PeriodCard }) {
 }
 
 // ── 2 · topics — pick from the list and it's saved instantly; delete to undo ─
-function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void }) {
-  const { plan } = card;
+/** One class's topics for this period.
+ *
+ *  TT-4: a combined period renders one of these PER CLASS, and that is
+ *  deliberate. Everything else about a shared lesson is genuinely one act — one
+ *  roll call, one homework — but the syllabus is not: a 5th-class chapter is not
+ *  a 6th-class chapter, and a single shared picker would either move the wrong
+ *  syllabus or need a seventh definition of "covered" to reconcile them. Two
+ *  taps, and both classes' pace figures stay true.
+ */
+function TopicPicker({ csId, periodNo, plan, onSaved }: {
+  csId: string; periodNo: number; plan: PeriodPlan; onSaved: () => void;
+}) {
   const log = useMutation({
     mutationFn: (topicId: string) => schoolApi.logLesson({
-      class_subject_id: card.class_subject_id!, topic_id: topicId, coverage: "full",
-      period_no: card.period_no,
+      class_subject_id: csId, topic_id: topicId, coverage: "full",
+      period_no: periodNo,
     }),
     onSuccess: () => { toast.success("Added — taught today"); onSaved(); },
     onError: (e) => showApiError(e, "Could not add"),
@@ -144,17 +185,11 @@ function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void
     byUnit.get(row.unit_title)!.push(row);
   }
 
-  if (card.class_subject_id == null) {
-    return (
-      <Section title="Topics taught" icon={<Check className="h-4 w-4" />}>
-        <p className="text-sm text-muted-foreground">No subject is timetabled for this period.</p>
-      </Section>
-    );
-  }
-
   return (
-    <Section title="Topics taught" icon={<Check className="h-4 w-4" />}
-      aside={log.isPending ? <span className="text-xs text-muted-foreground">saving…</span> : null}>
+    <div>
+      {log.isPending ? (
+        <p className="mb-1 text-right text-xs text-muted-foreground">saving…</p>
+      ) : null}
 
       {plan.logged.length > 0 ? (
         <ul className="mb-3 space-y-1">
@@ -213,6 +248,46 @@ function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void
         Picking a topic saves it instantly. The same topic can be added again on another day
         if it takes longer than one class.
       </p>
+    </div>
+  );
+}
+
+function TopicSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void }) {
+  const combined = card.combined ?? [];
+  if (combined.length > 1) {
+    return (
+      <Section title="Topics taught" icon={<Check className="h-4 w-4" />}>
+        <p className="mb-3 text-xs text-muted-foreground">
+          One lesson, two syllabuses. Log what each class actually covered — their
+          chapters are their own, so their pace stays their own.
+        </p>
+        <div className="space-y-4">
+          {combined.map((c) => (
+            <div key={c.class_id} className="rounded-lg border border-border bg-background p-3">
+              <p className="mb-2 text-sm font-semibold">
+                {c.class_label}
+                {c.subject_name ? <span className="font-normal text-muted-foreground"> · {c.subject_name}</span> : null}
+              </p>
+              {c.class_subject_id ? (
+                <TopicPicker csId={c.class_subject_id} periodNo={card.period_no}
+                  plan={c.plan} onSaved={onSaved} />
+              ) : (
+                <p className="text-sm text-muted-foreground">No subject timetabled for this class.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </Section>
+    );
+  }
+  return (
+    <Section title="Topics taught" icon={<Check className="h-4 w-4" />}>
+      {card.class_subject_id == null ? (
+        <p className="text-sm text-muted-foreground">No subject is timetabled for this period.</p>
+      ) : (
+        <TopicPicker csId={card.class_subject_id} periodNo={card.period_no}
+          plan={card.plan} onSaved={onSaved} />
+      )}
     </Section>
   );
 }
@@ -223,11 +298,27 @@ function HomeworkSection({ card, onSaved }: { card: PeriodCard; onSaved: () => v
   const [due, setDue] = useState("");
   const [studentId, setStudentId] = useState("");
   const [adding, setAdding] = useState(false);
+  // TT-4 — the same homework, set once for the room. Every class starts ticked
+  // because that is what a combined lesson usually means; untick one and it
+  // simply doesn't get it. A note for a NAMED child never fans out — those
+  // children are all in one class, and copying it would message a stranger's
+  // parents (the server enforces this too).
+  const others = (card.combined ?? []).filter(
+    (c) => c.class_subject_id && c.class_subject_id !== card.class_subject_id);
+  const [alsoFor, setAlsoFor] = useState<Set<string>>(new Set());
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  const othersKey = others.map((c) => c.class_subject_id).join(",");
+  if (othersKey !== seededFor) {
+    setSeededFor(othersKey);
+    setAlsoFor(new Set(others.map((c) => c.class_subject_id!)));
+  }
+
   const nameOf = new Map(card.roster.map((r) => [r.student_id, r.full_name]));
   const add = useMutation({
     mutationFn: () => schoolApi.addHomework({
       class_subject_id: card.class_subject_id!, text: text.trim(),
       due_date: due || null, student_id: studentId || null,
+      also_class_subject_ids: studentId ? [] : [...alsoFor],
     }),
     onSuccess: (res) => {
       toast.success(`Homework set · ${res.notified_count} parents notified`);
@@ -268,6 +359,36 @@ function HomeworkSection({ card, onSaved }: { card: PeriodCard; onSaved: () => v
             </select>
             <Input type="date" aria-label="Due date" value={due} onChange={(e) => setDue(e.target.value)} />
           </div>
+          {others.length > 0 ? (
+            <div className="rounded-md border border-border bg-background px-2 py-1.5">
+              <p className="mb-1 text-xs text-muted-foreground">
+                {studentId
+                  ? "A note for one child goes to that child only."
+                  : "Also set it for"}
+              </p>
+              {!studentId ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {others.map((c) => {
+                    const on = alsoFor.has(c.class_subject_id!);
+                    return (
+                      <button key={c.class_id} type="button"
+                        onClick={() => setAlsoFor((prev) => {
+                          const next = new Set(prev);
+                          if (on) next.delete(c.class_subject_id!);
+                          else next.add(c.class_subject_id!);
+                          return next;
+                        })}
+                        className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                          on ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-card hover:bg-muted"}`}>
+                        {on ? <Check className="mr-1 inline h-3 w-3" /> : null}{c.class_label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex gap-2">
             <Button type="submit" className="flex-1" disabled={add.isPending || !text.trim()}>
               <Send className="h-4 w-4" /> {add.isPending ? "Sending…" : "Set & notify parents"}
@@ -667,9 +788,17 @@ function PeriodPageInner() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              P{card.period_no} · {card.class_label}{card.subject_name ? ` · ${card.subject_name}` : ""}
+              P{card.period_no} · {card.combined_label ?? card.class_label}
+              {card.subject_name ? ` · ${card.subject_name}` : ""}
             </h1>
-            <p className="text-sm text-muted-foreground">{card.date}</p>
+            <p className="text-sm text-muted-foreground">
+              {card.date}
+              {card.combined_label ? (
+                <span className="ml-1.5 inline-flex items-center gap-1 text-primary">
+                  <Link2 className="h-3.5 w-3.5" /> taught together
+                </span>
+              ) : null}
+            </p>
           </div>
           {card.status === "not_held" ? (
             <Badge tone="neutral">not held{card.not_held_reason ? ` · ${card.not_held_reason}` : ""}</Badge>

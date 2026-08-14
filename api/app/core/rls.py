@@ -109,6 +109,11 @@ SCHOOL_TIMETABLE_TABLES = (
     "timetable_slots",
 )
 
+# TT-4 combined periods (two classes, one meeting) — migration b6c7d8e9f0a1.
+SCHOOL_COMBINED_TABLES = (
+    "combined_periods",
+)
+
 # V2-P2 attendance (SPRD2 §4.4, §5.4) — engaged in migration f1b2c3d4e5f6.
 # V2-P6 renamed `attendance_marks` → `class_periods` (migration f5a6b7c8d9e0). The
 # rename preserves the table OID, so its RLS policy and grants carry over; the

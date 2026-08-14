@@ -2,7 +2,8 @@
 
 import { Fragment } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Home } from "lucide-react";
+import { AlertTriangle, Home, Link2, Unlink } from "lucide-react";
+import { toast } from "sonner";
 
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
@@ -76,6 +77,15 @@ export function TimetableGrid({ classId, canEdit }: { classId: string; canEdit: 
       schoolApi.clearSlot({ class_id: classId, ...v }),
     onSuccess: () => inv(),
     onError: (e) => showApiError(e, "Could not clear period"),
+  });
+  // TT-4: take THIS class out of a shared lesson. The other classes carry on
+  // together — unless only one is left, in which case the server splits it too,
+  // because a combination of one is not a combination.
+  const uncombine = useMutation({
+    mutationFn: (combinedId: string) =>
+      schoolApi.uncombinePeriod({ combined_id: combinedId, class_ids: [classId] }),
+    onSuccess: () => { inv(); toast.success("Split — this class is on its own again"); },
+    onError: (e) => showApiError(e, "Could not split the period"),
   });
 
   if (!grid) return <div className="h-40 animate-pulse rounded-lg bg-muted" />;
@@ -152,6 +162,10 @@ export function TimetableGrid({ classId, canEdit }: { classId: string; canEdit: 
                       const slot = at(wd, p);
                       const isClash = clashes.has(clashKey(wd, p));
                       const isBlock = slot?.slot_type === "block";
+                      // TT-4 — the room, said on the cell. Without it a combined
+                      // period looks exactly like an ordinary one whose clash
+                      // somebody silenced, which is the wrong thing to believe.
+                      const shared = slot?.combined_with ?? [];
                       return (
                         <td key={wd} className="px-1 py-1">
                           {canEdit ? (
@@ -200,6 +214,24 @@ export function TimetableGrid({ classId, canEdit }: { classId: string; canEdit: 
                               </span>
                             </div>
                           )}
+                          {shared.length > 0 ? (
+                            <p className="mt-0.5 flex items-center gap-1 px-0.5 text-[11px] text-primary">
+                              <Link2 className="h-3 w-3 shrink-0" aria-hidden />
+                              <span className="min-w-0 flex-1 truncate"
+                                title={`Taught together with ${shared.join(", ")}`}>
+                                with {shared.join(", ")}
+                              </span>
+                              {canEdit && slot?.combined_id ? (
+                                <button type="button" aria-label="Split this class out"
+                                  title="Split this class out"
+                                  disabled={uncombine.isPending}
+                                  onClick={() => uncombine.mutate(slot.combined_id!)}
+                                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                                  <Unlink className="h-3 w-3" />
+                                </button>
+                              ) : null}
+                            </p>
+                          ) : null}
                         </td>
                       );
                     })}
@@ -268,6 +300,12 @@ export function TeacherWeekGrid() {
                   {week.weekdays.map((wd) => {
                     const slot = at(wd, p);
                     const isBlock = slot?.slot_type === "block";
+                    // TT-4: one cell per meeting, naming the whole room. A
+                    // combined lesson used to draw two rows here and a Monday
+                    // assembly twenty, which is not what a day looks like.
+                    const room = slot
+                      ? (slot.class_labels?.length ? slot.class_labels : [slot.class_label]).join(" + ")
+                      : "";
                     return (
                       <td key={wd} className="px-1 py-1">
                         <div className={`min-h-7 rounded px-1.5 py-1 text-xs ${
@@ -275,9 +313,13 @@ export function TeacherWeekGrid() {
                         }`}>
                           {slot
                             ? isBlock
-                              ? `${slot.block_name ?? ""} · ${slot.class_label}`
-                              : `${slot.class_label} · ${slot.subject_name ?? ""}`
+                              ? `${slot.block_name ?? ""} · ${room}`
+                              : `${room} · ${slot.subject_name ?? ""}`
                             : ""}
+                          {slot?.combined_id ? (
+                            <Link2 className="ml-1 inline h-3 w-3 align-[-2px] text-primary"
+                              aria-label="Combined class" />
+                          ) : null}
                         </div>
                       </td>
                     );

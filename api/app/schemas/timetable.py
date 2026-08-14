@@ -133,18 +133,31 @@ class SlotOut(BaseModel):
     category_name: str | None = None
     staff_member_ids: list[uuid.UUID] = Field(default_factory=list)
     staff_names: list[str] = Field(default_factory=list)
+    # TT-4: this cell is one class's share of a combined meeting.
+    combined_id: uuid.UUID | None = None
+    #: The OTHER classes sitting in the same lesson — what the grid chip says.
+    combined_with: list[str] = Field(default_factory=list)
     effective_from: date
     effective_to: date | None = None
 
 
 class Clash(BaseModel):
-    """A teacher double-booked at one weekday+period across classes."""
+    """A teacher double-booked at one weekday+period across classes.
+
+    TT-4: `combinable` is the difference between a mistake and an arrangement the
+    grid has no words for yet. When every class in the clash runs a subject and
+    they share one teacher, the honest fix is usually not to move a period — it
+    is to say these classes sit together. The banner offers exactly that, and
+    `class_ids` is what it posts.
+    """
 
     weekday: int
     period_no: int
     teacher_member_id: uuid.UUID
     teacher_name: str | None = None
     class_labels: list[str]
+    class_ids: list[uuid.UUID] = Field(default_factory=list)
+    combinable: bool = False
 
 
 class GridPeriod(BaseModel):
@@ -218,8 +231,69 @@ class SlotBulkOut(BaseModel):
     skipped: list[str] = Field(default_factory=list)
 
 
+# ── combined periods (TT-4) ──────────────────────────────────────────────────
+class CombineIn(BaseModel):
+    """"These classes sit together in this period."
+
+    Named by the CELL (weekday + period) and the classes in it, never by slot
+    ids: the admin is pointing at a column of the grid, and slot ids change every
+    time a cell is edited.
+    """
+
+    weekday: int = Field(ge=0, le=6)
+    period_no: int = Field(ge=1, le=16)
+    class_ids: list[uuid.UUID] = Field(min_length=2, max_length=12)
+    note: str | None = Field(default=None, max_length=200)
+    effective_from: date | None = None
+
+
+class UncombineIn(BaseModel):
+    """Split a combined meeting back into separate lessons.
+
+    One class id splits just that class out; none splits the whole thing.
+    """
+
+    combined_id: uuid.UUID
+    class_ids: list[uuid.UUID] = Field(default_factory=list, max_length=12)
+    effective_from: date | None = None
+
+
+class CombinedClassOut(BaseModel):
+    class_id: uuid.UUID
+    class_label: str
+    class_subject_id: uuid.UUID | None = None
+    subject_name: str | None = None
+
+
+class CombinedOut(BaseModel):
+    """One combined meeting as every screen reads it.
+
+    Weekday, period and members are all resolved from the live slots — nothing
+    here is stored twice.
+    """
+
+    id: uuid.UUID
+    weekday: int
+    period_no: int
+    note: str | None = None
+    teacher_member_id: uuid.UUID | None = None
+    teacher_name: str | None = None
+    classes: list[CombinedClassOut] = Field(default_factory=list)
+    label: str = ""
+
+
 # ── teacher views ────────────────────────────────────────────────────────────
 class TeacherSlot(BaseModel):
+    """One thing this teacher is doing at one weekday+period.
+
+    TT-4: **one row per MEETING, not per class.** A combined lesson and a block
+    placed on twenty classes are each one place the teacher stands, so they
+    collapse to a single row here — `class_id`/`class_label` name the one the
+    screens key off, and `class_ids`/`class_labels` carry the whole room. Before
+    this, a Monday assembly drew twenty identical rows on the admin's week and a
+    combined Maths drew two, which is not what a day looks like.
+    """
+
     weekday: int
     period_no: int
     class_id: uuid.UUID
@@ -232,6 +306,12 @@ class TeacherSlot(BaseModel):
     block_kind: str | None = None
     start: str = ""
     end: str = ""
+    #: Every class in this meeting, `class_id` first. Length 1 for an ordinary
+    #: period — so a caller can always read this one field and be right.
+    class_ids: list[uuid.UUID] = Field(default_factory=list)
+    class_labels: list[str] = Field(default_factory=list)
+    #: Set only when this is a combined SUBJECT meeting (TT-4).
+    combined_id: uuid.UUID | None = None
 
 
 class TeacherWeekOut(BaseModel):

@@ -220,8 +220,15 @@ export interface MyDayPeriod {
   slot_type: string;
   class_subject_id: string | null;
   class_id: string;
+  /** TT-4: on a combined period this is the ROOM — "5-A + 6-A". `class_id`
+   *  stays the one class the row navigates by. */
   class_label: string;
   subject_name: string | null;
+  /** TT-4 — empty on an ordinary period; set on a combined one (and on a block
+   *  running across several classes). */
+  combined_id: string | null;
+  combined_class_ids: string[];
+  combined_class_labels: string[];
   session_id: string | null;
   block_name: string | null;
   block_kind: string | null;
@@ -288,6 +295,10 @@ export interface TimetableSlot {
   block_name: string | null;
   block_kind: string | null;
   block_kind_label: string | null;
+  /** TT-4 — this cell is one class's share of a combined meeting, and
+   *  `combined_with` names the OTHER classes in the room. */
+  combined_id: string | null;
+  combined_with: string[];
   /** `D-129` — the student category this block serves, or null for the whole
    *  class. Replaces the old `hostellers_only` boolean, which could only ask
    *  one question and resolved it by matching the category NAME. */
@@ -305,6 +316,31 @@ export interface TimetableClash {
   teacher_member_id: string;
   teacher_name: string | null;
   class_labels: string[];
+  /** What the Combine button posts — labels are for reading, not for keying. */
+  class_ids: string[];
+  /** TT-4: every class in the clash runs a subject and they share one teacher,
+   *  so "they sit together" is a real answer and the banner offers it. */
+  combinable: boolean;
+}
+
+/** TT-4 — classes taught as one meeting at one weekday+period. */
+export interface CombinedClass {
+  class_id: string;
+  class_label: string;
+  class_subject_id: string | null;
+  subject_name: string | null;
+}
+
+export interface CombinedPeriod {
+  id: string;
+  weekday: number;
+  period_no: number;
+  note: string | null;
+  teacher_member_id: string | null;
+  teacher_name: string | null;
+  classes: CombinedClass[];
+  /** "5-A + 6-A" — the room's name, the same string on every screen. */
+  label: string;
 }
 
 export interface TimetableGrid {
@@ -333,6 +369,12 @@ export interface TeacherSlot {
   block_kind: string | null;
   start: string;
   end: string;
+  /** TT-4 — ONE row per meeting. A block across twenty classes and a combined
+   *  lesson across two are each one place the teacher stands, so these carry
+   *  the whole room; length 1 on an ordinary period. */
+  class_ids: string[];
+  class_labels: string[];
+  combined_id: string | null;
 }
 
 export interface TeacherWeek {
@@ -527,6 +569,10 @@ export interface AttendanceRosterRow {
   roll_no: string | null;
   status: AttendanceException | null;
   late_minutes: number | null;
+  /** TT-4 — null on an ordinary sheet; set on a combined one, where the roll
+   *  has to be grouped by class or a name cannot be found in eighty. */
+  class_id: string | null;
+  class_label: string | null;
 }
 
 export interface AttendanceRoster {
@@ -547,6 +593,11 @@ export interface AttendanceRoster {
   present_count: number;
   absent_count: number;
   late_count: number;
+  /** TT-4 — the combined meeting this sheet covers. `combined_class_ids` is
+   *  what the save posts back; one roll call, one register per class. */
+  combined_id: string | null;
+  combined_class_ids: string[];
+  combined_label: string | null;
 }
 
 export interface AttendanceMarkResult {
@@ -1616,6 +1667,23 @@ export interface PeriodDayEvent {
   blocks_periods: number[] | null;
 }
 
+/** One class's half of a combined period (TT-4). The plan stays per class —
+ *  a 5th-class chapter is not a 6th-class chapter. */
+export interface CombinedClassCard {
+  class_id: string;
+  class_label: string;
+  class_subject_id: string | null;
+  subject_name: string | null;
+  period_id: string | null;
+  attendance_marked: boolean;
+  roster_count: number;
+  present_count: number | null;
+  absent_count: number | null;
+  late_count: number | null;
+  plan: PeriodPlan;
+  homework: PeriodHomework[];
+}
+
 export interface PeriodCard {
   class_id: string;
   class_label: string;
@@ -1623,6 +1691,11 @@ export interface PeriodCard {
   date: string;
   class_subject_id: string | null;
   subject_name: string | null;
+  /** TT-4 — the classes sitting in this room. EMPTY on an ordinary period; when
+   *  set it INCLUDES this class, so the card iterates one list. */
+  combined_id: string | null;
+  combined_label: string | null;
+  combined: CombinedClassCard[];
   period_id: string | null;
   status: "held" | "not_held";
   not_held_reason: string | null;

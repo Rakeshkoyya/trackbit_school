@@ -101,6 +101,35 @@ class PeriodHomeworkOut(BaseModel):
     due_date: date | None = None
 
 
+class CombinedClassCard(BaseModel):
+    """One class's half of a combined period (TT-4).
+
+    The teacher captures once; the record is still each class's own. Attendance,
+    the lesson log and the homework all land per class — so what this carries is
+    one class's state of that shared meeting, and the card renders as many of
+    these as there are classes in the room.
+
+    The **plan stays per class and is not pooled.** A 5th-class Maths chapter is
+    not a 6th-class Maths chapter, however identical the lesson in the room was;
+    one shared topic list would either move the wrong syllabus or invent a
+    seventh definition of "covered" (see `core/coverage.py` on why that matters).
+    """
+
+    class_id: uuid.UUID
+    class_label: str
+    class_subject_id: uuid.UUID | None = None
+    subject_name: str | None = None
+    # This class's own register for the period.
+    period_id: uuid.UUID | None = None
+    attendance_marked: bool = False
+    roster_count: int = 0
+    present_count: int | None = None
+    absent_count: int | None = None
+    late_count: int | None = None
+    plan: "PeriodPlanOut" = Field(default_factory=lambda: PeriodPlanOut())
+    homework: list["PeriodHomeworkOut"] = []
+
+
 class PeriodEventOut(BaseModel):
     """One approved calendar row running on this date, offered as the reason."""
     id: uuid.UUID
@@ -123,6 +152,13 @@ class PeriodCardOut(BaseModel):
     date: date
     class_subject_id: uuid.UUID | None = None
     subject_name: str | None = None
+
+    # TT-4 — the classes sitting in this room. EMPTY on an ordinary period, so a
+    # caller can branch on `combined` alone; when set it includes THIS class, so
+    # the card can iterate one list rather than "this one, plus the others".
+    combined_id: uuid.UUID | None = None
+    combined_label: str | None = None
+    combined: list[CombinedClassCard] = []
 
     # Lifecycle — period_id is NULL until the teacher opens it.
     period_id: uuid.UUID | None = None

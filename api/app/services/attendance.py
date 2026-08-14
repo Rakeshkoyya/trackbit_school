@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.context import CurrentMember
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
     AttendanceException,
@@ -232,10 +232,61 @@ class AttendanceService:
                 Student.status == "active").order_by(Student.full_name)))
 
     # ── roster for the capture sheet ─────────────────────────────────────────
+    def _combined_rows(self, m: CurrentMember, class_ids: list[uuid.UUID],
+                       labels: dict[uuid.UUID, str], d: date,
+                       period_no: int) -> tuple[list[AttendanceRosterRow], int, int, bool]:
+        """The whole room's sheet: every class's roster, each carrying its label.
+
+        Marks are read per class, from that class's own register, because that is
+        where they are written. `marked` is ALL of them: a room where one class's
+        register is in and the other's is not has not had its roll taken, and
+        saying otherwise would leave a class silently unmarked for the day.
+        """
+        rows: list[AttendanceRosterRow] = []
+        marked_all = True
+        for cid in class_ids:
+            sheet = self._sheet_for(m, cid, period_no, d)
+            marked_all = marked_all and sheet.marked
+            for r in sheet.roster:
+                rows.append(r.model_copy(update={
+                    "class_id": cid, "class_label": labels.get(cid)}))
+        absent = sum(1 for r in rows if r.status == "absent")
+        late = sum(1 for r in rows if r.status == "late")
+        return rows, absent, late, marked_all
+
     def roster(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
-               on_date: date | None = None) -> AttendanceRosterOut:
-        klass = self._class(m.org_id, class_id)
+               on_date: date | None = None,
+               combined: bool = True) -> AttendanceRosterOut:
+        """The capture sheet for one period.
+
+        TT-4: when the period is a COMBINED meeting the sheet is the room, not
+        the class — every child the teacher can see in front of her, grouped by
+        class. `combined=False` asks for this class alone, which is what the
+        period card wants for its per-class sections.
+        """
         d = on_date or self._today(m)
+        if combined:
+            from app.services.timetable import TimetableService, combined_label  # noqa: PLC0415
+
+            combo = TimetableService(self.db).combined_meeting(m, class_id, period_no, d)
+            if combo is not None:
+                assert_can_take_class(self.db, m, class_id, None, d, period_no)
+                ids = [c.class_id for c in combo.classes]
+                labels = {c.class_id: c.class_label for c in combo.classes}
+                rows, absent, late, marked = self._combined_rows(
+                    m, ids, labels, d, period_no)
+                label = combined_label([c.class_label for c in combo.classes])
+                return AttendanceRosterOut(
+                    class_id=class_id, class_label=label, period_no=period_no, date=d,
+                    period_id=None, marked=marked, once_per_day=self.once_per_day(m),
+                    roster=rows, present_count=len(rows) - absent,
+                    absent_count=absent, late_count=late,
+                    combined_id=combo.id, combined_class_ids=ids, combined_label=label)
+        return self._sheet_for(m, class_id, period_no, d)
+
+    def _sheet_for(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
+                   d: date) -> AttendanceRosterOut:
+        klass = self._class(m.org_id, class_id)
         assert_can_take_class(self.db, m, class_id, None, d, period_no)
         roster = self._roster(m.org_id, class_id)
         # In a once-per-day school the sheet must OPEN on the day's register
@@ -298,9 +349,56 @@ class AttendanceService:
         return m.org.attendance_mode == "first_period"
 
     # ── mark (the one-tap capture) ───────────────────────────────────────────
+    def _mark_combined(self, m: CurrentMember, body: AttendanceMarkIn,
+                       d: date) -> AttendanceMarkOut:
+        """One roll call over a combined room → one register PER CLASS (TT-4).
+
+        Deliberately a fan-out over the ordinary `mark`, not a second write path.
+        Everything that makes attendance correct — the once-a-day redirect, the
+        kept absence reasons, the guardian alert firing on the day's first marked
+        period — is written once and would have to be written twice if a combined
+        register were its own thing. Splitting the exceptions is free: `mark`
+        already ignores students who are not on the class's roster, so each class
+        picks up exactly its own children.
+        """
+        from app.services.timetable import TimetableService  # noqa: PLC0415
+
+        combo = TimetableService(self.db).combined_meeting(
+            m, body.class_id, body.period_no, d)
+        if combo is None:
+            raise ValidationError(
+                "These classes are not combined in this period. Take each "
+                "class's register on its own.")
+        allowed = {c.class_id: c for c in combo.classes}
+        asked = [cid for cid in dict.fromkeys(body.class_ids) if cid in allowed]
+        unknown = [cid for cid in body.class_ids if cid not in allowed]
+        if unknown or not asked:
+            raise ValidationError(
+                "One of those classes is not in this combined period. Reload the "
+                "sheet and try again.")
+
+        roster_count = present = absent = late = alerted = 0
+        primary: AttendanceMarkOut | None = None
+        for cid in asked:
+            one = self.mark(m, body.model_copy(update={
+                "class_id": cid, "class_ids": [],
+                "class_subject_id": allowed[cid].class_subject_id}))
+            if cid == body.class_id or primary is None:
+                primary = one
+            roster_count += one.roster_count
+            present += one.present_count
+            absent += one.absent_count
+            late += one.late_count
+            alerted += one.alerted_count
+        return primary.model_copy(update={
+            "roster_count": roster_count, "present_count": present,
+            "absent_count": absent, "late_count": late, "alerted_count": alerted})
+
     def mark(self, m: CurrentMember, body: AttendanceMarkIn) -> AttendanceMarkOut:
-        klass = self._class(m.org_id, body.class_id)
         d = body.date or self._today(m)
+        if body.class_ids and set(body.class_ids) - {body.class_id}:
+            return self._mark_combined(m, body, d)
+        klass = self._class(m.org_id, body.class_id)
         assert_can_take_class(self.db, m, body.class_id, body.class_subject_id,
                               d, body.period_no)
         roster_ids = {s.id for s in self._roster(m.org_id, body.class_id)}

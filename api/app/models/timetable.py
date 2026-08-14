@@ -70,6 +70,38 @@ class BellSchedule(Base, UUIDPKMixin, CreatedAtMixin):
     )
 
 
+class CombinedPeriod(Base, UUIDPKMixin, CreatedAtMixin):
+    """Two or more classes taught as ONE meeting at one weekday+period (TT-4).
+
+    A school with a small 5th and a small 6th runs them together for Maths: one
+    teacher, one room, one lesson. Before this, the only way to say so was to put
+    Maths in both grids — which is *true*, and which the clash validator was
+    right to flag, because from the grid alone it is indistinguishable from the
+    teacher being double-booked.
+
+    The row is deliberately almost empty. **Its membership is the set of live
+    slots pointing at it**, so weekday, period, classes and subjects are read off
+    `timetable_slots` and are never copied here: the most-repeated defect in this
+    codebase's history is one fact in two stores, and a combination that cached
+    its own weekday would keep it after the admin moved the period.
+
+    Membership therefore inherits the grid's effective-dating for free —
+    combining and un-combining close the old slot rows and open new ones, exactly
+    as any other cell edit does (Law 3), so a register read back from August
+    still knows whether the class sat on its own that month.
+    """
+
+    __tablename__ = "combined_periods"
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Why these classes sit together — "small batch, one Maths teacher". Shown on
+    # the grid chip; never load-bearing.
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class TimetableSlot(Base, UUIDPKMixin, CreatedAtMixin):
     __tablename__ = "timetable_slots"
 
@@ -99,6 +131,14 @@ class TimetableSlot(Base, UUIDPKMixin, CreatedAtMixin):
     # closes the slots first.
     session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    # TT-4: this cell is one class's share of a COMBINED meeting. Live slots
+    # sharing this id at one weekday+period are one lesson taken once. SET NULL
+    # rather than CASCADE for the same reason as `session_id`: dropping the
+    # combination must un-combine the cells, never delete a class's timetable.
+    combined_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("combined_periods.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
     # Effective-dating: [effective_from, effective_to). NULL effective_to = current.
