@@ -199,6 +199,9 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
   const [rows, setRows] = useState<PlannedInstallment[]>([]);
   const [planKey, setPlanKey] = useState<string | null>(null);
   const [seeded, setSeeded] = useState<string | null>(null);
+  // A structure the office picked on purpose — e.g. billing a day scholar on
+  // the Hosteller price, because that is what the school agreed.
+  const [pickedFs, setPickedFs] = useState<string | null>(null);
 
   // Reset per student, during render (React's documented pattern) — a sheet
   // reopened on the next child must never carry the last one's discount.
@@ -206,7 +209,7 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
     setSeeded(studentId);
     setMode("default");
     setTotal(""); setDiscount(""); setParts(""); setDues("");
-    setRows([]); setPlanKey(null);
+    setRows([]); setPlanKey(null); setPickedFs(null);
   }
 
   const { data: setup, isLoading } = useQuery({
@@ -215,17 +218,24 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
     enabled: !!studentId && !!yearId,
   });
 
+  // The structure in play: the one that prices her, or one the office picked.
+  const others = setup?.class_structures ?? [];
+  const active = pickedFs
+    ? others.find((s) => s.id === pickedFs) ?? null
+    : setup?.structure ?? null;
   // No structure = no default to offer, so the sheet opens straight into the
   // form rather than on a choice with one real option.
-  const priced = !!setup?.structure;
+  const priced = !!active;
   const custom = mode === "custom" || !priced;
-  const effectiveTotal = total || setup?.structure?.total_amount || "";
+  const effectiveTotal = total || active?.total_amount || "";
 
-  const debounced = useDebounced({ total: effectiveTotal, discount, parts, dues });
+  const debounced = useDebounced({
+    total: effectiveTotal, discount, parts, dues, fs: active?.id ?? null });
   const { data: preview } = useQuery({
     queryKey: ["fee-setup-preview", studentId, yearId, debounced],
     queryFn: () => schoolApi.feeSetupPreview({
       student_id: studentId!, academic_year_id: yearId!,
+      fee_structure_id: debounced.fs,
       total_fee: debounced.total || null,
       discount: debounced.discount || "0",
       opening_dues: debounced.dues || "0",
@@ -259,7 +269,7 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
     mutationFn: () => schoolApi.enroll({
       student_id: studentId,
       academic_year_id: yearId,
-      fee_structure_id: setup?.structure?.id ?? null,
+      fee_structure_id: active?.id ?? null,
       total_fee: preview?.total_fee ?? effectiveTotal ?? "0",
       discount: custom ? (discount || "0") : "0",
       opening_dues: custom ? (dues || "0") : "0",
@@ -312,13 +322,19 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
               {setup.class_label}
               {setup.category_name ? ` · ${setup.category_name}` : ""} ·{" "}
               <span className="font-medium text-foreground">
-                {money(setup.structure!.total_amount)}
+                {money(active!.total_amount)}
               </span>{" "}
-              in {setup.structure!.num_installments} instalment
-              {setup.structure!.num_installments === 1 ? "" : "s"}
-              {setup.structure!.category_name
-                ? ` — the ${setup.structure!.category_name.toLowerCase()} price`
+              in {active!.num_installments} instalment
+              {active!.num_installments === 1 ? "" : "s"}
+              {active!.category_name
+                ? ` — the ${active!.category_name.toLowerCase()} price`
                 : ""}
+              {pickedFs ? (
+                <button type="button" onClick={() => setPickedFs(null)}
+                  className="ml-1.5 font-medium text-primary hover:underline">
+                  clear
+                </button>
+              ) : null}
             </p>
           ) : (
             // Informative, never blocking. The two ways to get here are a class
@@ -326,16 +342,50 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
             // the school still has a family at the counter.
             <div className="rounded-lg border border-border bg-muted/40 px-3 py-2">
               <p className="text-xs text-muted-foreground">
-                {setup.class_label
-                  ? <>Class <span className="font-medium text-foreground">
-                    {setup.class_label}</span> has no fee structure yet.</>
-                  : <>{setup.student_name} is not in a class yet.</>}
-                {" "}Type this student&rsquo;s fee below — you can price the class
-                properly later, and it will not disturb her record.
+                {others.length > 0 ? (
+                  // The class IS priced — just not for a child in her category.
+                  // Saying "no fee structure yet" here is what made this screen
+                  // look broken: the office could see the structure on the next
+                  // tab. Name the real situation instead.
+                  <>
+                    Class <span className="font-medium text-foreground">
+                      {setup.structure?.class_name ?? others[0].class_name}
+                    </span> is priced for{" "}
+                    {others.map((s) => s.category_name ?? "everyone")
+                      .join(" and ")}{" "}
+                    only, and {setup.student_name.split(" ")[0]} is{" "}
+                    {setup.category_name
+                      ? `in ${setup.category_name}`
+                      : "in no category"}. Pick a price to use, or type her fee.
+                  </>
+                ) : setup.class_label ? (
+                  <>Class <span className="font-medium text-foreground">
+                    {setup.class_label}</span> has no fee structure yet. Type this
+                    student&rsquo;s fee below — you can price the class properly
+                    later, and it will not disturb her record.</>
+                ) : (
+                  <>{setup.student_name} is not in a class yet. Type her fee
+                    below — putting her in a class later will not disturb this
+                    record.</>
+                )}
               </p>
+              {others.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {others.map((s) => (
+                    <button key={s.id} type="button"
+                      onClick={() => { setPickedFs(s.id); setTotal(""); }}
+                      className="rounded-full border border-border bg-card px-2.5 py-1 text-xs transition-colors hover:border-primary/60 hover:bg-muted">
+                      Use the {s.category_name ?? "class"} price ·{" "}
+                      <span className="font-medium">{money(s.total_amount)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <Link href="/fees/structure"
-                className="mt-1 inline-block text-xs font-medium text-primary hover:underline">
-                Set the class structure instead →
+                className="mt-1.5 inline-block text-xs font-medium text-primary hover:underline">
+                {others.length > 0
+                  ? "Add a price for everyone in this class →"
+                  : "Set the class structure instead →"}
               </Link>
             </div>
           )}
@@ -383,7 +433,7 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
               <div>
                 <Label>Instalments</Label>
                 <Input type="number" min={1} max={24} inputMode="numeric"
-                  placeholder={String(setup.structure?.num_installments ?? 1)}
+                  placeholder={String(active?.num_installments ?? 1)}
                   value={parts} onChange={(e) => setParts(e.target.value)} />
               </div>
               <div>
@@ -443,7 +493,11 @@ export function FeeSetupSheet({ studentId, yearId, onClose }: {
             ) : custom ? (
               <PlanEditor rows={rows} onChange={setRows} remaining={remaining} />
             ) : (
-              <PlanTable rows={setup.default_plan} />
+              // The preview with no discount and no count IS the default plan,
+              // so reading it here keeps one source. `default_plan` is only the
+              // first-render fallback — and using it unconditionally showed an
+              // empty table the moment the office picked a different structure.
+              <PlanTable rows={preview?.installments ?? setup.default_plan} />
             )}
           </div>
 

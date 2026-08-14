@@ -243,6 +243,13 @@ class FeeSetupOut(BaseModel):
     structure: FeeSetupStructure | None = None
     #: The default mapping, priced and dated — what "use the class structure" means.
     default_plan: list[PlannedInstallmentOut] = Field(default_factory=list)
+    #: EVERY active structure pricing her class, whichever category it is for.
+    #: With `structure` null and this non-empty, the class IS priced — just not
+    #: for a child in her category — and the screen must say that rather than
+    #: "no fee structure yet", which reads as a lie about a class the office can
+    #: see priced on the next tab. The office can also pick one of these
+    #: deliberately.
+    class_structures: list[FeeSetupStructure] = Field(default_factory=list)
 
 
 class FeeSetupPreviewIn(BaseModel):

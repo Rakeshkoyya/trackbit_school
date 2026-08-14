@@ -97,6 +97,34 @@ class FeeStructureService:
             )
         )
 
+    def structures_for_class_of(
+        self, org_id: uuid.UUID, year_id: uuid.UUID, student: Student,
+    ) -> list[FeeStructure]:
+        """Every active structure pricing this student's class, any category.
+
+        Separate from `structure_for_student` because "none of these applies to
+        her" and "this class is not priced at all" are different sentences, and
+        the setup screen has to be able to tell them apart. Saying "no fee
+        structure yet" about a class that visibly has one is how FE-2 confused
+        its first user.
+        """
+        klass = self.db.get(SchoolClass, student.class_id) if student.class_id else None
+        if klass is None:
+            return []
+        return list(
+            self.db.scalars(
+                select(FeeStructure)
+                .where(
+                    FeeStructure.org_id == org_id,
+                    FeeStructure.academic_year_id == year_id,
+                    FeeStructure.class_name == klass.name,
+                    FeeStructure.is_active.is_(True),
+                )
+                .options(selectinload(FeeStructure.templates),
+                         selectinload(FeeStructure.category))
+            )
+        )
+
     def structure_for_student(
         self, org_id: uuid.UUID, year_id: uuid.UUID, student: Student,
     ) -> FeeStructure | None:
@@ -110,25 +138,15 @@ class FeeStructureService:
         agree or a staff ward would be quoted one fee by the per-student screen
         and billed another by the bulk button.
 
-        Returns None when the class is not priced at all — which is a real answer
-        the setup screen renders as "not priced yet", never as ₹0.
+        Returns None in two different situations, and the caller must not
+        conflate them: the class is not priced at all, **or** it is priced only
+        for categories this child is not in. The second is real — a class 5
+        priced for Hostellers only genuinely has no answer for a day scholar —
+        but it is not "no fee structure yet", and telling the office that about a
+        class it can see priced elsewhere is a bug. Use
+        `structures_for_class_of()` to tell the two apart.
         """
-        klass = self.db.get(SchoolClass, student.class_id) if student.class_id else None
-        if klass is None:
-            return None
-        actives = list(
-            self.db.scalars(
-                select(FeeStructure)
-                .where(
-                    FeeStructure.org_id == org_id,
-                    FeeStructure.academic_year_id == year_id,
-                    FeeStructure.class_name == klass.name,
-                    FeeStructure.is_active.is_(True),
-                )
-                .options(selectinload(FeeStructure.templates),
-                         selectinload(FeeStructure.category))
-            )
-        )
+        actives = self.structures_for_class_of(org_id, year_id, student)
         if not actives:
             return None
         if student.category_id is not None:

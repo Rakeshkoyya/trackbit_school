@@ -308,8 +308,18 @@ class FeeService:
         offer to change it. A class with no structure yet is a sentence on the
         screen, never a ₹0 form the school could accidentally lock in.
         """
+        from app.services.fee_structures import FeeStructureService  # noqa: PLC0415
+
         student, fs, existing = self._setup_context(m, student_id, year_id)
         plan = plan_installments(q(fs.total_amount), list(fs.templates)) if fs else []
+        # Everything pricing her class, whichever category. With `structure`
+        # null and this non-empty the class IS priced — just not for a child in
+        # her category — and the screen has to say so. That is the exact case
+        # that made FE-2 look broken on a live school: class 5 priced for
+        # Hostellers only, and the three day scholars in it were told the class
+        # had no structure at all.
+        siblings = FeeStructureService(self.db).structures_for_class_of(
+            m.org_id, year_id, student)
         return FeeSetupOut(
             student_id=student.id, student_name=student.full_name,
             class_label=self._class_label(student.class_id),
@@ -323,6 +333,15 @@ class FeeService:
                 total_amount=q(fs.total_amount),
                 num_installments=fs.num_installments,
             ) if fs else None,
+            class_structures=[
+                FeeSetupStructure(
+                    id=s.id, class_name=s.class_name, category_id=s.category_id,
+                    category_name=s.category.name if s.category else None,
+                    total_amount=q(s.total_amount),
+                    num_installments=s.num_installments,
+                )
+                for s in siblings
+            ],
             default_plan=[PlannedInstallmentOut(**p._asdict()) for p in plan],
         )
 
@@ -347,8 +366,13 @@ class FeeService:
             # end, and a school with an unpriced class (or a student not yet in
             # one) could not set that child up at all, which is exactly the
             # family standing at the counter with cash.
-            warning = ("This class has no fee structure yet — type the total for "
-                       "this student, or price the class first.")
+            #
+            # The wording stays neutral about WHY there is no default, because
+            # there are two reasons and the screen knows which from
+            # `class_structures` — a class priced for one category only is not an
+            # unpriced class, and saying so here would contradict the sheet.
+            warning = ("There is no default price for this student — type the "
+                       "total, or pick one of the class's structures.")
         elif net < 0:
             warning = (f"A discount of ₹{discount:,.0f} is more than the fee of "
                        f"₹{total:,.0f}.")

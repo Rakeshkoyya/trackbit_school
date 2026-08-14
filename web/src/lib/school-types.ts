@@ -1452,6 +1452,11 @@ export interface FeeSetup {
   student_fee_id: string | null;
   structure: FeeSetupStructure | null;
   default_plan: PlannedInstallment[];
+  /** Every active structure pricing her class, whichever category it is for.
+   *  `structure` null with this non-empty means the class IS priced — just not
+   *  for a child in her category — which is a different sentence from "no fee
+   *  structure yet", and the one that made FE-2 look broken on a live school. */
+  class_structures: FeeSetupStructure[];
 }
 
 /** The arithmetic, done server-side. These rows ARE what gets written — the

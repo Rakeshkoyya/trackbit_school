@@ -943,6 +943,8 @@ export const schoolApi = {
    *  the rows it returns are exactly what `enroll` will store. */
   feeSetupPreview: (b: {
     student_id: string; academic_year_id: string;
+    /** Pick a structure deliberately — e.g. billing a day scholar on the
+     *  Hosteller price because that is what the school agreed. */
     fee_structure_id?: string | null; total_fee?: string | null;
     discount?: string; opening_dues?: string; num_installments?: number | null;
   }) => api.post<import("@/lib/school-types").FeeSetupPreview>(

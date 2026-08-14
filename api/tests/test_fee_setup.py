@@ -109,7 +109,10 @@ def test_an_unpriced_class_is_a_sentence_not_a_zero(client, cleanup):
     preview = client.post("/api/v1/fees/setup/preview", headers=ctx["h"], json={
         "student_id": orphan["id"], "academic_year_id": ctx["year"]["id"]}).json()
     assert preview["warning"] is not None
-    assert "no fee structure" in preview["warning"]
+    # Neutral wording: the screen knows from `class_structures` whether this is
+    # "unpriced class" or "priced, but not for her", and the two must not be
+    # contradicted here.
+    assert "no default price" in preview["warning"]
 
 
 def test_the_setup_screen_and_the_bulk_apply_pick_the_same_structure(client, cleanup):
@@ -338,3 +341,75 @@ def test_an_edited_schedule_that_does_not_add_up_is_refused(client, cleanup):
         ]})
     assert r.status_code == 422, r.text
     assert "must equal net payable" in r.json()["error"]["message"]
+
+
+def test_a_class_priced_only_for_a_category_is_not_an_unpriced_class(client, cleanup):
+    """The founder's production report, exactly.
+
+    SHANA's class 5 had ONE active structure and it was Hosteller-only. The
+    hosteller resolved fine; the three day scholars in the same class were told
+    *"class 5 has no fee structure yet"* — about a class they could see priced on
+    the next tab. The lookup was right (a day scholar genuinely has no agreed
+    price) but the sentence was a lie, and there was no way forward.
+
+    `class_structures` is what lets the screen tell the two apart, and what it
+    offers to bill her on.
+    """
+    ctx = _school(client, cleanup)
+    # Retire the general price, leaving only the category one — the prod shape.
+    only_ward = client.post("/api/v1/fees/structures", headers=ctx["h"], json={
+        "class_name": "5", "academic_year_id": ctx["year"]["id"],
+        "category_id": ctx["category"]["id"],
+        "total_amount": "20000", "num_installments": 2,
+        "installments": _schedule(20000, 2)}).json()
+    six = client.post("/api/v1/academics/classes", headers=ctx["h"], json={
+        "academic_year_id": ctx["year"]["id"], "name": "6", "section": "A"}).json()
+    day_scholar = client.post("/api/v1/students", headers=ctx["h"], json={
+        "admission_no": "S5", "full_name": "Day Scholar",
+        "class_id": six["id"]}).json()
+
+    # The ward still resolves to her own price.
+    ward = _setup(client, ctx, ctx["ward"]).json()
+    assert ward["structure"]["id"] == only_ward["id"]
+
+    # A child in a class priced for NOBODY: no structure AND no siblings.
+    orphan = _setup(client, ctx, day_scholar).json()
+    assert orphan["structure"] is None
+    assert orphan["class_structures"] == []
+
+    # The founder's case: class 5 IS priced, just not for this child. The screen
+    # gets both facts, so it can say which situation it is and offer the price.
+    ctx["student"]  # a class-5 child with no category
+    scholar = _setup(client, ctx).json()
+    assert scholar["structure"] is not None  # the general 60k still exists here
+    assert {s["id"] for s in scholar["class_structures"]} == {
+        ctx["structure"]["id"], only_ward["id"]}
+    assert [s["category_name"] for s in scholar["class_structures"]].count(
+        "Staff ward") == 1
+
+
+def test_the_office_can_bill_a_student_on_another_categorys_price(client, cleanup):
+    """Following from the above: with no default of her own, she is billed on a
+    structure the office picks — the same one, priced and dated, not a retyped
+    guess."""
+    ctx = _school(client, cleanup)
+    ward_price = client.post("/api/v1/fees/structures", headers=ctx["h"], json={
+        "class_name": "5", "academic_year_id": ctx["year"]["id"],
+        "category_id": ctx["category"]["id"],
+        "total_amount": "20000", "num_installments": 2,
+        "installments": _schedule(20000, 2)}).json()
+
+    p = client.post("/api/v1/fees/setup/preview", headers=ctx["h"], json={
+        "student_id": ctx["student"]["id"],
+        "academic_year_id": ctx["year"]["id"],
+        "fee_structure_id": ward_price["id"]}).json()
+    assert p["total_fee"] == "20000.00"
+    assert len(p["installments"]) == 2
+
+    locked = client.post("/api/v1/fees/student-fees", headers=ctx["h"], json={
+        "student_id": ctx["student"]["id"],
+        "academic_year_id": ctx["year"]["id"],
+        "fee_structure_id": ward_price["id"],
+        "total_fee": "20000"})
+    assert locked.status_code == 200, locked.text
+    assert locked.json()["net_fee"] == "20000.00"
