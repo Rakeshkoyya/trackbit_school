@@ -96,26 +96,26 @@ cannot know some *other* remote URL is precious — it is not a substitute for n
 line. Never point it at a superuser either: a superuser bypasses RLS even with
 `FORCE ROW LEVEL SECURITY`, so `test_rls.py` fails for reasons unrelated to the code.
 
-🚨 **`.env` is REMOTE right now, and its own banners say otherwise** — checked
-2026-08-11. The top banner reads `ACTIVE: LOCAL` and the block labelled
-`# ── LOCAL (active)` is **commented out**; the block labelled
-`# ── PRODUCTION (inactive …)` is the one actually live. Both `DATABASE_URL` and
-`ADMIN_DATABASE_URL` resolve to `doadmin` @ DigitalOcean, database **`trackbit_prod`** —
-not `trackbit_school`, the documented prod DB — and `alembic current` against it returns
-**nothing at all**, so that database has no `alembic_version` row.
+✅ **`.env` is LOCAL again** — checked 2026-08-14. The live, uncommented
+`DATABASE_URL` and `ADMIN_DATABASE_URL` both resolve to **localhost**
+(`trackbit_school`), and `TEST_DATABASE_URL` is local as it always must be. The
+2026-08-11 warning that the banners were lying no longer applies; somebody fixed
+the file. **Read the uncommented `DATABASE_URL=` lines rather than the banners
+anyway** — that is what caught it last time, and it costs one grep.
 
-Consequences, until somebody fixes the file:
+**Production is the DigitalOcean database `trackbit_prod`**, not `trackbit_school`
+— the latter is a stale name in the older comments. Verified 2026-08-14 by
+running `alembic current` against it. Migrate it explicitly, never by switching
+`.env`:
 
-- **Never run `uv run alembic upgrade head` from `api/` without an override.** It targets a
-  remote DO database with no version row, so it would attempt to build the entire schema
-  there. Use the documented `ALEMBIC_DATABASE_URL=…` form instead.
-- **Law 2 is inert** — `doadmin` has `rolbypassrls = true`. Nothing security-related is
-  testable against `DATABASE_URL` in this state.
-- `TEST_DATABASE_URL` is **still correctly local** (`trackbit_school_test`), so `pytest` is
-  safe and unaffected.
+```bash
+# the URL is the commented PRODUCTION ADMIN_DATABASE_URL line in api/.env
+ALEMBIC_DATABASE_URL="postgresql+psycopg2://doadmin:…@…/trackbit_prod?sslmode=require" \
+  uv run alembic current      # ← always look before you upgrade
+```
 
-Read the actual uncommented `DATABASE_URL=` lines, not the banners, before believing any of
-this — the banners are what was wrong.
+**Law 2 is inert on prod** — `doadmin` has `rolbypassrls = true`, so nothing
+security-related is testable there. Use LOCAL for that.
 
 <details><summary>⚠️ If you ever switch it back to <code>ACTIVE: PRODUCTION</code> — read this first</summary>
 
@@ -347,10 +347,16 @@ daily report generation · per-student homework · **Lucy** · the **parent port
 
 ## Current state and what is next
 
-Schema head is **`a5b6c7d8e9f0`** (one register a day is the default
+Schema head is **`b6c7d8e9f0a1`** — TT-4 combined periods (`combined_periods` +
+`timetable_slots.combined_id`): two or more classes taught as ONE meeting, which
+is how a school says out loud what the clash validator was right to flag.
+**Membership is the set of live slots**, never copied onto the combination, so it
+inherits the grid's effective-dating. Applied to **dev, test AND production**
+(2026-08-14; additive, so prod took it ahead of the code deploy as the convention
+requires). Its parent `a5b6c7d8e9f0` is one register a day as the default
 `attendance_mode` — the column default moves `every_period` → `first_period`
-**and existing orgs still on the old default move with it**; applied to the
-**test DB only** so far — 2026-08-11). Its parent `c8d9e0f1a2b3` is `D-129`, one
+**and existing orgs still on the old default move with it**. Its parent
+`c8d9e0f1a2b3` is `D-129`, one
 student-category vocabulary: `sessions.category_id`, replacing the
 `hostellers_only` boolean and the name-matching that resolved it. Its parent
 `b7c8d9e0f1a2` is FE-1
