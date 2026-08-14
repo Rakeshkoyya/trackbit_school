@@ -1422,6 +1422,50 @@ export interface ApplyStructureResult {
   message: string;
 }
 
+// ── FE-2: locking one student, with the discount agreed at the counter ──────
+export interface PlannedInstallment {
+  installment_number: number;
+  label: string | null;
+  amount: string;
+  due_date: string | null;
+}
+
+export interface FeeSetupStructure {
+  id: string;
+  class_name: string;
+  category_id: string | null;
+  category_name: string | null;
+  total_amount: string;
+  num_installments: number;
+}
+
+/** What the "set this student up" sheet opens on: what she would be billed if
+ *  nobody changed anything. `structure` null = the class has no price yet, which
+ *  is a sentence on screen and never a ₹0 form. */
+export interface FeeSetup {
+  student_id: string;
+  student_name: string;
+  class_label: string | null;
+  category_name: string | null;
+  academic_year_id: string;
+  already_locked: boolean;
+  student_fee_id: string | null;
+  structure: FeeSetupStructure | null;
+  default_plan: PlannedInstallment[];
+}
+
+/** The arithmetic, done server-side. These rows ARE what gets written — the
+ *  browser never divides the money itself. */
+export interface FeeSetupPreview {
+  total_fee: string;
+  discount: string;
+  net_fee: string;
+  opening_dues: string;
+  total_payable: string;
+  installments: PlannedInstallment[];
+  warning: string | null;
+}
+
 export interface StudentFeeListItem {
   id: string;
   student_id: string;

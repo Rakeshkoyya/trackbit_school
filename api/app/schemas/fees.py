@@ -197,6 +197,79 @@ class StudentFeeCreate(BaseModel):
     use_custom_schedule: bool = False
     installments: list[InstallmentIn] = Field(default_factory=list)
     first_payment: PaymentIn | None = None
+    # FE-2: "the class's price, this family's discount, but six payments instead
+    # of four". Unset (or equal to the structure's own count) keeps the school's
+    # real terms and due dates; a different number re-plans evenly. The split is
+    # `fee_math.plan_installments` either way — never the browser's arithmetic.
+    num_installments: int | None = Field(default=None, ge=1, le=24)
+
+
+# ── FE-2: locking one student's fee, with the discount agreed at the counter ──
+class PlannedInstallmentOut(BaseModel):
+    """A proposed row. Nothing is written until the office confirms."""
+
+    installment_number: int
+    label: str | None = None
+    amount: Decimal
+    due_date: date | None = None
+
+
+class FeeSetupStructure(BaseModel):
+    id: uuid.UUID
+    class_name: str
+    category_id: uuid.UUID | None = None
+    category_name: str | None = None
+    total_amount: Decimal
+    num_installments: int
+
+
+class FeeSetupOut(BaseModel):
+    """What the "set this student up" screen opens on.
+
+    It answers the question the office actually has — *what would this child be
+    billed if I do nothing?* — before offering to change it. `structure` is null
+    when the class has no price yet, and that is a state with a sentence, never
+    a zero.
+    """
+
+    student_id: uuid.UUID
+    student_name: str
+    class_label: str | None = None
+    category_name: str | None = None
+    academic_year_id: uuid.UUID
+    #: Already locked. The screen becomes a link to her record rather than a form.
+    already_locked: bool = False
+    student_fee_id: uuid.UUID | None = None
+    structure: FeeSetupStructure | None = None
+    #: The default mapping, priced and dated — what "use the class structure" means.
+    default_plan: list[PlannedInstallmentOut] = Field(default_factory=list)
+
+
+class FeeSetupPreviewIn(BaseModel):
+    student_id: uuid.UUID
+    academic_year_id: uuid.UUID
+    #: Defaults to the structure that prices this student. Sent explicitly only
+    #: when the office deliberately picks another one.
+    fee_structure_id: uuid.UUID | None = None
+    #: Overrides the structure's price. Left unset the structure's total stands.
+    total_fee: Decimal | None = None
+    discount: Decimal = Decimal("0")
+    opening_dues: Decimal = Decimal("0")
+    num_installments: int | None = Field(default=None, ge=1, le=24)
+
+
+class FeeSetupPreview(BaseModel):
+    """The arithmetic, done server-side and shown before it is committed."""
+
+    total_fee: Decimal
+    discount: Decimal
+    net_fee: Decimal
+    opening_dues: Decimal
+    total_payable: Decimal
+    installments: list[PlannedInstallmentOut] = Field(default_factory=list)
+    #: A sentence when something is off — a discount larger than the fee, a class
+    #: with no structure. Never a silent zero.
+    warning: str | None = None
 
 
 class StudentFeeUpdate(BaseModel):

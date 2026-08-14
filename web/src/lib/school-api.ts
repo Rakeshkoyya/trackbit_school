@@ -932,6 +932,21 @@ export const schoolApi = {
     ),
   studentFee: (id: string) => api.get<StudentFeeDetail>(`/fees/student-fees/${id}`),
   enroll: (b: Record<string, unknown>) => api.post<StudentFeeDetail>("/fees/student-fees", b),
+
+  // ── FE-2: lock one student, with the discount agreed at the counter ───────
+  /** What she would be billed if nobody changed anything — the class's
+   *  structure, already priced and dated. */
+  feeSetup: (studentId: string, yearId: string) =>
+    api.get<import("@/lib/school-types").FeeSetup>(
+      `/fees/setup/${studentId}${qs({ year_id: yearId })}`),
+  /** The arithmetic behind a discount, done server-side. Writes nothing — and
+   *  the rows it returns are exactly what `enroll` will store. */
+  feeSetupPreview: (b: {
+    student_id: string; academic_year_id: string;
+    fee_structure_id?: string | null; total_fee?: string | null;
+    discount?: string; opening_dues?: string; num_installments?: number | null;
+  }) => api.post<import("@/lib/school-types").FeeSetupPreview>(
+    "/fees/setup/preview", b),
   updateDiscount: (id: string, b: { discount?: string; opening_dues?: string }) =>
     api.patch<StudentFeeDetail>(`/fees/student-fees/${id}`, b),
   transactions: (id: string) => api.get<import("@/lib/school-types").FeeTransaction[]>(

@@ -18,13 +18,14 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Camera, MoreHorizontal, Paperclip, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, Camera, Lock, MoreHorizontal, Paperclip, Trash2, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { use, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { FeeConversation } from "@/components/school/fee-conversation";
+import { FeeSetupSheet } from "@/components/school/fee-setup-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -358,6 +359,8 @@ function FamilyInner({ studentId }: { studentId: string }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [discount, setDiscount] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  // FE-2 — the setup sheet, for a student who has no record yet.
+  const [setupOpen, setSetupOpen] = useState(false);
   const [addAmount, setAddAmount] = useState("");
   const [addDate, setAddDate] = useState("");
 
@@ -395,7 +398,10 @@ function FamilyInner({ studentId }: { studentId: string }) {
 
   if (!record) {
     // `D-125`: a student with no fee record still has a page, and it is an
-    // invitation rather than a dead end.
+    // invitation rather than a dead end. FE-2 makes the invitation actionable —
+    // it used to point at the Students tab and stop, which meant the one child
+    // whose price was negotiated had to be billed the class price first and
+    // corrected afterwards.
     return (
       <div>
         <Link href="/fees/students"
@@ -403,10 +409,17 @@ function FamilyInner({ studentId }: { studentId: string }) {
           <ArrowLeft className="h-4 w-4" /> Students
         </Link>
         <EmptyState
-          icon={Camera}
+          icon={Lock}
           title="No fee record for this student yet"
-          body="Set the class up from the Students tab — one action bills every child in it from the class's structure."
+          body="Set her up on the class structure, or on a price agreed with the family — a fixed discount and how many instalments."
+          action={
+            <Button onClick={() => setSetupOpen(true)}>
+              <Lock className="h-4 w-4" /> Set up fees
+            </Button>
+          }
         />
+        <FeeSetupSheet studentId={setupOpen ? studentId : null}
+          yearId={yearId ?? null} onClose={() => setSetupOpen(false)} />
       </div>
     );
   }

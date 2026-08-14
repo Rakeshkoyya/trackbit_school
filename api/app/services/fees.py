@@ -28,12 +28,17 @@ from app.models import (
 from app.schemas.fees import (
     CloseFeeIn,
     DueDateUpdate,
+    FeeSetupOut,
+    FeeSetupPreview,
+    FeeSetupPreviewIn,
+    FeeSetupStructure,
     FeeStructureCreate,
     FeeStructureOut,
     FeeSummary,
     InstallmentOut,
     OverdueStudent,
     PaymentIn,
+    PlannedInstallmentOut,
     StudentFeeCreate,
     StudentFeeDetail,
     StudentFeeListItem,
@@ -47,6 +52,7 @@ from app.services.fee_math import (
     assert_balanced,
     installment_status,
     live_installments,
+    plan_installments,
     proportional_installments,
     q,
     recompute_student_fee,
@@ -256,6 +262,102 @@ class FeeService:
             ))
         return items
 
+    # ── FE-2: locking one student, with the discount agreed at the counter ────
+    def _student(self, org_id: uuid.UUID, student_id: uuid.UUID) -> Student:
+        student = self.db.scalar(
+            select(Student)
+            .where(Student.id == student_id, Student.org_id == org_id)
+            .options(selectinload(Student.category))
+        )
+        if student is None:
+            raise NotFoundError("Student")
+        return student
+
+    def _setup_context(self, m: CurrentMember, student_id: uuid.UUID,
+                       year_id: uuid.UUID, fee_structure_id: uuid.UUID | None = None):
+        """(student, the structure that prices her, her existing record if any)."""
+        from app.services.fee_structures import FeeStructureService  # noqa: PLC0415
+
+        student = self._student(m.org_id, student_id)
+        self._year(m.org_id, year_id)
+        if fee_structure_id is not None:
+            fs = self.db.scalar(
+                select(FeeStructure)
+                .where(FeeStructure.id == fee_structure_id, FeeStructure.org_id == m.org_id)
+                .options(selectinload(FeeStructure.templates),
+                         selectinload(FeeStructure.category))
+            )
+            if fs is None:
+                raise NotFoundError("Fee structure")
+        else:
+            fs = FeeStructureService(self.db).structure_for_student(
+                m.org_id, year_id, student)
+        existing = self.db.scalar(
+            select(StudentFee).where(
+                StudentFee.org_id == m.org_id, StudentFee.student_id == student_id,
+                StudentFee.academic_year_id == year_id)
+        )
+        return student, fs, existing
+
+    def setup(self, m: CurrentMember, student_id: uuid.UUID,
+              year_id: uuid.UUID) -> FeeSetupOut:
+        """What the "set this student up" screen opens on (FE-2).
+
+        The office's real question is *what would she be billed if I do
+        nothing?* — so the default mapping is priced and dated here, before any
+        offer to change it. A class with no structure yet is a sentence on the
+        screen, never a ₹0 form the school could accidentally lock in.
+        """
+        student, fs, existing = self._setup_context(m, student_id, year_id)
+        plan = plan_installments(q(fs.total_amount), list(fs.templates)) if fs else []
+        return FeeSetupOut(
+            student_id=student.id, student_name=student.full_name,
+            class_label=self._class_label(student.class_id),
+            category_name=student.category.name if student.category else None,
+            academic_year_id=year_id,
+            already_locked=existing is not None,
+            student_fee_id=existing.id if existing else None,
+            structure=FeeSetupStructure(
+                id=fs.id, class_name=fs.class_name, category_id=fs.category_id,
+                category_name=fs.category.name if fs.category else None,
+                total_amount=q(fs.total_amount),
+                num_installments=fs.num_installments,
+            ) if fs else None,
+            default_plan=[PlannedInstallmentOut(**p._asdict()) for p in plan],
+        )
+
+    def setup_preview(self, m: CurrentMember, body: FeeSetupPreviewIn) -> FeeSetupPreview:
+        """The arithmetic, done here and shown before it is committed.
+
+        Deliberately the same call the write makes: `plan_installments` over the
+        same net. A browser that divided the money itself would disagree with the
+        server on the first rounding remainder, and the family would be shown one
+        schedule and handed another.
+        """
+        _student, fs, _existing = self._setup_context(
+            m, body.student_id, body.academic_year_id, body.fee_structure_id)
+        total = q(body.total_fee) if body.total_fee is not None else (
+            q(fs.total_amount) if fs else q(0))
+        discount = q(body.discount)
+        opening = q(body.opening_dues)
+        net = q(total - discount)
+        warning: str | None = None
+        if fs is None and body.total_fee is None:
+            warning = ("This class has no fee structure yet, so there is no price "
+                       "to start from. Set the class structure first, or type the "
+                       "total for this student.")
+        elif net < 0:
+            warning = (f"A discount of ₹{discount:,.0f} is more than the fee of "
+                       f"₹{total:,.0f}.")
+        plan = plan_installments(
+            max(net, q(0)), list(fs.templates) if fs else [], body.num_installments)
+        return FeeSetupPreview(
+            total_fee=total, discount=discount, net_fee=net, opening_dues=opening,
+            total_payable=q(net + opening),
+            installments=[PlannedInstallmentOut(**p._asdict()) for p in plan],
+            warning=warning,
+        )
+
     def enroll(self, m: CurrentMember, body: StudentFeeCreate) -> StudentFeeDetail:
         student = self.db.scalar(
             select(Student).where(Student.id == body.student_id, Student.org_id == m.org_id)
@@ -277,6 +379,10 @@ class FeeService:
         net = q(total - discount)
         opening = q(body.opening_dues)
 
+        if net < 0:
+            raise ValidationError(
+                f"A discount of ₹{discount} is more than the fee of ₹{total}.")
+
         inst_rows: list[Installment] = []
         if body.use_custom_schedule and body.installments:
             inst_sum = q(sum(q(i.amount) for i in body.installments))
@@ -288,21 +394,27 @@ class FeeService:
                     org_id=m.org_id, installment_number=i.installment_number, label=i.label,
                     amount=q(i.amount), due_date=i.due_date,
                 ))
-        elif body.fee_structure_id:
-            fs = self.db.scalar(
-                select(FeeStructure)
-                .where(FeeStructure.id == body.fee_structure_id, FeeStructure.org_id == m.org_id)
-                .options(selectinload(FeeStructure.templates))
-            )
-            if fs is None:
-                raise NotFoundError("Fee structure")
-            templates = sorted(fs.templates, key=lambda t: t.installment_number)
-            scaled = proportional_installments(net, [t.amount for t in templates])
-            for idx, t in enumerate(templates):
-                inst_rows.append(Installment(
-                    org_id=m.org_id, installment_number=t.installment_number, label=t.label,
-                    amount=scaled[idx], due_date=t.due_date,
-                ))
+        elif body.fee_structure_id or body.num_installments:
+            templates: list = []
+            if body.fee_structure_id:
+                fs = self.db.scalar(
+                    select(FeeStructure)
+                    .where(FeeStructure.id == body.fee_structure_id,
+                           FeeStructure.org_id == m.org_id)
+                    .options(selectinload(FeeStructure.templates))
+                )
+                if fs is None:
+                    raise NotFoundError("Fee structure")
+                templates = list(fs.templates)
+            # FE-2 — one splitter, so the schedule written here is the one the
+            # office was shown in the preview, to the paisa.
+            inst_rows = [
+                Installment(
+                    org_id=m.org_id, installment_number=p.installment_number,
+                    label=p.label, amount=p.amount, due_date=p.due_date,
+                )
+                for p in plan_installments(net, templates, body.num_installments)
+            ]
         else:
             inst_rows.append(Installment(
                 org_id=m.org_id, installment_number=1, amount=net, due_date=None))
@@ -329,6 +441,31 @@ class FeeService:
 
         recompute_student_fee(sf)
         self.db.flush()
+        # `D-124` — the actor log. A fee agreed at the counter is a DECISION
+        # somebody made, and "why is this child paying ₹8,000 less" is the
+        # question that gets asked six months later, by a different person. The
+        # bulk apply already records itself; a single lock has to as well, or the
+        # discounted ones are exactly the records with no trail.
+        if q(sf.discount) > 0:
+            fee_events.record(
+                self.db, m, "fee_created",
+                f"{self._who(sf)} locked at ₹{q(sf.net_fee):,.0f} — "
+                f"₹{q(sf.total_fee):,.0f} less a ₹{q(sf.discount):,.0f} discount, "
+                f"in {len(inst_rows)} instalment{'' if len(inst_rows) == 1 else 's'}.",
+                student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+                meta={"total_fee": str(q(sf.total_fee)),
+                      "discount": str(q(sf.discount)),
+                      "net_fee": str(q(sf.net_fee)),
+                      "installments": len(inst_rows)},
+            )
+        else:
+            fee_events.record(
+                self.db, m, "fee_created",
+                f"{self._who(sf)} set up at ₹{q(sf.net_fee):,.0f} in "
+                f"{len(inst_rows)} instalment{'' if len(inst_rows) == 1 else 's'}.",
+                student_fee_id=sf.id, academic_year_id=sf.academic_year_id,
+                meta={"net_fee": str(q(sf.net_fee)), "installments": len(inst_rows)},
+            )
         return self._detail(sf)
 
     def update_discount(self, m: CurrentMember, sf_id: uuid.UUID, body: StudentFeeUpdate) -> StudentFeeDetail:

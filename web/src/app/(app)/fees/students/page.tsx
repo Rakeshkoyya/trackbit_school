@@ -24,13 +24,14 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Users } from "lucide-react";
+import { Lock, Search, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { ClassTabs, sortClasses } from "@/components/school/class-subject-picker";
+import { FeeSetupSheet } from "@/components/school/fee-setup-sheet";
 import { YearSwitcher } from "@/components/school/year-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,8 @@ function StudentsInner() {
   const [classId, setClassId] = useState(ALL);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // FE-2 — which child the setup sheet is open on. Null = closed.
+  const [setupFor, setSetupFor] = useState<string | null>(null);
 
   const { data: rawClasses = [] } = useQuery({
     queryKey: ["classes", yearId, "all"],
@@ -231,14 +234,33 @@ function StudentsInner() {
                       <td className="px-3 py-2.5">
                         <Badge tone={STATUS_TONE[fee.status] ?? "neutral"}>
                           {fee.status}
+                          {Number(fee.discount) > 0 ? (
+                            // FE-2: a family on an agreed price is not on the
+                            // class price, and the desk has to be able to see
+                            // which is which without opening every record.
+                            <span className="ml-1 opacity-80">
+                              · −{money(fee.discount)}
+                            </span>
+                          ) : null}
                         </Badge>
                       </td>
                     </>
                   ) : (
                     // `D-119`: a state, spanning the money columns as one muted
                     // phrase. Four ₹0 cells would say this family owes nothing.
-                    <td colSpan={4} className="px-3 py-2.5 text-muted-foreground">
-                      fees not set up
+                    // FE-2 gives it the door it was missing: the bulk button
+                    // bills the class price, and the one conversation a fee desk
+                    // actually has — "we agreed ₹52,000 for this child" — needed
+                    // somewhere to happen BEFORE the record exists.
+                    <td colSpan={4} className="px-3 py-2.5"
+                      onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">fees not set up</span>
+                        <Button size="sm" variant="outline"
+                          onClick={() => setSetupFor(student.id)}>
+                          <Lock className="h-3.5 w-3.5" /> Set up
+                        </Button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -280,6 +302,12 @@ function StudentsInner() {
           </Button>
         </div>
       ) : null}
+
+      {/* FE-2 — one sheet, opened from the row. The bulk button above still
+          bills the class price in one action (`D-120`); this is the door for
+          the child whose price was agreed in a conversation. */}
+      <FeeSetupSheet studentId={setupFor} yearId={yearId ?? null}
+        onClose={() => setSetupFor(null)} />
     </div>
   );
 }

@@ -36,6 +36,9 @@ from app.schemas.fees import (
     ConfirmProofIn,
     DueDateUpdate,
     FeeEventOut,
+    FeeSetupOut,
+    FeeSetupPreview,
+    FeeSetupPreviewIn,
     FeeStructureCreate,
     FeeStructureOut,
     FeeStructureUpdate,
@@ -156,6 +159,28 @@ def list_student_fees(
 def enroll(body: StudentFeeCreate, m: CurrentMember = Depends(require_admin),
            db: Session = Depends(get_db)):
     return FeeService(db).enroll(m, body)
+
+
+# ── FE-2: locking one student, with the discount agreed at the counter ────────
+@router.get("/setup/{student_id}", response_model=FeeSetupOut)
+def fee_setup(student_id: uuid.UUID, year_id: uuid.UUID,
+              m: CurrentMember = Depends(require_admin),
+              db: Session = Depends(get_db)):
+    """What would this child be billed if nobody changed anything?
+
+    The structure that prices her, dated and split — read BEFORE offering to
+    change it, so "use the class structure" is a thing the office can see rather
+    than a promise.
+    """
+    return FeeService(db).setup(m, student_id, year_id)
+
+
+@router.post("/setup/preview", response_model=FeeSetupPreview)
+def fee_setup_preview(body: FeeSetupPreviewIn, m: CurrentMember = Depends(require_admin),
+                      db: Session = Depends(get_db)):
+    """The arithmetic behind a discount, done server-side and shown before it is
+    committed. Writes nothing."""
+    return FeeService(db).setup_preview(m, body)
 
 
 @router.get("/student-fees/{sf_id}", response_model=StudentFeeDetail)

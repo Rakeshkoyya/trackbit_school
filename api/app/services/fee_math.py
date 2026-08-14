@@ -8,8 +8,9 @@ of a lump payment; monthly default due dates from the April year-start.
 
 from datetime import date
 from decimal import Decimal
+from typing import NamedTuple
 
-from app.models.fees import Installment, StudentFee
+from app.models.fees import FeeInstallmentTemplate, Installment, StudentFee
 
 
 def q(value) -> Decimal:
@@ -102,6 +103,65 @@ def default_due_dates(n: int, start: date | None = None) -> list[date]:
         m = month_index % 12 + 1
         out.append(date(y, m, 1))
     return out
+
+
+class PlannedInstallment(NamedTuple):
+    """One row of a proposed schedule — before anything is written."""
+
+    installment_number: int
+    label: str | None
+    amount: Decimal
+    due_date: date | None
+
+
+def plan_installments(
+    net_fee,
+    templates: "list[FeeInstallmentTemplate] | None" = None,
+    num_installments: int | None = None,
+    start: date | None = None,
+) -> list[PlannedInstallment]:
+    """How a net payable becomes N dated instalments. **The only place.**
+
+    Every door into "set this student up" has to answer the same question — the
+    bulk apply, the per-student lock, and the preview the office reads before it
+    commits — and if the preview divided the money in the browser while the write
+    divided it here, the two would drift on the first rounding remainder and the
+    school would be told one schedule and given another. So it is computed once,
+    server-side, and the preview endpoint returns *these rows*, not a formula.
+
+    Three shapes, in order:
+
+    * **The class's own schedule** — `templates` given and `num_installments`
+      either unset or equal to their count. Their labels and due dates are the
+      school's real terms ("Term 1", due 10 June); only the amounts move, scaled
+      proportionally so a discount lands across the year the way the school
+      priced it. This is the default mapping and it must stay byte-identical to
+      what `FeeStructureService.apply()` writes.
+    * **Re-planned** — `templates` given but a different count. The school agreed
+      six payments instead of four; there are no labels for the extra ones and no
+      school-set dates, so the money splits evenly and the dates fall monthly
+      from the FIRST template's due date, which is the term the school actually
+      starts collecting in.
+    * **From nothing** — no structure at all. Even split, monthly from the
+      April year-start.
+    """
+    net_fee = q(net_fee)
+    rows = sorted(templates or [], key=lambda t: t.installment_number)
+    if rows and (num_installments is None or num_installments == len(rows)):
+        amounts = proportional_installments(net_fee, [t.amount for t in rows])
+        return [
+            PlannedInstallment(t.installment_number, t.label, amounts[i], t.due_date)
+            for i, t in enumerate(rows)
+        ]
+
+    n = num_installments if num_installments and num_installments > 0 else (len(rows) or 1)
+    amounts = even_split(net_fee, n)
+    anchor = start or next((t.due_date for t in rows if t.due_date), None)
+    dates = default_due_dates(n, anchor)
+    return [
+        PlannedInstallment(i + 1, None, amounts[i], dates[i] if i < len(dates) else None)
+        for i in range(n)
+    ]
 
 
 def proportional_installments(net_fee, template_amounts: list) -> list[Decimal]:

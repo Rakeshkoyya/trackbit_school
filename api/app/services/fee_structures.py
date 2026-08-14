@@ -97,6 +97,46 @@ class FeeStructureService:
             )
         )
 
+    def structure_for_student(
+        self, org_id: uuid.UUID, year_id: uuid.UUID, student: Student,
+    ) -> FeeStructure | None:
+        """Which structure prices THIS child (FE-2).
+
+        The exact mirror of `apply()`'s rule, read from the student's end instead
+        of the structure's: **her own category's price for her class if one
+        exists, otherwise the class's general price.** `apply()` says the same
+        thing by having the general structure skip children whose category is
+        spoken for; said from here it has to be a preference, and the two must
+        agree or a staff ward would be quoted one fee by the per-student screen
+        and billed another by the bulk button.
+
+        Returns None when the class is not priced at all — which is a real answer
+        the setup screen renders as "not priced yet", never as ₹0.
+        """
+        klass = self.db.get(SchoolClass, student.class_id) if student.class_id else None
+        if klass is None:
+            return None
+        actives = list(
+            self.db.scalars(
+                select(FeeStructure)
+                .where(
+                    FeeStructure.org_id == org_id,
+                    FeeStructure.academic_year_id == year_id,
+                    FeeStructure.class_name == klass.name,
+                    FeeStructure.is_active.is_(True),
+                )
+                .options(selectinload(FeeStructure.templates),
+                         selectinload(FeeStructure.category))
+            )
+        )
+        if not actives:
+            return None
+        if student.category_id is not None:
+            mine = next((s for s in actives if s.category_id == student.category_id), None)
+            if mine is not None:
+                return mine
+        return next((s for s in actives if s.category_id is None), None)
+
     def _require_real_class(
         self, org_id: uuid.UUID, year_id: uuid.UUID, class_name: str
     ) -> None:
