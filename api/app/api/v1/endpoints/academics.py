@@ -24,6 +24,7 @@ from app.schemas.academics import (
     ClassOut,
     ClassSubjectCreate,
     ClassSubjectOut,
+    ClassSubjectTeacherIn,
     ClassSubjectUpdate,
     ClassUpdate,
     CopySubjectsIn,
@@ -192,6 +193,20 @@ def update_class_subject(cs_id: uuid.UUID, body: ClassSubjectUpdate,
                          m: CurrentMember = Depends(require_operator),
                          db: Session = Depends(get_db)):
     return AcademicService(db).update_class_subject(m, cs_id, body)
+
+
+@router.put("/class-subjects/{cs_id}/teacher", response_model=ClassSubjectOut)
+def set_class_subject_teacher(cs_id: uuid.UUID, body: ClassSubjectTeacherIn,
+                              m: CurrentMember = Depends(require_admin),
+                              db: Session = Depends(get_db)):
+    """Move a subject to another teacher, or leave it unassigned (`D-130`).
+
+    `require_admin`, NOT `require_operator`: everything else about a
+    class-subject is setup and freezes at handover, but a school that cannot
+    hand the 5th's EVS to somebody else in August has a register, a syllabus and
+    a My Day that are all wrong from that morning."""
+    return AcademicService(db).set_class_subject_teacher(
+        m, cs_id, body.teacher_member_id)
 
 
 @router.post("/classes/{class_id}/copy-subjects", response_model=CopySubjectsOut)

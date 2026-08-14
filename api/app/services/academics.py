@@ -311,6 +311,39 @@ class AcademicService:
         item.subject_name = self.db.scalar(select(Subject.name).where(Subject.id == cs.subject_id))
         return item
 
+    def set_class_subject_teacher(
+        self, m: CurrentMember, cs_id: uuid.UUID, member_id: uuid.UUID | None,
+    ) -> ClassSubjectOut:
+        """Who teaches this subject, changed by the school itself (`D-130`).
+
+        Split out of `update_class_subject` because the two are frozen
+        differently. **Which subjects a class studies is setup** — it is what
+        `require_operator` was written to lock at handover, and a school
+        re-cutting its curriculum mid-year is a conversation, not a click. **Who
+        teaches one of them is not.** Teachers leave, a cover takes over the
+        5th's EVS in August, and this column is what My Day, `visible_class_ids`,
+        the syllabus board, the homework queue and the timetable clash validator
+        all read live. A school that cannot change it has a daily record that is
+        wrong from the morning the teacher changed — the same argument TT-2 made
+        for the day shape, and the reason the timings left the freeze too.
+
+        Passing None un-assigns, which is a real state: the subject is still
+        taught, nobody owns it yet, and every screen already renders that.
+        """
+        cs = self._scoped(ClassSubject, m.org_id, cs_id)
+        if member_id is not None:
+            ok = self.db.scalar(select(Membership.id).where(
+                Membership.id == member_id, Membership.org_id == m.org_id,
+                Membership.status == "active"))
+            if ok is None:
+                raise NotFoundError("Member")
+        cs.teacher_member_id = member_id
+        self.db.flush()
+        item = ClassSubjectOut.model_validate(cs)
+        item.subject_name = self.db.scalar(
+            select(Subject.name).where(Subject.id == cs.subject_id))
+        return item
+
     def delete_class_subject(self, m: CurrentMember, cs_id: uuid.UUID) -> None:
         self.db.delete(self._scoped(ClassSubject, m.org_id, cs_id))
 

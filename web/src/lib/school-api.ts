@@ -710,6 +710,15 @@ export const schoolApi = {
   updateClassSubject: (id: string, b: { teacher_member_id?: string | null; periods_per_week?: number }) =>
     api.patch<ClassSubject>(`/academics/class-subjects/${id}`, b),
   deleteClassSubject: (id: string) => api.del<{ message: string }>(`/academics/class-subjects/${id}`),
+  /** `D-130` — move a subject to another teacher, or leave it unassigned.
+   *
+   *  Its own route because it is the one part of a class-subject a LIVE school
+   *  may change: everything else here is setup and freezes at handover, and a
+   *  school that cannot hand the 5th's EVS to somebody else in August has a
+   *  register, a syllabus and a My Day that are all wrong from that morning. */
+  setClassSubjectTeacher: (id: string, teacherMemberId: string | null) =>
+    api.put<ClassSubject>(`/academics/class-subjects/${id}/teacher`,
+      { teacher_member_id: teacherMemberId }),
 
   // ── students ──────────────────────────────────────────────────────────────
   categories: () => api.get<StudentCategory[]>("/students/categories"),

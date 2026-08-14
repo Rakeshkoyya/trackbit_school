@@ -98,9 +98,14 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
     onError: (e) => showApiError(e, "Could not add"),
   });
 
+  // `D-130` — the one class-subject edit a LIVE school may make. It goes
+  // through its own admin-only route, so it keeps working after handover while
+  // the rest of this panel (adding a subject, its periods, removing it) stays
+  // frozen: which subjects a class studies is curriculum, who teaches one of
+  // them is a Tuesday.
   const reassign = useMutation({
     mutationFn: ({ id, memberId }: { id: string; memberId: string | null }) =>
-      schoolApi.updateClassSubject(id, { teacher_member_id: memberId }),
+      schoolApi.setClassSubjectTeacher(id, memberId),
     onSuccess: () => {
       invalidate();
       toast.success("Teacher updated");
@@ -175,23 +180,26 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
         <div key={cs.id} className="flex flex-wrap items-center gap-2 px-1 py-1 text-sm">
           <span className="min-w-24 flex-1 font-medium">{cs.subject_name}</span>
 
+          {/* Always live, `canEdit` or not — see the `reassign` note above. */}
+          <select
+            aria-label={`Teacher for ${cs.subject_name}`}
+            className={`rounded border bg-card px-1.5 py-1 text-xs ${
+              cs.teacher_member_id ? "border-border" : "border-warning text-warning"
+            }`}
+            value={cs.teacher_member_id ?? ""}
+            disabled={reassign.isPending}
+            onChange={(e) => reassign.mutate({ id: cs.id, memberId: e.target.value || null })}
+          >
+            <option value="">Unassigned</option>
+            {staff.map((t) => (
+              <option key={t.member_id} value={t.member_id!}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+
           {canEdit ? (
             <>
-              <select
-                aria-label={`Teacher for ${cs.subject_name}`}
-                className={`rounded border bg-card px-1.5 py-1 text-xs ${
-                  cs.teacher_member_id ? "border-border" : "border-warning text-warning"
-                }`}
-                value={cs.teacher_member_id ?? ""}
-                onChange={(e) => reassign.mutate({ id: cs.id, memberId: e.target.value || null })}
-              >
-                <option value="">Unassigned</option>
-                {staff.map((t) => (
-                  <option key={t.member_id} value={t.member_id!}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
               <Input
                 aria-label={`Periods per week for ${cs.subject_name}`}
                 className="h-7 w-14 text-xs"
@@ -217,9 +225,6 @@ export function ClassSubjectsPanel({ classId, canEdit }: { classId: string; canE
           ) : (
             <span className="text-xs text-muted-foreground">
               {cs.periods_per_week}p/wk
-              {cs.teacher_member_id
-                ? ` · ${staff.find((t) => t.member_id === cs.teacher_member_id)?.name ?? "teacher"}`
-                : " · unassigned"}
             </span>
           )}
         </div>

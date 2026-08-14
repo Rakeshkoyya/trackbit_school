@@ -112,6 +112,17 @@ class ClassSubjectUpdate(BaseModel):
     periods_per_week: int | None = Field(default=None, ge=0, le=60)
 
 
+class ClassSubjectTeacherIn(BaseModel):
+    """`D-130` — reassign one subject, by a live school.
+
+    Its own body (and its own route) because it is the one part of a
+    class-subject that is NOT setup structure: which subjects a class studies is
+    frozen at handover, who teaches one of them never can be.
+    """
+
+    teacher_member_id: uuid.UUID | None = None
+
+
 class ClassSubjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

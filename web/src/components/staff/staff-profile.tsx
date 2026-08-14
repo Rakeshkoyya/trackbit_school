@@ -242,26 +242,163 @@ export function StaffProfileCard({ memberId }: { memberId: string }) {
         </div>
       )}
 
-      {row.subjects.length ? (
-        <div className="border-t border-border px-4 py-3">
-          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Teaches
-          </span>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {row.subjects.map((s) => (
-              <Link key={s.class_subject_id} href={`/plan/syllabus?class_subject=${s.class_subject_id}`}
-                className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted">
-                {s.class_label} {s.subject_name}
+      <TeachesSection memberId={memberId} row={row} canEdit={data.can_edit} />
+    </section>
+  );
+}
+
+/** What this member teaches — and, for an admin, the one control that was
+ *  missing (`D-130`).
+ *
+ *  The founder's sentence: *"I want to remove EVS of 5 class currently mapped to
+ *  Aarti madam and map it to another teacher"*. Both the API and a dropdown for
+ *  it already existed, on Setup → class — behind `require_operator`, which
+ *  freezes at handover. So on a live school the control was there and greyed
+ *  out, in a place you had to already know about. The staff file is where
+ *  somebody actually looks for it, because the question starts with the person.
+ *
+ *  Adding or removing a subject from a class stays on Setup and stays frozen:
+ *  that is curriculum. Handing one to a colleague is a Tuesday. */
+function TeachesSection({ memberId, row, canEdit }: {
+  memberId: string; row: StaffDetail["row"]; canEdit: boolean;
+}) {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+
+  // Only fetched when an admin can act on it — a teacher reading her own file
+  // has no use for the whole school's roster.
+  const { data: directory } = useQuery({
+    queryKey: ["staff", "directory"],
+    queryFn: () => schoolApi.staffDirectory(),
+    enabled: canEdit,
+  });
+  const { data: allCs = [] } = useQuery({
+    queryKey: ["class-subjects", "all"],
+    queryFn: () => schoolApi.allClassSubjects(),
+    enabled: canEdit && adding,
+  });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["staff"] });
+    qc.invalidateQueries({ queryKey: ["class-subjects"] });
+    // Who teaches what decides My Day, the register and the clash validator, so
+    // everything downstream has to be re-read, not just this card.
+    qc.invalidateQueries({ queryKey: ["timetable-clashes"] });
+    qc.invalidateQueries({ queryKey: ["my-day"] });
+  };
+  const move = useMutation({
+    mutationFn: ({ csId, to }: { csId: string; to: string | null }) =>
+      schoolApi.setClassSubjectTeacher(csId, to),
+    onSuccess: (_res, v) => {
+      invalidate();
+      toast.success(v.to
+        ? "Subject moved to the new teacher"
+        : "Subject left unassigned");
+    },
+    onError: (e) => showApiError(e, "Could not change the teacher"),
+  });
+
+  // `core/staff.py::not_operator()` already keeps the platform operator out of
+  // the roster read, so this list is the school's own people.
+  const teachers = (directory?.rows ?? []).filter((t) => t.status === "active");
+  const mine = new Set(row.subjects.map((s) => s.class_subject_id));
+  const spare = allCs.filter((cs) => !mine.has(cs.id));
+
+  if (!row.subjects.length && !canEdit) return null;
+
+  return (
+    <div className="border-t border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Teaches
+        </span>
+        {canEdit ? (
+          <Button size="sm" variant="ghost" onClick={() => setAdding((v) => !v)}>
+            {adding ? "Cancel" : "+ Add a subject"}
+          </Button>
+        ) : null}
+      </div>
+
+      {!canEdit ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {row.subjects.map((s) => (
+            <Link key={s.class_subject_id}
+              href={`/plan/syllabus?class_subject=${s.class_subject_id}`}
+              className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted">
+              {s.class_label} {s.subject_name}
+              {s.periods_per_week ? (
+                <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                  {s.periods_per_week}/wk
+                </span>
+              ) : null}
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-1.5 space-y-1">
+          {row.subjects.length === 0 && !adding ? (
+            <p className="text-sm text-muted-foreground">
+              No subjects assigned yet.
+            </p>
+          ) : null}
+          {row.subjects.map((s) => (
+            <div key={s.class_subject_id}
+              className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5">
+              <Link href={`/plan/syllabus?class_subject=${s.class_subject_id}`}
+                className="min-w-0 flex-1 truncate text-sm hover:underline">
+                <span className="font-medium">{s.class_label}</span>{" "}
+                {s.subject_name}
                 {s.periods_per_week ? (
                   <span className="ml-1 font-mono text-[10px] text-muted-foreground">
                     {s.periods_per_week}/wk
                   </span>
                 ) : null}
               </Link>
-            ))}
-          </div>
+              {/* Changing the name here MOVES the subject — she loses it and the
+                  chosen colleague gains it. One control, said plainly. */}
+              <select
+                aria-label={`Who teaches ${s.class_label} ${s.subject_name}`}
+                className="h-8 max-w-44 rounded-md border border-border bg-background px-2 text-sm"
+                value={memberId}
+                disabled={move.isPending}
+                onChange={(e) => move.mutate({
+                  csId: s.class_subject_id, to: e.target.value || null })}>
+                {teachers.map((t) => (
+                  <option key={t.member_id} value={t.member_id}>{t.name}</option>
+                ))}
+                <option value="">Nobody yet</option>
+              </select>
+            </div>
+          ))}
+
+          {adding ? (
+            <div className="rounded-lg border border-dashed border-border px-2.5 py-2">
+              <p className="mb-1 text-xs text-muted-foreground">
+                Pick a class-subject to give her. One with a teacher already moves
+                across — nothing is taught twice.
+              </p>
+              <select
+                aria-label="Add a subject for this teacher"
+                className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+                value=""
+                disabled={move.isPending}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  move.mutate({ csId: e.target.value, to: memberId });
+                  setAdding(false);
+                }}>
+                <option value="">Choose a class and subject…</option>
+                {spare.map((cs) => (
+                  <option key={cs.id} value={cs.id}>
+                    {cs.class_label ?? ""} {cs.subject_name}
+                    {cs.teacher_member_id ? " — currently assigned" : " — unassigned"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-    </section>
+      )}
+    </div>
   );
 }

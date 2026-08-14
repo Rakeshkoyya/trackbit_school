@@ -226,6 +226,78 @@ def test_the_operator_can_change_structure_in_a_handed_over_school(
     assert r.status_code == 200, r.text
 
 
+# ── and neither does WHO teaches a subject (`D-130`) ─────────────────────────
+def _teaching_school(client, cleanup):
+    """A live school with one class-subject and a second teacher to move it to."""
+    reg = _register(client, cleanup, org_name="Teaching School")
+    h = _headers(reg)
+    year = client.post("/api/v1/academics/years", json={
+        "label": "2026-27", "start_date": "2026-06-01",
+        "end_date": "2027-04-30"}, headers=h).json()
+    klass = client.post("/api/v1/academics/classes", json={
+        "academic_year_id": year["id"], "name": "5", "section": "A"},
+        headers=h).json()
+    subject = client.post("/api/v1/academics/subjects", json={"name": "EVS"},
+                          headers=h).json()
+    cs = client.post("/api/v1/academics/class-subjects", json={
+        "class_id": klass["id"], "subject_id": subject["id"],
+        "periods_per_week": 4}, headers=h).json()
+    inv = client.post("/api/v1/org/members/invite", json={
+        "name": "Other Teacher", "phone": "+9198" + str(uuid.uuid4().int)[:8],
+        "role": "teacher"}, headers=h).json()
+    cleanup["users"].append(uuid.UUID(inv["user_id"]))
+    token = inv["invite_url"].rsplit("/join/", 1)[1]
+    other = client.post("/api/v1/auth/verify", json={"token": token}).json()
+    other_h = {"Authorization": f"Bearer {other['access_token']}"}
+    members = client.get("/api/v1/org/members", headers=h).json()
+    rows = members["members"] if isinstance(members, dict) else members
+    other_mid = next(x["member_id"] for x in rows
+                     if x.get("name") == "Other Teacher")
+    _hand_over(reg["org"]["id"])
+    return reg, h, cs, other_mid, other_h
+
+
+def test_a_live_school_can_move_a_subject_to_another_teacher(client, cleanup):
+    """The founder's case: *"I want to remove EVS of 5 class currently mapped to
+    Aarti madam and map it to another teacher"*.
+
+    Everything else about a class-subject is curriculum and stays frozen —
+    adding one, its periods, deleting it. Who teaches it never can be: teachers
+    leave, a cover takes over in August, and this column is what My Day, the
+    register's permission, the syllabus board and the clash validator all read
+    live. A school that cannot change it has a daily record that is wrong from
+    that morning.
+    """
+    _reg, h, cs, other_mid, _oh = _teaching_school(client, cleanup)
+
+    # The structure route is still frozen — periods per week is curriculum.
+    frozen = client.patch(f"/api/v1/academics/class-subjects/{cs['id']}",
+                          json={"periods_per_week": 6}, headers=h)
+    assert frozen.status_code == 403
+    assert frozen.json()["error"]["code"] == "operator_only"
+
+    # The assignment is not.
+    moved = client.put(f"/api/v1/academics/class-subjects/{cs['id']}/teacher",
+                       json={"teacher_member_id": other_mid}, headers=h)
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["teacher_member_id"] == other_mid
+
+    # And "nobody yet" is a real state, not an error.
+    cleared = client.put(f"/api/v1/academics/class-subjects/{cs['id']}/teacher",
+                         json={"teacher_member_id": None}, headers=h)
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["teacher_member_id"] is None
+
+
+def test_a_teacher_cannot_move_a_subject(client, cleanup):
+    """Admin-only. An in-process service call does not run the route guard, so
+    this is the only thing between a teacher and reassigning her own load."""
+    _reg, _h, cs, other_mid, other_h = _teaching_school(client, cleanup)
+    r = client.put(f"/api/v1/academics/class-subjects/{cs['id']}/teacher",
+                   json={"teacher_member_id": other_mid}, headers=other_h)
+    assert r.status_code == 403, r.text
+
+
 # ── the frozen list is exactly what we think it is ───────────────────────────
 def test_the_operator_only_surface_is_the_one_we_meant():
     """Pins the split. A structure route added under `require_admin`, or an
@@ -255,6 +327,8 @@ def test_the_operator_only_surface_is_the_one_we_meant():
     for entry in ("POST /api/v1/students",
                   "POST /api/v1/org/members/invite",
                   "POST /api/v1/academics/calendar/events",
-                  "PATCH /api/v1/planner/syllabus/chapters/{unit_id}"):
+                  "PATCH /api/v1/planner/syllabus/chapters/{unit_id}",
+                  # `D-130`: WHO teaches a subject is a Tuesday, not curriculum.
+                  "PUT /api/v1/academics/class-subjects/{cs_id}/teacher"):
         assert entry not in frozen, f"{entry} must not freeze at handover"
     assert len(frozen) >= 30, "the structure surface should not have shrunk"
