@@ -469,6 +469,11 @@ class SessionService:
             a.status = row.status
             a.late_minutes = row.late_minutes if row.status == "late" else None
             a.homework_done = row.homework_done
+        # Who actually ran it. Only `set_meeting_note` stamped this, so a block
+        # whose teacher took the roll and wrote nothing had a meeting with no
+        # taker — and My Day could not tell her four colleagues that somebody
+        # had already covered it, which is the whole point of a pooled block.
+        meeting.taken_by_member_id = m.membership.id
         self.db.flush()
         return self._meeting_out(m, s, meeting)
 
@@ -495,6 +500,7 @@ class SessionService:
             self.db.add(SessionStudentLog(
                 org_id=m.org_id, meeting_id=meeting_id, student_id=student_id,
                 section=section, note=note, member_id=m.membership.id))
+        meeting.taken_by_member_id = m.membership.id
         self.db.flush()
         return self.student_card(m, meeting_id, student_id)
 

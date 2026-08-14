@@ -351,3 +351,102 @@ def test_my_day_shows_a_block_to_its_staff_and_to_nobody_else(client, cleanup):
 
     theirs = client.get("/api/v1/classroom/my-day", headers=outsider_h).json()
     assert [p for p in theirs["periods"] if p["slot_type"] == "block"] == []
+
+
+# ── TT-5: a block is a POOL, not an assignment (founder, 2026-08-14) ─────────
+def test_a_block_never_reports_a_teacher_clash(client, cleanup):
+    """Founder: *"each block can be edited by any teacher that is assigned, so
+    there is no need to give warning if an activity teacher is overlapping — the
+    other teacher will take care of it."*
+
+    `session_staff` lists who MAY take a games period, not who must. Warning
+    that one of them also teaches Science that hour is noise about the exact
+    situation the block was designed to absorb — and noise here is what makes a
+    school stop reading the real clashes underneath.
+    """
+    s = _school(client, cleanup)
+    _set_day(client, s)
+    # The admin teaches Science in this class, period 1 on Monday…
+    client.put("/api/v1/timetable/slot", headers=s["h"], json={
+        "class_id": s["class"]["id"], "weekday": 0, "period_no": 1,
+        "class_subject_id": s["cs"]["id"]})
+    # …and is also on the staff of a games block another class runs then.
+    other = client.post("/api/v1/academics/classes", headers=s["h"], json={
+        "academic_year_id": s["year"]["id"], "name": "8", "section": "A"}).json()
+    b = _block(client, s, name="Games", kind="sports",
+               staff_member_ids=[s["admin_mid"]])
+    client.put("/api/v1/timetable/slot", headers=s["h"], json={
+        "class_id": other["id"], "weekday": 0, "period_no": 1,
+        "slot_type": "block", "session_id": b["id"]})
+
+    assert client.get("/api/v1/timetable/validate", headers=s["h"]).json() == []
+
+    # A genuine subject-on-subject double booking still reports — the rule
+    # narrows the warning, it does not switch it off.
+    subject2 = client.post("/api/v1/academics/subjects", headers=s["h"],
+                           json={"name": "Maths"}).json()
+    cs2 = client.post("/api/v1/academics/class-subjects", headers=s["h"], json={
+        "class_id": other["id"], "subject_id": subject2["id"],
+        "teacher_member_id": s["admin_mid"], "periods_per_week": 4}).json()
+    client.put("/api/v1/timetable/slot", headers=s["h"], json={
+        "class_id": other["id"], "weekday": 0, "period_no": 2,
+        "class_subject_id": cs2["id"]})
+    client.put("/api/v1/timetable/slot", headers=s["h"], json={
+        "class_id": s["class"]["id"], "weekday": 0, "period_no": 2,
+        "class_subject_id": s["cs"]["id"]})
+    clashes = client.get("/api/v1/timetable/validate", headers=s["h"]).json()
+    assert len(clashes) == 1
+    assert clashes[0]["period_no"] == 2
+
+
+def test_a_block_taken_by_one_teacher_reads_as_done_for_the_others(client, cleanup):
+    """The pooled block's other half. The same row is on four teachers' My Day,
+    so it has to say when a colleague has already run it — otherwise each of
+    them opens it to find out, and a row that must be opened to be dismissed is
+    not an optional row."""
+    s = _school(client, cleanup)
+    one_h, one_mid = _teacher(client, cleanup, s, "Warden")
+    two_h, two_mid = _teacher(client, cleanup, s, "Second")
+    client.post("/api/v1/students", headers=s["h"], json={
+        "admission_no": f"A{uuid.uuid4().hex[:6]}", "full_name": "Asha Rao",
+        "class_id": s["class"]["id"]})
+    _set_day(client, s)
+    b = _block(client, s, name="Evening study", kind="study",
+               staff_member_ids=[one_mid, two_mid])
+    weekday = datetime.now(ZoneInfo("Asia/Kolkata")).weekday()
+    client.put("/api/v1/timetable/slot", headers=s["h"], json={
+        "class_id": s["class"]["id"], "weekday": weekday, "period_no": 3,
+        "slot_type": "block", "session_id": b["id"]})
+
+    def block_row(headers):
+        day = client.get("/api/v1/classroom/my-day", headers=headers).json()
+        rows = [p for p in day["periods"] if p["slot_type"] == "block"]
+        assert len(rows) == 1, day["periods"]
+        return rows[0]
+
+    # Both see it, both are told nothing is owed.
+    for h in (one_h, two_h):
+        row = block_row(h)
+        assert row["optional"] is True
+        assert row["captured"] is False
+        assert row["captured_by"] is None
+
+    # Merely OPENING it must not tick it — `open_meeting` creates the row on a
+    # tap, and treating that as done would mark a block covered for being
+    # glanced at.
+    meeting = client.post(f"/api/v1/blocks/{b['id']}/open", headers=one_h).json()
+    assert block_row(two_h)["captured"] is False
+
+    # Taking the roll is what "somebody ran it" means.
+    students = client.get(f"/api/v1/students?class_id={s['class']['id']}",
+                          headers=s["h"]).json()
+    rows = [{"student_id": st["id"], "status": "present"} for st in students] \
+        if students else []
+    r = client.patch(f"/api/v1/blocks/meetings/{meeting['id']}/attendance",
+                     headers=one_h, json={"rows": rows})
+    assert r.status_code == 200, r.text
+
+    covered = block_row(two_h)
+    assert covered["captured"] is True
+    # Named, because the point is who to ask — and what stops a second roll.
+    assert covered["captured_by"] is not None

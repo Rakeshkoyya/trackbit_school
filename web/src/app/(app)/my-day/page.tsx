@@ -83,7 +83,10 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
     <Link href={href}
       className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/40 active:scale-[0.995]">
       <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md text-xs font-bold ${
-        isBlock ? "bg-primary/10 text-primary"
+        isBlock
+          ? p.captured
+            ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]"
+            : "bg-primary/10 text-primary"
           : done ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]" : "bg-muted"}`}>
         P{p.period_no}
       </span>
@@ -104,14 +107,33 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
           {clock ? " · " : ""}
           {combined && !isBlock ? `${p.combined_class_ids.length} classes together · ` : ""}
           {isBlock
-            ? p.block_kind_label ?? captureFor(p.block_kind).label
+            ? p.captured
+              ? // TT-5 — the sentence that lets four colleagues stop thinking
+                // about it. Naming the person matters more than the tick: it is
+                // who to ask, and it is what stops two people re-taking a roll.
+                p.captured_by ? `Taken by ${p.captured_by}` : "Already taken"
+              : p.block_kind_label ?? captureFor(p.block_kind).label
             : p.status === "not_held" ? "Not held"
               : p.planned_topic ?? "No topic planned this week"}
         </p>
       </div>
       {isBlock ? (
         <div className="flex shrink-0 items-center gap-1.5">
-          <Badge tone="primary">{captureFor(p.block_kind).hint}</Badge>
+          {p.captured ? (
+            <Badge tone="success"><Check className="h-3 w-3" /> done</Badge>
+          ) : (
+            <>
+              <Badge tone="primary">{captureFor(p.block_kind).hint}</Badge>
+              {/* Pooled and optional: anyone on the block's staff may take it,
+                  and nobody is being asked to. Said quietly, in the off state,
+                  because a chip that shouts "optional" reads as a chore too. */}
+              {p.optional ? (
+                <span className="hidden font-mono text-[10px] uppercase tracking-wide text-muted-foreground/70 sm:inline">
+                  optional
+                </span>
+              ) : null}
+            </>
+          )}
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </div>
       ) : (

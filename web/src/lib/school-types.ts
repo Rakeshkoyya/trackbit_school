@@ -233,6 +233,13 @@ export interface MyDayPeriod {
   block_name: string | null;
   block_kind: string | null;
   block_kind_label: string | null;
+  /** TT-5 — a block is POOLED: every teacher on its staff sees this row and any
+   *  one of them may take it. `captured` says a colleague already has (derived
+   *  from what was recorded, never from the meeting row existing), and
+   *  `optional` says nothing here is owed. */
+  captured: boolean;
+  captured_by: string | null;
+  optional: boolean;
   /** Straight off the bell schedule — "" when the school never set timings. */
   start: string;
   end: string;

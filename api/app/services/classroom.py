@@ -364,8 +364,11 @@ class ClassroomService:
         # live on the block's own meeting, which does not exist until she opens
         # it, so there is nothing to count here and nothing to pre-create. The
         # row is a doorway, and `block_kind` is what the doorway leads to.
+        block_state = self._block_states(
+            m, [ts.session_id for ts in block_slots if ts.session_id], today)
         for ts in block_slots:
             block_classes = list(ts.class_labels) or [ts.class_label]
+            state = block_state.get(ts.session_id, (False, None))
             periods.append(MyDayPeriod(
                 period_no=ts.period_no, slot_type="block", class_subject_id=None,
                 class_id=ts.class_id, class_label=" + ".join(block_classes),
@@ -376,6 +379,9 @@ class ClassroomService:
                 block_kind=ts.block_kind,
                 block_kind_label=day_shape.label_for(ts.block_kind),
                 start=ts.start, end=ts.end,
+                # TT-5: pooled, so the row says whether a colleague has already
+                # covered it — and says it is optional either way.
+                captured=state[0], captured_by=state[1], optional=True,
                 # A block never carries the school-day register (D-91): its roll
                 # is its own, taken against its own roster on its own meeting.
                 marks_attendance=False, roster_count=0))
@@ -386,6 +392,67 @@ class ClassroomService:
                         day_closed=lock.closed,
                         locked_periods=sorted(lock.periods),
                         lock_reason=lock.title)
+
+    def _block_states(
+        self, m: CurrentMember, session_ids: list[uuid.UUID], d: date,
+    ) -> dict[uuid.UUID, tuple[bool, str | None]]:
+        """session_id → (has anything been recorded today, by whom) — TT-5.
+
+        A block is staffed by everyone who MAY take it, so the same row appears
+        on four teachers' My Day. Without this, each of them has to open it to
+        discover a colleague already did it at six o'clock — and a row that has
+        to be opened to be dismissed is not an optional row.
+
+        **Captured is derived from content, never from the meeting existing.**
+        `open_meeting` creates that row the moment somebody taps the card, so
+        reading it as done would tick a block off for merely being looked at.
+        Attendance, a class log, a per-student log or a photo are the things
+        that mean somebody actually ran it.
+        """
+        from app.models import (  # noqa: PLC0415
+            SessionAttendance,
+            SessionMedia,
+            SessionMeeting,
+            SessionStudentLog,
+        )
+
+        if not session_ids:
+            return {}
+        meetings = list(self.db.scalars(
+            select(SessionMeeting).where(
+                SessionMeeting.org_id == m.org_id,
+                SessionMeeting.session_id.in_(set(session_ids)),
+                SessionMeeting.date == d)))
+        if not meetings:
+            return {}
+        ids = [mt.id for mt in meetings]
+        with_content: set[uuid.UUID] = set()
+        for model in (SessionAttendance, SessionMedia, SessionStudentLog):
+            with_content |= set(self.db.scalars(
+                select(model.meeting_id).where(model.meeting_id.in_(ids)).distinct()))
+        names = self._member_names(
+            m.org_id, {mt.taken_by_member_id for mt in meetings if mt.taken_by_member_id})
+        return {
+            mt.session_id: (
+                # `taken_by_member_id` is stamped by every WRITE and by none of
+                # the reads, so it carries the case content cannot: a block whose
+                # roster is empty that evening was still taken by somebody, and
+                # her colleagues should be told so.
+                mt.id in with_content or bool(mt.note)
+                or mt.taken_by_member_id is not None,
+                names.get(mt.taken_by_member_id),
+            )
+            for mt in meetings
+        }
+
+    def _member_names(self, org_id: uuid.UUID,
+                      member_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        if not member_ids:
+            return {}
+        return dict(self.db.execute(
+            select(Membership.id, User.name)
+            .join(User, User.id == Membership.user_id)
+            .where(Membership.org_id == org_id, Membership.id.in_(member_ids))).all())
 
     def _my_day_tasks(self, m: CurrentMember, today: date, year: AcademicYear | None):
         """D-41/D-43: the narrow task window under the periods — rail follow-ups

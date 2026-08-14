@@ -87,6 +87,26 @@ def _label(klass: SchoolClass) -> str:
     return klass.name + (f"-{klass.section}" if klass.section else "")
 
 
+def counts_as_clash(slot: TimetableSlot) -> bool:
+    """Is a double-booking involving this cell worth telling anybody about?
+
+    **A block is a POOL, not an assignment** (founder, 2026-08-14): *"each block
+    can be edited by any teacher that is assigned, so there is no need to give
+    warning if an activity teacher is overlapping — the other teacher will take
+    care of it."* Games, assembly and the homework class are staffed by whoever
+    is free that evening, and `session_staff` lists the people who MAY take it,
+    not the one who must. Warning that one of five possible takers also teaches
+    Maths in that period is noise about a situation the block was designed to
+    absorb — and noise on this banner is what makes a school stop reading the
+    real clashes underneath it.
+
+    A subject is the opposite: exactly one teacher is named on it, and if she is
+    somewhere else at that hour the class has nobody. That is the clash worth a
+    warning, and it is the only one left.
+    """
+    return slot.slot_type != "block"
+
+
 def combined_label(class_labels: list[str]) -> str:
     """How a combined meeting names itself: "5-A + 6-A" (TT-4).
 
@@ -268,6 +288,8 @@ class TimetableService:
         # (weekday, period_no, teacher) → {engagement: {class_id: label}}
         buckets: dict[tuple[int, int, uuid.UUID], dict[tuple, dict[uuid.UUID, str]]] = {}
         for s in slots:
+            if not counts_as_clash(s):
+                continue
             for tmid, engagement in self._commitments(s, cs_meta, block_meta):
                 key = (s.weekday, s.period_no, tmid)
                 buckets.setdefault(key, {}).setdefault(engagement, {})[s.class_id] = \
@@ -1202,6 +1224,12 @@ class TimetableService:
         for s in live:
             if s.slot_type == "subject" and s.class_id in class_ids:
                 continue  # this is what we are replacing
+            # Same rule as the clash banner: a block is a pool, so being on its
+            # staff does not make this teacher unavailable. Treating it as busy
+            # here would refuse to place real subject demand around a games
+            # period four other people could take.
+            if not counts_as_clash(s):
+                continue
             for tmid, _e in self._commitments(s, cs_meta, block_meta):
                 busy.add((s.weekday, s.period_no, tmid))
         # Cells already held by a block are not the generator's to fill.

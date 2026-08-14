@@ -60,6 +60,17 @@ class MyDayPeriod(BaseModel):
     block_name: str | None = None
     block_kind: str | None = None
     block_kind_label: str | None = None
+    # TT-5 — a block is POOLED: every teacher on its staff sees this row, and any
+    # one of them may take it. So the row has to answer "has somebody already
+    # done this?" or four colleagues each open it to find out.
+    #
+    # `captured` is derived from what was actually recorded (a roll, a log, a
+    # note, a photo), never from the meeting row existing — opening the screen
+    # creates that row, and treating it as done would turn a glance into a tick.
+    captured: bool = False
+    captured_by: str | None = None
+    #: True for a block. Nothing here is owed; the row is an offer, not a chore.
+    optional: bool = False
     # The clock, straight off the bell schedule — "P9 · 15:30" beats "P9" when
     # the day now runs past 2pm and half of it is optional.
     start: str = ""
