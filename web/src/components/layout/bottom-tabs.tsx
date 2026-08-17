@@ -19,7 +19,11 @@ export function BottomTabs() {
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
       <ul className="mx-auto flex max-w-md items-stretch justify-around">
         {items.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          // An item may stand for more than its own href: Students lands on
+          // Directory but owns the whole area, so reading Academics must not
+          // leave the bar with nothing lit.
+          const match = item.activePrefix ?? item.href;
+          const active = pathname === match || pathname.startsWith(match + "/");
           const Icon = item.icon;
           return (
             <li key={item.href} className="flex-1">
