@@ -8,7 +8,57 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 
-import { menuNavForRole } from "./nav-items";
+import { menuNavForRole, type NavItem } from "./nav-items";
+
+const isUnder = (pathname: string, href: string) =>
+  pathname === href || pathname.startsWith(href + "/");
+
+const rowClass = (active: boolean) =>
+  cn("flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+    active ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted");
+
+/**
+ * A group's halves, OPEN — under the group's name, never behind a press.
+ *
+ * This menu is already a popover; a drawer inside it would be a second layer of
+ * open-to-find for two words that cost one row each. So the halves are always
+ * on screen, and the group's name sits above them as a label rather than a link
+ * — pressing "Students" here would only repeat Directory, and the bottom bar
+ * already carries that press.
+ */
+function MenuGroup({ item, pathname, onNavigate }: {
+  item: NavItem; pathname: string; onNavigate: () => void;
+}) {
+  const Icon = item.icon;
+  return (
+    <div className="py-1">
+      <div className="flex items-center gap-3 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden />
+        {item.label}
+      </div>
+      {/* Indented and tied to the label by a hairline, exactly as the sidebar
+          draws it, so the halves read as one thing with two doors. */}
+      <div className="ml-[1.4rem] border-l border-border pl-2">
+        {item.children!.map((child) => {
+          const active = isUnder(pathname, child.href);
+          const ChildIcon = child.icon;
+          return (
+            <Link
+              key={child.href}
+              href={child.href}
+              role="menuitem"
+              onClick={onNavigate}
+              className={cn(rowClass(active), "py-2")}
+            >
+              <ChildIcon className="h-4 w-4 shrink-0" strokeWidth={active ? 2.2 : 1.8} />
+              {child.label}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Mobile-only hamburger (top-left of the Topbar). Holds every nav item that
@@ -17,19 +67,18 @@ import { menuNavForRole } from "./nav-items";
  * lg+ where the full sidebar takes over. Same lightweight popover pattern as
  * AccountMenu (no popover primitive: absolute panel, close on outside-click /
  * Escape / navigation).
+ *
+ * A grouped item keeps its level here (MenuGroup). It used to be flattened to
+ * its children, which read as unlabelled rows — and for an admin it was worse
+ * than that: the bar carries the Students group's own href, the group was
+ * filtered out of this menu wholesale, and Academics had no door on a phone.
  */
 export function MobileMenu() {
   const pathname = usePathname();
   const { me } = useAuth();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  // A group is FLATTENED here rather than nested. This menu is already a
-  // popover; a drawer inside it would be a second layer of open-to-find, and
-  // the two halves are two words — they cost one row each. Flattening also
-  // means nothing can become unreachable on a phone if the bottom bar changes
-  // and swallows the group's own href.
-  const items = menuNavForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher, me?.has_band_scope)
-    .flatMap((i) => (i.children?.length ? i.children : [i]));
+  const items = menuNavForRole(me?.org_role, me?.is_super_admin, me?.is_class_teacher, me?.has_band_scope);
 
   useEffect(() => {
     if (!open) return;
@@ -70,7 +119,17 @@ export function MobileMenu() {
           className="tb-menu-in absolute left-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-border bg-card p-1.5 shadow-xl"
         >
           {items.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            if (item.children?.length) {
+              return (
+                <MenuGroup
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  onNavigate={() => setOpen(false)}
+                />
+              );
+            }
+            const active = isUnder(pathname, item.href);
             const Icon = item.icon;
             return (
               <Link
@@ -79,10 +138,7 @@ export function MobileMenu() {
                 role="menuitem"
                 data-tour={item.tour}
                 onClick={() => setOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
-                  active ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted",
-                )}
+                className={rowClass(active)}
               >
                 <Icon className="h-5 w-5 shrink-0" strokeWidth={active ? 2.2 : 1.8} />
                 {item.label}

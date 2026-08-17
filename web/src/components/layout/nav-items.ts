@@ -34,6 +34,11 @@ export type NavItem = {
   // a sidebar nobody reads. `href` stays the group's own landing page, so a
   // press on the parent is never a dead press.
   children?: NavItem[];
+  // The route prefix that lights the item up, for the rare item that stands for
+  // more than its own href. The mobile bar's Students tab lands on Directory but
+  // stands for the whole area, so without this an admin reading Academics sees
+  // no tab lit at all and cannot tell which of the four she is inside.
+  activePrefix?: string;
   // Package tier (`D-106`). The item is NEVER hidden for want of a plan — the
   // founder's rule is that everything stays on screen and the block happens on
   // arrival. The sidebar renders a padlock beside it and the screen behind it
@@ -174,10 +179,11 @@ export function bottomNavForRole(role: OrgRole | string | undefined): NavItem[] 
   switch (role) {
     case "admin":
       // The bar navigates — it never opens a drawer, so Students lands on
-      // Directory and the tabs inside the area carry you across.
-      return [plan, tasks, { ...students, children: undefined }, lucy];
+      // Directory and the hamburger carries the two halves by name.
+      return [plan, tasks,
+        { ...students, children: undefined, activePrefix: "/students" }, lucy];
     case "teacher":
-      return [myDay, tasks, studentsForTeacher, lucy];
+      return [myDay, tasks, { ...studentsForTeacher, activePrefix: "/students" }, lucy];
     case "parent":
       return [];
     default:
@@ -188,6 +194,14 @@ export function bottomNavForRole(role: OrgRole | string | undefined): NavItem[] 
 // The mobile hamburger menu: every nav item NOT already in the bottom bar,
 // keeping the sidebar's order (admin → Dashboard/Fees/Setup, teacher →
 // Sessions/Plan, plus Schools for the platform operator).
+//
+// A GROUP is judged by its halves, not by its own href. The bar carries
+// Students *flattened onto Directory*, so `students.href` matched the bar and
+// deleted the whole group from this menu — taking Academics with it, which the
+// bar does not carry and which no screen links to. An admin on a phone was left
+// with no door to the class log, homework, exams, reports or analytics at all.
+// The group is kept while any half is missing from the bar, and MobileMenu
+// renders its halves under the group's name.
 export function menuNavForRole(
   role: OrgRole | string | undefined,
   isSuperAdmin = false,
@@ -196,7 +210,9 @@ export function menuNavForRole(
 ): NavItem[] {
   const inBottom = new Set(bottomNavForRole(role).map((i) => i.href));
   return navForRole(role, isSuperAdmin, isClassTeacher, hasBandScope)
-    .filter((i) => !inBottom.has(i.href));
+    .filter((i) => (i.children?.length
+      ? !i.children.every((c) => inBottom.has(c.href))
+      : !inBottom.has(i.href)));
 }
 
 // Role-aware landing after login (SPRD2 §3): admin → Dashboard (leads with the
