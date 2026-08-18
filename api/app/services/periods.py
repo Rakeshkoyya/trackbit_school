@@ -50,6 +50,26 @@ def visible_class_ids(db: Session, m: CurrentMember) -> set[uuid.UUID] | None:
         _SchoolClass.class_teacher_member_id == m.membership.id)))
 
 
+def is_class_teacher_of(db: Session, m: CurrentMember, class_id: uuid.UUID) -> bool:
+    """Is this member the class teacher of THIS class? (`D-89`.)
+
+    The homeroom half of `visible_class_ids`, asked about one class instead of
+    all of them, so the two can never drift apart — the whole reason a class
+    teacher is derived from `school_classes.class_teacher_member_id` and never
+    stored as a third `org_role` is that the same fact in two stores diverges on
+    the first reassignment, and two copies of the same *query* diverge the same
+    way. Admin is deliberately not short-circuited here: callers answer that
+    themselves, and this stays a plain fact about the roster.
+    """
+    if m.membership is None:
+        return False
+    from app.models import SchoolClass as _SchoolClass  # noqa: PLC0415
+
+    return db.scalar(select(_SchoolClass.id).where(
+        _SchoolClass.id == class_id, _SchoolClass.org_id == m.org_id,
+        _SchoolClass.class_teacher_member_id == m.membership.id)) is not None
+
+
 def assert_can_edit_class_subject(
     db: Session, m: CurrentMember, class_subject_id: uuid.UUID,
 ) -> ClassSubject:
@@ -96,6 +116,23 @@ def assert_can_take_class(
     substitute would see the period in My Day and be refused when they tapped it,
     which is worse than never showing it — so the date is threaded through from
     the period card.
+
+    **The class teacher of the homeroom passes too.** She is the person the
+    school's own rule names first — *the class teacher takes the register at
+    period one* — and until now this function was the one place that did not
+    know her. `visible_class_ids` has read "the subjects she teaches ∪ the
+    homeroom she owns" since 2026-08-05, so her class appeared on the attendance
+    board, in My Day and in the exam feed, and then every one of those screens
+    refused her the moment she tapped it. A class whose subjects are not mapped
+    yet — a new senior class, a school still mid-setup — has NO `class_subjects`
+    at all, so its class teacher failed every branch below and was locked out of
+    her own register with a 403 the UI showed as an endless spinner.
+
+    This is the same rule `assert_can_edit_class_subject` and
+    `MainExamService.assert_can_record_subject` already state in their own
+    words: she is answerable for her class's record. It stays narrower than it
+    looks — this function answers *may she stand in front of this class*, and
+    recording another subject's marks is still gated by the narrower guard.
     """
     if class_subject_id is not None:
         cs = db.scalar(select(ClassSubject).where(
@@ -110,6 +147,8 @@ def assert_can_take_class(
         ClassSubject.org_id == m.org_id, ClassSubject.class_id == class_id,
         ClassSubject.teacher_member_id == m.membership.id).limit(1))
     if teaches is not None:
+        return
+    if is_class_teacher_of(db, m, class_id):
         return
     if on_date is not None:
         from app.services.substitution import SubstitutionService  # noqa: PLC0415

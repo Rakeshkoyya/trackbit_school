@@ -23,7 +23,12 @@ export class ApiError extends Error {
   status: number;
   details: Record<string, unknown>;
   constructor(status: number, code: string, message: string, details: Record<string, unknown> = {}) {
-    super(message);
+    // `super(message)` coerces with String(), so a non-string here becomes the
+    // literal "[object Object]" and every toast downstream shows it. `parse()`
+    // below is careful, but this is the chokepoint every ApiError passes
+    // through, so the guarantee "an ApiError's message is readable text" is
+    // enforced once, structurally, rather than trusted at each construction.
+    super(typeof message === "string" && message.trim() ? message : "Something went wrong.");
     this.status = status;
     this.code = code;
     this.details = details;
@@ -65,17 +70,79 @@ async function raw(path: string, opts: Options, accessOverride?: string): Promis
   });
 }
 
+/**
+ * Turn whatever a failing response put in `detail` into a sentence.
+ *
+ * The backend's own errors are the structured envelope `{ error: { code,
+ * message } }`, and `message` there is always a string. But FastAPI answers a
+ * request whose BODY fails Pydantic validation before any of our code runs, and
+ * that 422 has a different shape: `detail` is an ARRAY of objects
+ * (`[{ loc, msg, type }]`). Handing that to `new ApiError(...)` gave `Error` a
+ * non-string, which it coerced with `String()` — so every toast for a 422 read
+ * exactly **"[object Object]"**, naming neither the field nor the problem.
+ *
+ * That is the error the founder hit saving a lesson detail and then could not
+ * reproduce. It needs a malformed payload, so it surfaces only when some *other*
+ * defect sends one — a `class_subject_id` that came through undefined for a
+ * class with no subject mapped, an empty required field — which is exactly why
+ * it looked intermittent. The trigger is worth fixing wherever it is found; a
+ * validation error a person cannot read is a bug on its own, because it hides
+ * the one clue that would have identified the trigger.
+ *
+ * Strings pass through, a Pydantic list becomes "field: message", and anything
+ * else falls back rather than stringifying an object.
+ */
+function readDetail(detail: unknown): string | null {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        if (typeof d === "string") return d;
+        if (!d || typeof d !== "object") return null;
+        const { loc, msg } = d as { loc?: unknown; msg?: unknown };
+        if (typeof msg !== "string") return null;
+        // Drop the leading "body"/"query" frame — it names our transport, not
+        // anything the person in front of the form can act on.
+        const field = Array.isArray(loc)
+          ? loc
+            .filter((x) => typeof x === "string" && x !== "body" && x !== "query")
+            .join(".")
+          : "";
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter((x): x is string => !!x);
+    if (parts.length) return parts.join(" \u00b7 ");
+  }
+  return null;
+}
+
 async function parse<T>(res: Response): Promise<T> {
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  // A gateway 502/504 answers with HTML, not JSON. Letting JSON.parse throw here
+  // raised a SyntaxError that was NOT an ApiError, so every caller's
+  // `showApiError` fell through to its generic fallback and the status was lost.
+  // Parse defensively and let the status carry the meaning instead.
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
   if (!res.ok) {
-    const err = data?.error;
-    throw new ApiError(
-      res.status,
-      err?.code ?? "error",
-      err?.message ?? data?.detail ?? "Something went wrong.",
-      err?.details ?? {},
-    );
+    const body = (data ?? {}) as {
+      error?: { code?: string; message?: string; details?: Record<string, unknown> };
+      detail?: unknown;
+    };
+    const err = body.error;
+    const message =
+      (typeof err?.message === "string" && err.message ? err.message : null)
+      ?? readDetail(body.detail)
+      ?? (res.status >= 500
+        ? "The server had a problem. Please try again."
+        : "Something went wrong.");
+    throw new ApiError(res.status, err?.code ?? "error", message, err?.details ?? {});
   }
   return data as T;
 }

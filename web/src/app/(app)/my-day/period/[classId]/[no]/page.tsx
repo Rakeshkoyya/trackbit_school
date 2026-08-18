@@ -18,8 +18,9 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { ClassDayNotice } from "@/components/school/day-notice";
 import { CaptureReview, useStartCapture } from "@/components/school/score-capture";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageError } from "@/components/ui/page-error";
 import { PageLoading } from "@/components/ui/page-loading";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
@@ -730,9 +731,10 @@ function PeriodPageInner() {
   // which is S-146's per-class case (8-A went to the rehearsal, 8-B taught on).
   const [reasonEvent, setReasonEvent] = useState("");
 
-  const { data: card, isLoading } = useQuery({
+  const { data: card, isLoading, error } = useQuery({
     queryKey: ["period-card", classId, periodNo],
     queryFn: () => schoolApi.periodCard(classId, periodNo),
+    retry: false,
   });
 
   const refresh = () => {
@@ -771,6 +773,19 @@ function PeriodPageInner() {
     onError: (e) => showApiError(e, "Could not reopen"),
   });
 
+  // Same rule as the roster sheets: a failed query leaves `isLoading` false and
+  // `card` undefined, so the two must not share one branch or the page spins on
+  // "Loading period…" with the server's actual answer never shown.
+  if (error) {
+    return (
+      <PageError error={error} fallback="Could not load this period."
+        action={
+          <Link href="/my-day" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            Back to My Day
+          </Link>
+        } />
+    );
+  }
   if (isLoading || !card) {
     return <PageLoading label="Loading period…" />;
   }

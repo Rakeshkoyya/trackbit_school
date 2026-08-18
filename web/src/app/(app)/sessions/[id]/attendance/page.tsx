@@ -22,6 +22,7 @@ import {
   type RollMarks,
 } from "@/components/school/roll-call";
 import { Button } from "@/components/ui/button";
+import { PageError } from "@/components/ui/page-error";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
 import type { AttendanceStatus } from "@/lib/school-types";
@@ -32,7 +33,8 @@ function AttendanceInner({ id }: { id: string }) {
   const [marks, setMarks] = useState<RollMarks | null>(null);
   const [rollMode, setRollMode] = useState(false);
   const { data: session } = useQuery({ queryKey: ["session", id], queryFn: () => schoolApi.session(id) });
-  const { data: meeting, isLoading } = useQuery({ queryKey: ["meeting", id], queryFn: () => schoolApi.openMeeting(id) });
+  const { data: meeting, isLoading, error } = useQuery({
+    queryKey: ["meeting", id], queryFn: () => schoolApi.openMeeting(id), retry: false });
 
   if (meeting && marks === null) {
     setMarks(marksFrom(meeting.roster, (r) => {
@@ -60,6 +62,20 @@ function AttendanceInner({ id }: { id: string }) {
     onError: (e) => showApiError(e, "Could not save attendance"),
   });
 
+  // The error branch comes FIRST. A failed query leaves `isLoading` false and
+  // the data undefined, so folding the two into one spinner condition renders
+  // "Loading roster…" forever on a plain 403 — which is exactly how a refused
+  // register reached the founder as "stuck loading" instead of as a sentence.
+  if (error) {
+    return (
+      <PageError error={error} fallback="Could not load this roster."
+        action={
+          <Button variant="outline" onClick={() => router.push(`/sessions/${id}`)}>
+            Back to the session
+          </Button>
+        } />
+    );
+  }
   if (isLoading || !meeting || marks === null) {
     return <p className="py-12 text-center text-sm text-muted-foreground">Loading roster…</p>;
   }

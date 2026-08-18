@@ -27,6 +27,7 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { RegisterBook } from "@/components/school/register-book";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { PageError } from "@/components/ui/page-error";
 import { PageLoading } from "@/components/ui/page-loading";
 import { thisMonth, todayKey } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
@@ -96,9 +97,10 @@ function AttendanceInner() {
   const [picked, setPicked] = useState<string | null>(null);
   const [month, setMonth] = useState<string>(thisMonth);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["attendance", "my-classes", day],
     queryFn: () => schoolApi.myAttendance(day),
+    retry: false,
   });
 
   // The picked class drives the register below, so it is resolved before the
@@ -113,6 +115,10 @@ function AttendanceInner() {
   });
 
   if (isLoading) return <PageLoading label="Loading your classes…" />;
+  // Before the "no classes" empty state, because they are not the same thing.
+  // A failed request is not the school declining to assign her anything, and
+  // saying so sends her to an admin to fix a problem she does not have.
+  if (error) return <PageError error={error} fallback="Could not load your classes." />;
   if (!active) {
     return (
       <EmptyState icon={Users} title="No classes assigned to you"
@@ -151,7 +157,9 @@ function AttendanceInner() {
 
       <TodayStrip klass={active} day={day} />
 
-      {register.isLoading || !register.data ? (
+      {register.error ? (
+        <PageError error={register.error} fallback="Could not load this register." />
+      ) : register.isLoading || !register.data ? (
         <div className="h-64 animate-pulse rounded-xl bg-muted" />
       ) : (
         <RegisterBook data={register.data} month={month} onMonth={setMonth}
