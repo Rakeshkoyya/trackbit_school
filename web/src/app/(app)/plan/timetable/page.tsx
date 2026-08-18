@@ -89,6 +89,9 @@ function BlockSheet({ open, onOpenChange, editing }: {
   });
   const cap = captureFor(kind);
   const asks = [
+    // TT-6 first: it is the one capture that writes outside its own block, and
+    // an admin putting assembly on period 1 has to know that is what happens.
+    cap.schoolRoll && "the whole school's register, filed to every class in it",
     cap.roll && "attendance",
     cap.homeworkCheck && "homework checking",
     cap.classLog && "a class log",

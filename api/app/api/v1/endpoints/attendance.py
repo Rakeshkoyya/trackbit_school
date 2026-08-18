@@ -18,6 +18,9 @@ from app.schemas.attendance import (
     AbsenceNoteOut,
     AbsenceReasonIn,
     AbsenceReasonOut,
+    AssemblyMarkIn,
+    AssemblyMarkOut,
+    AssemblyRosterOut,
     AttendanceMarkIn,
     AttendanceMarkOut,
     AttendanceRosterOut,
@@ -67,6 +70,30 @@ def class_register(class_id: uuid.UUID, month: str | None = None,
 def mark(body: AttendanceMarkIn, m: CurrentMember = Depends(require_academic),
          db: Session = Depends(get_db)):
     return AttendanceService(db).mark(m, body)
+
+
+# ── the whole-school register, taken at assembly (TT-6) ──────────────────────
+@router.get("/assembly", response_model=AssemblyRosterOut)
+def assembly_sheet(session_id: uuid.UUID, on_date: date | None = None,
+                   period_no: int | None = None,
+                   m: CurrentMember = Depends(require_academic),
+                   db: Session = Depends(get_db)):
+    """Every child in the hall, grouped by class (founder, 2026-08-18).
+
+    The door is the BLOCK, not the classes: the person who takes assembly teaches
+    almost none of the school. `assert_may_take_block` is what admits her, and
+    the classes she can reach are only the ones that block holds on the grid at
+    that period — never a class list she gets to name.
+    """
+    return AttendanceService(db).assembly_sheet(m, session_id, on_date, period_no)
+
+
+@router.post("/assembly", response_model=AssemblyMarkOut)
+def mark_assembly(body: AssemblyMarkIn, m: CurrentMember = Depends(require_academic),
+                  db: Session = Depends(get_db)):
+    """One roll call in the hall → one register per class, filed on the block's
+    period. Capture-by-exception: "everyone is here" posts an empty list."""
+    return AttendanceService(db).mark_assembly(m, body)
 
 
 # ── V1-3: reasons + informed absence (D-02 / S-24) ───────────────────────────

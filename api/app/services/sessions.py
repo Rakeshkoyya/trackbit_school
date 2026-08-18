@@ -420,7 +420,8 @@ class SessionService:
                           capture=CaptureFlags(
                               roll=cap.roll, class_log=cap.class_log,
                               student_logs=cap.student_logs, memories=cap.memories,
-                              homework_check=cap.homework_check))
+                              homework_check=cap.homework_check,
+                              school_roll=cap.school_roll))
 
     def set_meeting_note(self, m: CurrentMember, meeting_id: uuid.UUID,
                          note: str | None) -> MeetingOut:

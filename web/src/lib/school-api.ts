@@ -361,6 +361,20 @@ export const schoolApi = {
     class_ids?: string[];
   }) => api.post<import("@/lib/school-types").AttendanceMarkResult>("/attendance/mark", b),
 
+  // TT-6 — the whole-school register, taken at assembly. The door is the BLOCK
+  // (its staff), not the classes: the warden who takes assembly teaches almost
+  // none of the school. The classes are the ones the grid puts in the hall at
+  // that period, and the save writes ONE register PER CLASS.
+  assemblySheet: (sessionId: string, onDate?: string) =>
+    api.get<import("@/lib/school-types").AssemblyRoster>(
+      `/attendance/assembly${qs({ session_id: sessionId, on_date: onDate })}`),
+  markAssembly: (b: {
+    session_id: string;
+    date?: string | null;
+    period_no?: number | null;
+    exceptions: { student_id: string; status: "absent" | "late"; late_minutes?: number | null }[];
+  }) => api.post<import("@/lib/school-types").AssemblyMarkResult>("/attendance/assembly", b),
+
   // V1-3 — reasons (D-02), informed absence (S-24), My Class (D-03)
   /** Recorded AFTER capture by admin or teacher; stamps every absent period of
    *  that student-day. Its presence turns a red row amber (D-86). */

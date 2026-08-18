@@ -16,10 +16,12 @@ Alerts carry plain "absent today" text only; never band/tier info (P4).
 import uuid
 from calendar import monthrange
 from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core import day_shape
 from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
@@ -42,6 +44,10 @@ from app.schemas.attendance import (
     AbsenceNoteOut,
     AbsenceReasonIn,
     AbsenceReasonOut,
+    AssemblyClassOut,
+    AssemblyMarkIn,
+    AssemblyMarkOut,
+    AssemblyRosterOut,
     AttendanceMarkIn,
     AttendanceMarkOut,
     AttendanceRosterOut,
@@ -65,6 +71,9 @@ from app.services.periods import (
     visible_class_ids,
 )
 from app.services.school_clock import marking_period_nos, today_in
+
+if TYPE_CHECKING:  # `timetable` imports nothing from here; kept lazy anyway so
+    from app.services.timetable import BlockRoom  # the two services stay uncoupled.
 
 # ── THE day-status rule (V1-0d, ux §9) ───────────────────────────────────────
 # "Was this child absent today?" is rendered on six surfaces (admin board,
@@ -285,9 +294,13 @@ class AttendanceService:
         return self._sheet_for(m, class_id, period_no, d)
 
     def _sheet_for(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
-                   d: date) -> AttendanceRosterOut:
+                   d: date, *, taking_block_id: uuid.UUID | None = None,
+                   ) -> AttendanceRosterOut:
         klass = self._class(m.org_id, class_id)
-        assert_can_take_class(self.db, m, class_id, None, d, period_no)
+        # TT-6: the assembly sheet is read through the block's door, which its
+        # taker has already passed. See `mark`.
+        if taking_block_id is None:
+            assert_can_take_class(self.db, m, class_id, None, d, period_no)
         roster = self._roster(m.org_id, class_id)
         # In a once-per-day school the sheet must OPEN on the day's register
         # wherever it was taken, so a teacher arriving at period 5 sees this
@@ -394,13 +407,26 @@ class AttendanceService:
             "roster_count": roster_count, "present_count": present,
             "absent_count": absent, "late_count": late, "alerted_count": alerted})
 
-    def mark(self, m: CurrentMember, body: AttendanceMarkIn) -> AttendanceMarkOut:
+    def mark(self, m: CurrentMember, body: AttendanceMarkIn, *,
+             taking_block_id: uuid.UUID | None = None) -> AttendanceMarkOut:
+        """Write one class's register.
+
+        `taking_block_id` says the caller is standing in a whole-school block and
+        has ALREADY been authorized for it (TT-6) — the assembly warden takes the
+        register for every class in the hall and teaches almost none of them, so
+        `assert_can_take_class` would refuse her on the very roll the school asked
+        her to take. It is a *different door*, never a wider one: the only caller
+        that may pass it is `mark_assembly`, which checks `assert_may_take_block`
+        first and then only fans out over the classes that block actually has on
+        the grid at that period.
+        """
         d = body.date or self._today(m)
         if body.class_ids and set(body.class_ids) - {body.class_id}:
             return self._mark_combined(m, body, d)
         klass = self._class(m.org_id, body.class_id)
-        assert_can_take_class(self.db, m, body.class_id, body.class_subject_id,
-                              d, body.period_no)
+        if taking_block_id is None:
+            assert_can_take_class(self.db, m, body.class_id, body.class_subject_id,
+                                  d, body.period_no)
         roster_ids = {s.id for s in self._roster(m.org_id, body.class_id)}
 
         # **One register a day means one register a day** (founder, 2026-08-05).
@@ -494,6 +520,157 @@ class AttendanceService:
             period_no=body.period_no, date=d,
             roster_count=roster_count, present_count=roster_count - absent_count,
             absent_count=absent_count, late_count=late_count, alerted_count=alerted)
+
+    # ── the whole-school register, taken at assembly (TT-6) ──────────────────
+    # Founder, 2026-08-18: assembly is at period 1, every child in the school is
+    # standing in it, and the roll taken there should BE each class's register
+    # for the day rather than a second list nobody reads.
+    #
+    # Deliberately a fan-out over the ordinary `mark`, exactly as TT-4's combined
+    # roll call is. Everything that makes attendance correct — the once-a-day
+    # redirect, the reasons that survive a re-mark, the guardian alert on the
+    # day's first marked period — is written once and would have to be written
+    # twice if the hall's register were its own kind of row.
+
+    def _assembly_room(self, m: CurrentMember, session_id: uuid.UUID, d: date,
+                       period_no: int | None = None) -> "BlockRoom":
+        """The hall, once every door has been checked.
+
+        Three refusals, in this order, because each one answers a different
+        question a caller can get wrong: *may you take this block*, *does this
+        kind of block take the school register at all*, and *is it on today's
+        grid*. The last is a state rather than a fault — assembly does not run on
+        Sunday — but it still has no period to file against, so it cannot write.
+        """
+        from app.models import Session as SessionModel  # noqa: PLC0415
+        from app.services.timetable import TimetableService  # noqa: PLC0415
+
+        tt = TimetableService(self.db)
+        tt.assert_may_take_block(m, session_id)
+        block = self.db.scalar(select(SessionModel).where(
+            SessionModel.id == session_id, SessionModel.org_id == m.org_id))
+        if block is None:
+            raise NotFoundError("Block")
+        if not day_shape.capture_for(block.kind).school_roll:
+            raise ValidationError(
+                f"A {day_shape.label_for(block.kind).lower()} block does not take "
+                "the school register — its roll is its own.",
+                code="no_school_roll")
+        room = tt.block_room(m, session_id, d, period_no)
+        if room is None:
+            raise ValidationError(
+                f"{block.name} is not on the timetable for {d:%A}, so there is no "
+                "period to file the register against.",
+                code="block_not_on_grid")
+        return room
+
+    def assembly_sheet(self, m: CurrentMember, session_id: uuid.UUID,
+                       on_date: date | None = None,
+                       period_no: int | None = None) -> AssemblyRosterOut:
+        """Every child in the hall on one sheet, grouped by class.
+
+        Each class's rows are read from that class's OWN register, because that
+        is where they are written and where they will be read back — the month
+        grid, the report card and the parent's Today all keep working on a class
+        at a time and learn nothing about assembly.
+        """
+        d = on_date or self._today(m)
+        room = self._assembly_room(m, session_id, d, period_no)
+
+        rows: list[AttendanceRosterRow] = []
+        classes: list[AssemblyClassOut] = []
+        marked_all = True
+        for cid in room.class_ids:
+            sheet = self._sheet_for(m, cid, room.period_no, d,
+                                    taking_block_id=room.session_id)
+            marked_all = marked_all and sheet.marked
+            label = room.class_labels.get(cid) or sheet.class_label
+            for r in sheet.roster:
+                rows.append(r.model_copy(update={"class_id": cid, "class_label": label}))
+            classes.append(AssemblyClassOut(
+                class_id=cid, class_label=label, roster=len(sheet.roster),
+                marked=sheet.marked, absent=sheet.absent_count, late=sheet.late_count))
+
+        absent = sum(1 for r in rows if r.status == "absent")
+        late = sum(1 for r in rows if r.status == "late")
+        n, k = len(rows), len(classes)
+        children = "child" if n == 1 else "children"
+        klasses = "class" if k == 1 else "classes"
+        headline = (
+            f"{n - absent} of {n} present · filed to {k} {klasses}"
+            if marked_all else
+            # Never a zero and never red: an untaken register is a state of the
+            # record, not news about the children (ux §5).
+            f"Not taken yet · {n} {children} across {k} {klasses}")
+        return AssemblyRosterOut(
+            session_id=room.session_id, block_name=room.name, block_kind=room.kind,
+            kind_label=day_shape.label_for(room.kind), period_no=room.period_no,
+            date=d, marked=marked_all and bool(classes),
+            once_per_day=self.once_per_day(m), classes=classes, roster=rows,
+            present_count=n - absent, absent_count=absent, late_count=late,
+            headline=headline)
+
+    def mark_assembly(self, m: CurrentMember, body: AssemblyMarkIn) -> AssemblyMarkOut:
+        """One roll call in the hall → one register PER CLASS.
+
+        The whole hall's exception list goes to every class untouched: `mark`
+        already ignores students who are not on the class's roster, so each class
+        picks up exactly its own absentees and nothing has to be split here.
+        """
+        d = body.date or self._today(m)
+        room = self._assembly_room(m, body.session_id, d, body.period_no)
+        exceptions = list(body.exceptions)
+
+        roster_count = present = absent = late = alerted = 0
+        for cid in room.class_ids:
+            one = self.mark(
+                m,
+                AttendanceMarkIn(class_id=cid, period_no=room.period_no, date=d,
+                                 exceptions=exceptions),
+                taking_block_id=room.session_id)
+            roster_count += one.roster_count
+            present += one.present_count
+            absent += one.absent_count
+            late += one.late_count
+            alerted += one.alerted_count
+        k = len(room.class_ids)
+        return AssemblyMarkOut(
+            session_id=room.session_id, period_no=room.period_no, date=d,
+            classes_marked=k, roster_count=roster_count, present_count=present,
+            absent_count=absent, late_count=late, alerted_count=alerted,
+            headline=(f"{present} of {roster_count} present · filed to {k} "
+                      f"{'class' if k == 1 else 'classes'}"))
+
+    def assembly_state(self, org_id: uuid.UUID, class_ids: list[uuid.UUID],
+                       period_no: int, d: date) -> dict:
+        """Where the hall's register stands — for My Day's assembly row.
+
+        `marked` is an ALL over the room for the same reason the sheet's is: a
+        hall with one class still unmarked has not had its roll taken, and a
+        green row there would let a class's day go missing quietly.
+        """
+        if not class_ids:
+            return {"marked": False, "roster_count": 0}
+        sizes = self.roster_sizes(org_id, class_ids)
+        states = self.period_states(org_id, class_ids, d)
+        # Once a day, a class's register may sit on a different period than the
+        # block's — a class whose period 1 was cancelled took it later. The hall
+        # asks the day's question, so any marked period of the day counts.
+        marked_of: dict[uuid.UUID, dict] = {}
+        for (cid, pno), s in states.items():
+            if not s.get("marked"):
+                continue
+            if cid not in marked_of or pno == period_no:
+                marked_of[cid] = s
+        marked = all(cid in marked_of for cid in class_ids)
+        return {
+            "marked": marked,
+            "roster_count": sum(sizes.get(cid, 0) for cid in class_ids),
+            "absent_count": (sum(s.get("absent_count") or 0
+                                 for s in marked_of.values()) if marked else None),
+            "late_count": (sum(s.get("late_count") or 0
+                               for s in marked_of.values()) if marked else None),
+        }
 
     def noted_student_ids(self, org_id: uuid.UUID, student_ids: list[uuid.UUID],
                           on: date) -> set[uuid.UUID]:

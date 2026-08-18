@@ -35,6 +35,10 @@ export interface BlockCapture {
   memories: boolean;
   /** The class → subject → check-the-books flow. */
   homeworkCheck: boolean;
+  /** TT-6: the roll taken here IS the school-day register, for every class in
+   *  the room — filed to each class, never to the meeting. The opposite claim
+   *  to `roll`, and no kind has both. */
+  schoolRoll: boolean;
 }
 
 export const BLOCK_CAPTURE: Record<BlockKind, BlockCapture> = {
@@ -42,39 +46,42 @@ export const BLOCK_CAPTURE: Record<BlockKind, BlockCapture> = {
     label: "Homework class",
     hint: "Check tonight's homework",
     roll: true, classLog: false, studentLogs: true, memories: true,
-    homeworkCheck: true,
+    homeworkCheck: true, schoolRoll: false,
   },
   study: {
     label: "Study / prep",
     hint: "Evening prep",
     roll: true, classLog: false, studentLogs: true, memories: true,
-    homeworkCheck: false,
+    homeworkCheck: false, schoolRoll: false,
   },
   sports: {
     label: "Sports",
     hint: "Games and practice",
     roll: true, classLog: false, studentLogs: false, memories: true,
-    homeworkCheck: false,
+    homeworkCheck: false, schoolRoll: false,
   },
   activity: {
     label: "Activity",
     hint: "Club or activity",
     roll: true, classLog: true, studentLogs: false, memories: true,
-    homeworkCheck: false,
+    homeworkCheck: false, schoolRoll: false,
   },
   course: {
     label: "Extra course",
     hint: "Extra course",
     roll: true, classLog: true, studentLogs: true, memories: true,
-    homeworkCheck: false,
+    homeworkCheck: false, schoolRoll: false,
   },
   assembly: {
     label: "Assembly / yoga",
-    // Whole-school time. Nobody takes a roll at assembly, and asking for one
-    // would be exactly the mandatory per-student capture P1v2 forbids.
-    hint: "Whole-school time",
+    // TT-6 — whole-school time, and the one moment when every child is standing
+    // in front of one person. So assembly takes the school-day REGISTER for
+    // every class in the hall (`schoolRoll`), not a roll of its own. Still
+    // capture-by-exception: the sheet opens on "everyone is here" and costs the
+    // taps of the children who are away, never 400 of them (P1v2).
+    hint: "Take the school register",
     roll: false, classLog: false, studentLogs: false, memories: true,
-    homeworkCheck: false,
+    homeworkCheck: false, schoolRoll: true,
   },
 };
 

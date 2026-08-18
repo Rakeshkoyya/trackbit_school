@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
-import { Camera, ChevronLeft, Home, StickyNote, Users } from "lucide-react";
+import { Camera, ChevronLeft, Home, School, StickyNote, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import {
-  RollCall, marksFrom, rollCounts,
+  RollCall, emptyMarks, marksFrom, rollCounts,
   type RollMarks, type RollRow,
 } from "@/components/school/roll-call";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { showApiError } from "@/lib/errors";
 import { schoolApi } from "@/lib/school-api";
-import type { HomeworkSheet, Meeting } from "@/lib/school-types";
+import type { AssemblyRoster, HomeworkSheet, Meeting } from "@/lib/school-types";
 
 /**
  * Capturing a period that is not a subject (TT-2).
@@ -329,6 +329,135 @@ function RollSection({ meeting }: { meeting: Meeting }) {
   );
 }
 
+/** TT-6 — the whole school on one sheet, taken at assembly.
+ *
+ *  Not the block's own roll (`RollSection` above), which files to the meeting
+ *  and is a second, private list. This IS each class's register for the day: one
+ *  roll call in the hall, filed to every class the grid puts in it, on the
+ *  period the grid puts assembly on. By the time the Maths teacher reaches
+ *  period 4 the roll is already taken and she is asked for nothing.
+ */
+function SchoolRollSection({ meeting }: { meeting: Meeting }) {
+  const qc = useQueryClient();
+  const [marks, setMarks] = useState<RollMarks | null>(null);
+  const [seeded, setSeeded] = useState<string | null>(null);
+
+  const { data: sheet, error } = useQuery<AssemblyRoster>({
+    queryKey: ["assembly-sheet", meeting.session_id, meeting.date],
+    queryFn: () => schoolApi.assemblySheet(meeting.session_id, meeting.date),
+    retry: false,
+  });
+
+  // Seed once per loaded sheet, adjusted during render: a taken register reopens
+  // on what was recorded, an untaken one on "everyone is here" — the same habit
+  // as a class register, because it is the same act.
+  if (sheet && seeded !== sheet.date) {
+    setSeeded(sheet.date);
+    setMarks(sheet.marked
+      ? marksFrom(sheet.roster, (r) => {
+        const row = sheet.roster.find((x) => x.student_id === r.student_id);
+        return { status: row?.status, late_minutes: row?.late_minutes };
+      })
+      : emptyMarks(sheet.roster));
+  }
+
+  const save = useMutation({
+    mutationFn: () => schoolApi.markAssembly({
+      session_id: meeting.session_id,
+      date: meeting.date,
+      exceptions: Object.entries(marks ?? {}).flatMap(
+        ([student_id, m]): { student_id: string; status: "absent" | "late" }[] =>
+          (m.status === "absent" || m.status === "late")
+            ? [{ student_id, status: m.status }]
+            : [],
+      ),
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["assembly-sheet", meeting.session_id] });
+      qc.invalidateQueries({ queryKey: ["my-day"] });
+      const alerted = res.alerted_count > 0 ? ` · ${res.alerted_count} parents alerted` : "";
+      toast.success(`${res.headline}${alerted}`);
+    },
+    onError: (e) => showApiError(e, "Could not save the register"),
+  });
+
+  if (error) {
+    // Assembly does not run on a Sunday, and a block that is not on today's grid
+    // has no period to file a register against. A state, said as one.
+    return (
+      <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+        This block isn&apos;t on the timetable today, so there is no period to file
+        the school register against.
+      </p>
+    );
+  }
+  if (!sheet || !marks) return <div className="h-40 animate-pulse rounded-xl bg-muted" />;
+
+  const counts = rollCounts(marks);
+  const pending = sheet.classes.filter((c) => !c.marked).length;
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+          <School className="h-4 w-4" /> School register
+        </h2>
+        <Badge tone={sheet.marked ? "success" : "neutral"}>
+          {counts.present}/{counts.total} present
+        </Badge>
+      </div>
+
+      {/* Say what the save reaches. A warden handed four hundred names needs to
+          know this is the day's register and not a second list nobody reads. */}
+      <p className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+        <School className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+        <span>
+          Everyone in assembly, at{" "}
+          <span className="font-medium text-foreground">period {sheet.period_no}</span>.
+          Take the roll once — it is filed to{" "}
+          <span className="font-medium text-foreground">each class&rsquo;s own register</span>,
+          so nobody is asked for it again today.
+        </span>
+      </p>
+
+      {sheet.classes.length > 1 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {sheet.classes.map((c) => (
+            <span key={c.class_id}
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] ${
+                    c.marked
+                      ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]"
+                      : "border border-border text-muted-foreground"}`}>
+              {c.class_label} · {c.roster}
+              {c.marked && c.absent ? ` · ${c.absent} away` : ""}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <RollCall rows={sheet.roster} marks={marks} onChange={setMarks} />
+
+      {sheet.roster.length > 0 ? (
+        <Button className="w-full" disabled={save.isPending} onClick={() => save.mutate()}>
+          {save.isPending
+            ? "Saving…"
+            : counts.absent === 0 && counts.late === 0
+              ? `Save — all ${counts.total} present`
+              : `Save — ${counts.present}/${counts.total} present`}
+        </Button>
+      ) : null}
+
+      {/* Never a zero and never red: an untaken register is a state of the
+          record, not news about the children. */}
+      <p className="text-xs text-muted-foreground">
+        {!sheet.marked && pending && pending < sheet.classes.length
+          ? `${pending} of ${sheet.classes.length} classes still need their register.`
+          : sheet.headline}
+      </p>
+    </section>
+  );
+}
+
 function NoteSection({ meeting }: { meeting: Meeting }) {
   const qc = useQueryClient();
   const [text, setText] = useState(meeting.note ?? "");
@@ -449,6 +578,9 @@ function BlockInner() {
         </p>
       </div>
 
+      {/* TT-6: the school register comes first on an assembly screen — it is the
+          reason the warden opened it, and the only thing on it the day needs. */}
+      {cap.school_roll ? <SchoolRollSection meeting={meeting} /> : null}
       {cap.homework_check ? <HomeworkSection meeting={meeting} /> : null}
       {cap.roll ? <RollSection meeting={meeting} /> : null}
       {cap.class_log ? <NoteSection meeting={meeting} /> : null}

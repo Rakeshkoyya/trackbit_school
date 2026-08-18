@@ -369,6 +369,17 @@ class ClassroomService:
         for ts in block_slots:
             block_classes = list(ts.class_labels) or [ts.class_label]
             state = block_state.get(ts.session_id, (False, None))
+            cap = day_shape.capture_for(ts.block_kind)
+            # TT-6: assembly is the exception to D-91. Every child in the school
+            # is standing in it, so the roll taken there IS each class's register
+            # — and this row therefore reports the HALL's state, read back from
+            # the class registers themselves rather than from the meeting. A
+            # block whose register is in for ten classes and missing for the
+            # eleventh is not done, which is why `marked` is an ALL.
+            room = (att_service.assembly_state(
+                m.org_id, list(ts.class_ids) or [ts.class_id], ts.period_no, today)
+                if cap.school_roll else None)
+            room_marked = bool(room and room["marked"])
             periods.append(MyDayPeriod(
                 period_no=ts.period_no, slot_type="block", class_subject_id=None,
                 class_id=ts.class_id, class_label=" + ".join(block_classes),
@@ -380,11 +391,22 @@ class ClassroomService:
                 block_kind_label=day_shape.label_for(ts.block_kind),
                 start=ts.start, end=ts.end,
                 # TT-5: pooled, so the row says whether a colleague has already
-                # covered it — and says it is optional either way.
-                captured=state[0], captured_by=state[1], optional=True,
-                # A block never carries the school-day register (D-91): its roll
-                # is its own, taken against its own roster on its own meeting.
-                marks_attendance=False, roster_count=0))
+                # covered it — and says it is optional either way. Except the
+                # school register, which is owed: the day's attendance hangs off
+                # it, and a school that skips it has no record of who came in.
+                captured=room_marked if room else state[0],
+                captured_by=state[1], optional=not cap.school_roll,
+                school_roll=cap.school_roll,
+                # A block normally never carries the school-day register (D-91):
+                # its roll is its own, taken against its own roster on its own
+                # meeting. `school_roll` is the one kind that does.
+                marks_attendance=cap.school_roll,
+                attendance_marked=room_marked,
+                roster_count=room["roster_count"] if room else 0,
+                present_count=(room["roster_count"] - (room["absent_count"] or 0)
+                               if room_marked else None),
+                absent_count=room["absent_count"] if room_marked else None,
+                late_count=room["late_count"] if room_marked else None))
         periods.sort(key=lambda p: p.period_no)
         tasks, older = self._my_day_tasks(m, today, year)
         return MyDayOut(date=today, classes=classes, periods=periods,

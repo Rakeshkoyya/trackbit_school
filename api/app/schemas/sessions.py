@@ -120,6 +120,10 @@ class CaptureFlags(BaseModel):
     student_logs: bool = False
     memories: bool = True
     homework_check: bool = False
+    #: TT-6 — this block takes the SCHOOL-DAY register for every class in the
+    #: room, not a roll of its own. Never both: `roll` files to the meeting,
+    #: `school_roll` files to each class's `class_periods` row.
+    school_roll: bool = False
 
 
 class ClassOption(BaseModel):

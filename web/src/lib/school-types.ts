@@ -240,6 +240,10 @@ export interface MyDayPeriod {
   captured: boolean;
   captured_by: string | null;
   optional: boolean;
+  /** TT-6 — this block takes the whole school's register (assembly / yoga). The
+   *  counts on the row are then the HALL's, and `attendance_marked` means every
+   *  class in it has its register in. The one block row that is not optional. */
+  school_roll: boolean;
   /** Straight off the bell schedule — "" when the school never set timings. */
   start: string;
   end: string;
@@ -607,6 +611,48 @@ export interface AttendanceRoster {
   combined_label: string | null;
 }
 
+/** TT-6 — the whole school on one sheet, taken at assembly. */
+export interface AssemblyClass {
+  class_id: string;
+  class_label: string;
+  roster: number;
+  marked: boolean;
+  absent: number;
+  late: number;
+}
+
+export interface AssemblyRoster {
+  session_id: string;
+  block_name: string;
+  block_kind: string;
+  kind_label: string;
+  /** The period the grid puts assembly on — where every register is filed. */
+  period_no: number;
+  date: string;
+  /** An ALL, never an any: one class still unmarked means the hall is not done. */
+  marked: boolean;
+  once_per_day: boolean;
+  classes: AssemblyClass[];
+  roster: AttendanceRosterRow[];
+  present_count: number;
+  absent_count: number;
+  late_count: number;
+  headline: string;
+}
+
+export interface AssemblyMarkResult {
+  session_id: string;
+  period_no: number;
+  date: string;
+  classes_marked: number;
+  roster_count: number;
+  present_count: number;
+  absent_count: number;
+  late_count: number;
+  alerted_count: number;
+  headline: string;
+}
+
 export interface AttendanceMarkResult {
   mark_id: string;
   class_id: string;
@@ -807,6 +853,10 @@ export interface CaptureFlags {
   student_logs: boolean;
   memories: boolean;
   homework_check: boolean;
+  /** TT-6 — this block takes the SCHOOL-DAY register for every class in the
+   *  room (assembly / yoga), not a roll of its own. Never both: `roll` files to
+   *  the meeting, `school_roll` files to each class's own register. */
+  school_roll: boolean;
 }
 
 export interface Meeting {

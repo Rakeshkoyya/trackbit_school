@@ -18,6 +18,7 @@ class happen" has one answer.
 
 import uuid
 from datetime import date, datetime
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
@@ -115,6 +116,24 @@ def combined_label(class_labels: list[str]) -> str:
     on one screen has to be the same room on the next.
     """
     return " + ".join(class_labels)
+
+
+class BlockRoom(NamedTuple):
+    """The classes a block has in front of it at one period on one day (TT-6).
+
+    Read off the live grid every time, never stored: the block's classes ARE its
+    live cells, so moving assembly out of 5-B's period 1 takes 5-B out of the
+    hall on the same day, with no second list to remember. `session_classes` is
+    deliberately not consulted here — it is the block's standing membership,
+    which says nothing about *this* period.
+    """
+
+    session_id: uuid.UUID
+    name: str
+    kind: str
+    period_no: int
+    class_ids: list[uuid.UUID]
+    class_labels: dict[uuid.UUID, str]
 
 
 class BlockMeta:
@@ -1148,6 +1167,42 @@ class TimetableService:
         if not self.may_take_block(m, session_id):
             raise ForbiddenError("You are not on this block's staff.",
                                  code="not_your_block")
+
+    def block_room(self, m: CurrentMember, session_id: uuid.UUID, on_date: date,
+                   period_no: int | None = None) -> BlockRoom | None:
+        """Who is in this block's room on this date, and at which period (TT-6).
+
+        The one lookup behind the whole-school register: the classes are the live
+        block cells for that weekday, and the period is the grid's, so "assembly
+        is at period 1" is said once — in the timetable — and the register lands
+        on that period's row in every one of those classes.
+
+        A block sitting on two periods of the same day (a double games slot)
+        answers for the FIRST unless asked for another: the register belongs to
+        the day, and taking it twice is the duplicate `once_per_day` exists to
+        prevent. `None` means the block is not on today's grid at all, which is a
+        state — an evening study block on a Sunday — and never an error.
+        """
+        block = self.db.scalar(select(SessionModel).where(
+            SessionModel.id == session_id, SessionModel.org_id == m.org_id))
+        if block is None:
+            return None
+        slots = list(self.db.scalars(select(TimetableSlot).where(
+            TimetableSlot.org_id == m.org_id,
+            TimetableSlot.session_id == session_id,
+            TimetableSlot.weekday == on_date.weekday(),
+            self._current_at(on_date))))
+        if not slots:
+            return None
+        at = period_no if period_no is not None else min(s.period_no for s in slots)
+        labels = self._class_labels(m.org_id)
+        ids = sorted({s.class_id for s in slots if s.period_no == at},
+                     key=lambda cid: labels.get(cid, "?"))
+        if not ids:
+            return None
+        return BlockRoom(session_id=block.id, name=block.name, kind=block.kind,
+                         period_no=at, class_ids=ids,
+                         class_labels={cid: labels.get(cid, "?") for cid in ids})
 
     # ── import (photo/xlsx → parse → confirm) ────────────────────────────────
     def _parsed_subjects(self, org_id: uuid.UUID, class_id: uuid.UUID) -> list[ParsedSubject]:

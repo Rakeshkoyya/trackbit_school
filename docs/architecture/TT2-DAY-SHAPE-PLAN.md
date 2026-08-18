@@ -103,14 +103,18 @@ The *flavour* of a block is `sessions.kind`, never a second column — one type 
 Per the `core/` convention — one computation, many renderings. Owns the block kinds and, for
 each, **what the teacher is asked for**:
 
-| kind | label | roll | class log | memories | homework check |
-|---|---|---|---|---|---|
-| `study` | Study / prep | ✓ | — | ✓ | — |
-| `homework` | Homework class | ✓ | — | ✓ | **✓** |
-| `sports` | Sports | ✓ | — | ✓ | — |
-| `activity` | Activity | ✓ | ✓ | ✓ | — |
-| `course` | Extra course | ✓ | ✓ | ✓ | — |
-| `assembly` | Assembly / yoga | optional | — | ✓ | — |
+| kind | label | roll | class log | memories | homework check | school roll |
+|---|---|---|---|---|---|---|
+| `study` | Study / prep | ✓ | — | ✓ | — | — |
+| `homework` | Homework class | ✓ | — | ✓ | **✓** | — |
+| `sports` | Sports | ✓ | — | ✓ | — | — |
+| `activity` | Activity | ✓ | ✓ | ✓ | — | — |
+| `course` | Extra course | ✓ | ✓ | ✓ | — | — |
+| `assembly` | Assembly / yoga | — | — | ✓ | — | **✓** (TT-6) |
+
+`roll` and `school_roll` are opposite claims and no kind has both: `roll` is the block's own
+second list, filed to its meeting; `school_roll` is the school-day register, filed to each
+class. See §6.
 
 Nothing else may branch on a kind string. `web/src/lib/day-shape.ts` mirrors it.
 
@@ -153,3 +157,51 @@ of students below with done / not-done, plus a photo or note per student.*
 No solver (§11 stands — the generator still reports what it cannot place). No per-weekday bell
 schedules; one shape at a time, changeable whenever the admin likes, with history. No parent-
 facing surface for any of it. No mandatory per-student capture in any new screen.
+
+
+## §6 — TT-6: assembly takes the school register (2026-08-18)
+
+Founder: *"if I added assembly in my timetable at first period and I want to take attendance of
+that whole school that are in assembly, it should reflect in each class."*
+
+TT-2 gave assembly `roll=False` on the reasoning that nobody takes a roll at assembly and asking
+for one would be the mandatory per-student capture P1v2 forbids. The second half of that is
+still true; the first half was wrong about the school. Assembly is the one moment in the day
+when **every child is standing in one place in front of one person**, which makes it the
+cheapest register the school will ever take — not an extra one.
+
+So `assembly` gains **`school_roll`**, and it is a different claim from `roll`:
+
+| | `roll` | `school_roll` |
+|---|---|---|
+| whose list | the block's own roster | every class the block holds on the grid |
+| filed to | `session_attendance` (the meeting) | `class_periods` — **one register per class** |
+| means | "who came to games" | "who was in school today" |
+| `D-91` | a child present at 08:20 can still miss the 18:00 game | this **is** the 08:20 register |
+
+What that buys, and why it is a fan-out rather than a new store:
+
+- **the write is the ordinary `mark`, once per class.** Everything that makes attendance
+  correct — the once-a-day redirect, the reasons that survive a re-mark, the guardian alert on
+  the day's first marked period — is written once and would have to be written twice if the
+  hall's register were its own row. Same shape as TT-4's combined roll call, same reason;
+- **nothing downstream learns a new word.** The month register, the report card, the parent's
+  Today and the daily report keep reading one class at a time and never hear about assembly;
+- **the period comes from the grid.** "Assembly is at period 1" is said in the timetable and
+  nowhere else, so moving it moves the register with it. A block that is not on today's grid
+  has no period to file against and refuses — a state, not a fault;
+- **the door is the block, not the class.** The warden who takes assembly teaches almost none
+  of the school, so `assert_can_take_class` would refuse her. `assert_may_take_block` admits
+  her instead, and the classes she can reach are only the ones the grid puts in the hall at
+  that period — never a list she names, or `session_id` would be a skeleton key into every
+  register in the school. `tests/test_assembly_register.py` asserts both halves;
+- **still capture-by-exception.** The sheet opens on "everyone is here" and costs the taps of
+  the children who are away. A school of 400 costs six taps, not 400 (P1v2);
+- **half a hall is not done.** `marked` is an ALL over the room, on the sheet and on My Day: a
+  hall with one class still unmarked has not had its roll taken, and a green row there would
+  lose a class's day quietly.
+
+Surfaces: `GET|POST /attendance/assembly` · the **School register** section on the block
+capture screen · the My Day assembly row, which carries the hall's counts and is the one block
+row that is **not** optional. **No migration** — `school_roll` is a property of a kind, and the
+registers it writes are the rows attendance has always written.

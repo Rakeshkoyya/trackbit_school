@@ -71,6 +71,11 @@ class MyDayPeriod(BaseModel):
     captured_by: str | None = None
     #: True for a block. Nothing here is owed; the row is an offer, not a chore.
     optional: bool = False
+    # TT-6 — this block takes the SCHOOL-DAY register for every class in the
+    # room (assembly / yoga). The counts below are then the whole hall's, and
+    # `attendance_marked` means every one of those classes has its register in.
+    # It is the one block row that IS owed: the school's day depends on it.
+    school_roll: bool = False
     # The clock, straight off the bell schedule — "P9 · 15:30" beats "P9" when
     # the day now runs past 2pm and half of it is optional.
     start: str = ""

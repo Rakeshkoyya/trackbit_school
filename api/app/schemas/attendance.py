@@ -103,6 +103,84 @@ class AttendanceMarkOut(BaseModel):
     alerted_count: int
 
 
+# ── the whole-school register, taken at assembly (TT-6) ──────────────────────
+# Founder, 2026-08-18: *"if I added assembly in my timetable at first period and
+# I want to take attendance of that whole school that are in assembly, it should
+# reflect in each class."*
+#
+# So this is not a new kind of attendance record — it is the SAME register, taken
+# once in the hall instead of eleven times in eleven rooms. Everything below the
+# capture is unchanged: one `class_periods` row per class, its own exceptions,
+# its own guardian alert. Nothing downstream of attendance learns a new shape,
+# which is the same rule TT-4's combined roll call follows and for the same
+# reason — a second store of "was this child in today" is a second answer.
+
+class AssemblyClassOut(BaseModel):
+    """One class standing in the hall, and where its register stands."""
+
+    class_id: uuid.UUID
+    class_label: str
+    roster: int = 0
+    marked: bool = False
+    absent: int = 0
+    late: int = 0
+
+
+class AssemblyRosterOut(BaseModel):
+    """The whole school on one sheet, grouped by class.
+
+    `marked` is an ALL, never an any: a hall where 5-A's register is in and 6-B's
+    is not has not had its roll taken, and a green tick there would lose a class's
+    day quietly. Same rule the combined sheet holds itself to.
+    """
+
+    session_id: uuid.UUID
+    block_name: str
+    block_kind: str
+    kind_label: str
+    # The period the grid puts this block on — where every register is filed.
+    period_no: int
+    date: date
+    marked: bool = False
+    once_per_day: bool = False
+    classes: list[AssemblyClassOut] = Field(default_factory=list)
+    # Every child in the hall, each carrying their class so the sheet can group
+    # eleven classes into something a person can find a name in.
+    roster: list[AttendanceRosterRow] = Field(default_factory=list)
+    present_count: int = 0
+    absent_count: int = 0
+    late_count: int = 0
+    headline: str = ""
+
+
+class AssemblyMarkIn(BaseModel):
+    """"Everyone is here ✓" = an empty `exceptions` list, for the whole school."""
+
+    session_id: uuid.UUID
+    date: Date | None = None
+    # Optional override for a block that sits on two periods of one day. The
+    # grid decides by default — the timetable is where "assembly is at period 1"
+    # is already written down.
+    period_no: int | None = Field(default=None, ge=1)
+    # Capped well above any real school-wide absence list; a sheet that needs
+    # more taps than this is not capture-by-exception any more.
+    exceptions: list[AttendanceExceptionIn] = Field(default_factory=list, max_length=2000)
+
+
+class AssemblyMarkOut(BaseModel):
+    session_id: uuid.UUID
+    period_no: int
+    date: date
+    # How many classes' registers this one roll call wrote.
+    classes_marked: int
+    roster_count: int
+    present_count: int
+    absent_count: int
+    late_count: int
+    alerted_count: int
+    headline: str = ""
+
+
 # ── absence reasons + informed absence (V1-3, D-02/D-86/S-24) ────────────────
 # A small shared vocabulary for the chips; free text rides in the note. Stored
 # as plain text — a school's own word is kept, never flattened.

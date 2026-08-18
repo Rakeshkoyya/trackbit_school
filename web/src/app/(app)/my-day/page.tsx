@@ -64,6 +64,9 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
   // TT-4 — one row per MEETING. Two classes taught together are one lesson, and
   // every count on this row is the whole room's.
   const combined = (p.combined_class_ids?.length ?? 0) > 1;
+  // TT-6 — how many classes are standing in this block's room. A block on one
+  // class still carries none, so the floor is 1.
+  const classCount = Math.max(p.combined_class_ids?.length ?? 0, 1);
   // Once a day (founder, 2026-08-11): the register is the DAY's, so a period
   // that is not being asked for one is not an unfinished period. Reading `done`
   // as "attendance_marked && logged" left every afternoon period grey in a
@@ -107,19 +110,38 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
           {clock ? " · " : ""}
           {combined && !isBlock ? `${p.combined_class_ids.length} classes together · ` : ""}
           {isBlock
-            ? p.captured
-              ? // TT-5 — the sentence that lets four colleagues stop thinking
-                // about it. Naming the person matters more than the tick: it is
-                // who to ask, and it is what stops two people re-taking a roll.
-                p.captured_by ? `Taken by ${p.captured_by}` : "Already taken"
-              : p.block_kind_label ?? captureFor(p.block_kind).label
+            ? p.school_roll
+              ? // TT-6 — assembly holds the whole school's register. The row says
+                // the size of the hall before it is taken and what it settled
+                // after, because that is the fact the rest of the day hangs off.
+                p.attendance_marked
+                  ? `Register taken · ${classCount} ${classCount === 1 ? "class" : "classes"}`
+                  : `${p.roster_count} in the hall · take the school register`
+              : p.captured
+                ? // TT-5 — the sentence that lets four colleagues stop thinking
+                  // about it. Naming the person matters more than the tick: it is
+                  // who to ask, and it is what stops two people re-taking a roll.
+                  p.captured_by ? `Taken by ${p.captured_by}` : "Already taken"
+                : p.block_kind_label ?? captureFor(p.block_kind).label
             : p.status === "not_held" ? "Not held"
               : p.planned_topic ?? "No topic planned this week"}
         </p>
       </div>
       {isBlock ? (
         <div className="flex shrink-0 items-center gap-1.5">
-          {p.captured ? (
+          {p.school_roll ? (
+            /* TT-6 — the same chip a class period wears, because it is the same
+               register. Green once every class in the hall has it; before that
+               a plain ask, never a red one — an untaken register is a state of
+               the record, not news about the children. */
+            p.attendance_marked ? (
+              <Badge tone={p.absent_count ? "warning" : "success"}>
+                <Users className="h-3 w-3" /> {p.present_count}/{p.roster_count}
+              </Badge>
+            ) : (
+              <Badge tone="primary"><Users className="h-3 w-3" /> school register</Badge>
+            )
+          ) : p.captured ? (
             <Badge tone="success"><Check className="h-3 w-3" /> done</Badge>
           ) : (
             <>

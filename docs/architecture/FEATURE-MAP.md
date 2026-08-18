@@ -188,6 +188,7 @@ tap, record only deviations. Budgets: quick-log ≤ 3 taps / 25s; period card
 | Period card (the capture surface) | `capture.period` | `periods.py`, `classroom.py` | `/periods/card`, `/periods/*` | `/my-day/period/[classId]/[no]` | teacher of that class |
 | Block capture (homework class · sports · course · assembly) | `capture.period` | `blocks.py`, `sessions.py` | `/blocks/*` | `/my-day/block/[blockId]` | the block's **staff** (`session_staff`), its owner, or admin |
 | Attendance (register + exceptions) | `capture.attendance` | `attendance.py` | `/attendance/*` | `/attendance`, `/attendance/[classId]` | any teacher of the class |
+| **School register at assembly** (TT-6) | `capture.attendance` | `attendance.py` | `/attendance/assembly` | the block screen `/my-day/block/[blockId]` | the assembly block's **staff** — writes one register per class the grid puts in the hall, and NOT a class list the caller names |
 | Lesson log + topic coverage | `capture.lesson_log` | `classroom.py` | `/classroom/lesson-logs` | period card | subject teacher |
 | Deep log / observations (per student) | `capture.observations` | `classroom.py` | `/classroom/observations` | period card | subject teacher |
 | Class log (deliberate per-student note) | `capture.class_log` | `student_records.py` | `/classroom/class-log` | `/students/academics/class-logs` | teacher |

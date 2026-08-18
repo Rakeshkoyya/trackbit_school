@@ -59,6 +59,15 @@ class Capture(NamedTuple):
     memories: bool
     #: The class → subject → check-the-books flow (TT-2 §3).
     homework_check: bool
+    #: The roll taken here IS the school-day register, for every class standing
+    #: in the room (`TT-6`, founder 2026-08-18). Deliberately NOT `roll`: that one
+    #: is the block's own second roll against its own roster and never touches
+    #: attendance (`D-91`). This one is the opposite claim — the whole school is
+    #: in front of one person at 08:20, so the register she takes there is the
+    #: day's, and it is filed to each class's own `class_periods` row rather than
+    #: to the meeting. A kind may sensibly have neither; no kind has both, and a
+    #: kind that did would be asking a school to answer "who is here" twice.
+    school_roll: bool = False
 
 
 #: kind → what it captures. The `sessions.kind` CHECK constraint is generated
@@ -96,11 +105,21 @@ CAPTURE: dict[str, Capture] = {
     ),
     "assembly": Capture(
         label="Assembly / yoga",
-        # Whole-school time: nobody takes a roll at assembly, and asking for one
-        # would be the mandatory per-student capture P1v2 exists to prevent.
-        hint="Whole-school time",
+        # Whole-school time — and the one moment in the day when every child is
+        # standing in one place in front of one person. `TT-6` (founder,
+        # 2026-08-18): *"I want to take attendance of that whole school that are
+        # in assembly and it should reflect in each class."* So this block takes
+        # the school-day REGISTER (`school_roll`), not a roll of its own — one
+        # sheet, filed to every class in the hall.
+        #
+        # It stays capture-by-exception, which is the only reason it fits inside
+        # P1v2: nobody is entered one by one. The absentees are tapped off a
+        # sheet that opens on "everyone is here", exactly as a class register
+        # does, and the school of 400 costs the taps of the children who are
+        # away rather than 400 taps.
+        hint="Take the school register",
         roll=False, class_log=False, student_logs=False, memories=True,
-        homework_check=False,
+        homework_check=False, school_roll=True,
     ),
 }
 
