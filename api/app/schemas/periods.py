@@ -10,6 +10,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.assessments import ExamSummary
 from app.schemas.attendance import AttendanceRosterRow
 
 # `date` is a field name below; alias the type so the annotation stays valid.
@@ -199,3 +200,19 @@ class PeriodCardOut(BaseModel):
 
     plan: PeriodPlanOut = PeriodPlanOut()
     homework: list[PeriodHomeworkOut] = []
+
+    # The tests already recorded for this class-subject TODAY (SC-2/V1-8).
+    #
+    # Founder, 2026-08-18: photographing a test from the period card left no
+    # trace on it — the review sheet closed and the section went back to
+    # offering a capture that had already happened, so the teacher had no way
+    # to see what she had just recorded, or back to the papers. This is the
+    # same `ExamSummary` the exams feed renders, deliberately: the row on My
+    # Day and the row on Students → Exams are the same exam, and a second
+    # shape here would be a second place for "how many scored" to drift.
+    #
+    # Empty is the ordinary case. Only exams with something ON them (a mark or
+    # a photographed paper) are listed — a started-then-discarded capture
+    # leaves an empty cycle behind, and offering that as a record would be a
+    # ghost the teacher cannot act on.
+    tests: list[ExamSummary] = []

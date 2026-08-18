@@ -28,6 +28,7 @@ scales (`S-114`)."""
 
 import uuid
 from datetime import UTC, datetime
+from datetime import date as Date
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -121,12 +122,14 @@ class ExamService:
     # ── feed ─────────────────────────────────────────────────────────────────
     def _feed_query(self, m: CurrentMember, class_id: uuid.UUID | None,
                     subject_id: uuid.UUID | None, exam_event_id: uuid.UUID | None,
-                    scale: str | None):
+                    scale: str | None, on_date: Date | None = None):
         q = select(AssessmentCycle).where(AssessmentCycle.org_id == m.org_id)
         if class_id:
             q = q.where(AssessmentCycle.class_id == class_id)
         if subject_id:
             q = q.where(AssessmentCycle.subject_id == subject_id)
+        if on_date is not None:
+            q = q.where(AssessmentCycle.date == on_date)
         if exam_event_id:
             q = q.where(AssessmentCycle.exam_event_id == exam_event_id)
         if scale:
@@ -163,8 +166,8 @@ class ExamService:
     def feed(self, m: CurrentMember, class_id: uuid.UUID | None = None,
              limit: int = 30, *, subject_id: uuid.UUID | None = None,
              exam_event_id: uuid.UUID | None = None, scale: str | None = None,
-             offset: int = 0) -> list[ExamSummary]:
-        q = (self._feed_query(m, class_id, subject_id, exam_event_id, scale)
+             on_date: Date | None = None, offset: int = 0) -> list[ExamSummary]:
+        q = (self._feed_query(m, class_id, subject_id, exam_event_id, scale, on_date)
              .order_by(AssessmentCycle.date.desc(), AssessmentCycle.created_at.desc())
              .limit(min(limit, 100)).offset(max(offset, 0)))
         cycles = list(self.db.scalars(q))
@@ -230,6 +233,7 @@ class ExamService:
                 verified=bool(verified),
                 created_by_name=authors.get(c.created_by_member_id),
                 page_count=pages.get(c.id, 0),
+                created_at=c.created_at,
                 grid_only=c.type == "diagnostic" or c.class_id is None
                           or c.subject_id is None))
         return out

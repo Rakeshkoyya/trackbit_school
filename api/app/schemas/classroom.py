@@ -110,6 +110,10 @@ class MyDayPeriod(BaseModel):
     # Day-scoped by design: homework is set once per class-subject per day, so a
     # second period of the same subject shows it as already done.
     homework_set: bool = False
+    # Day-scoped for the same reason: a test recorded for this class-subject
+    # today. Shallow on purpose — the row says one has been recorded, the
+    # period card says WHICH, with the way back to the marked papers.
+    test_recorded: bool = False
     # DASH3 PR-2: this period is not on my timetable — I am covering it for
     # someone who is away today. Rendered differently so the teacher knows why a
     # class they don't teach is in their day.

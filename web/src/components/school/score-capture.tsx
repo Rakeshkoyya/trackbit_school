@@ -79,6 +79,9 @@ export function CaptureReview({ captureId, onDone }: { captureId: string; onDone
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["grid"] });
       qc.invalidateQueries({ queryKey: ["captures"] });
+      // The exam the caller can now navigate to — the My Day period card links
+      // straight at it, so a stale feed would open onto yesterday's numbers.
+      qc.invalidateQueries({ queryKey: ["exam-feed"] });
       toast.success("Scores saved");
       onDone();
     },

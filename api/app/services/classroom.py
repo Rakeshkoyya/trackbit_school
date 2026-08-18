@@ -19,6 +19,8 @@ from app.core.context import CurrentMember
 from app.core.exceptions import ForbiddenError, NotFoundError, ValidationError
 from app.models import (
     AcademicYear,
+    AssessmentCycle,
+    AssessmentScore,
     ClassPeriod,
     ClassSubject,
     Guardian,
@@ -30,6 +32,8 @@ from app.models import (
     Membership,
     PlanEntry,
     SchoolClass,
+    ScoreCapture,
+    ScoreCapturePage,
     Student,
     Subject,
     SyllabusTopic,
@@ -37,6 +41,7 @@ from app.models import (
     TimetableSlot,
     User,
 )
+from app.schemas.assessments import ExamSummary
 from app.schemas.classroom import (
     ClassLogBookOut,
     ClassLogEntryOut,
@@ -272,6 +277,9 @@ class ClassroomService:
         hw_cs = set(self.db.scalars(
             select(HomeworkAssignment.class_subject_id).where(
                 HomeworkAssignment.org_id == m.org_id, HomeworkAssignment.date == today)))
+        test_cs = self._tests_recorded_today(
+            m.org_id, [ts.class_subject_id for ts in day_slots if ts.class_subject_id],
+            today)
 
         assignment = self._assign_topics(
             m.org_id, monday, day_slots,
@@ -356,6 +364,7 @@ class ClassroomService:
                 late_count=sum(s.get("late_count") or 0
                                for s in states) if marked_all else None,
                 homework_set=ts.class_subject_id in hw_cs,
+                test_recorded=ts.class_subject_id in test_cs,
                 substituting=(ts.class_id, ts.period_no) in covering_by_slot,
                 covering_for=covering_by_slot.get((ts.class_id, ts.period_no)),
                 start=ts.start, end=ts.end))
@@ -936,6 +945,62 @@ class ClassroomService:
             select(Subject.name).join(ClassSubject, ClassSubject.subject_id == Subject.id)
             .where(ClassSubject.id == cs_id))
 
+    def _tests_recorded_today(self, org_id: uuid.UUID,
+                              cs_ids: list[uuid.UUID], d: date) -> set[uuid.UUID]:
+        """Which of the day's class-subjects already have a test on the record.
+
+        One query for the whole day — the My Day row only has to answer "is
+        there one?", the same shallow question the topic and homework chips
+        answer. What those tests ARE is the period card's job (`tests`).
+
+        "On the record" means a mark or a photographed paper. Starting a
+        capture creates its cycle before either exists, so counting the cycle
+        alone would put a green chip on a test that was opened and abandoned.
+        """
+        if not cs_ids:
+            return set()
+        has_score = select(AssessmentScore.id).where(
+            AssessmentScore.cycle_id == AssessmentCycle.id).exists()
+        has_page = (select(ScoreCapturePage.id)
+                    .join(ScoreCapture, ScoreCapture.id == ScoreCapturePage.capture_id)
+                    .where(ScoreCapture.cycle_id == AssessmentCycle.id,
+                           ScoreCapture.status != "discarded").exists())
+        return set(self.db.scalars(
+            select(ClassSubject.id)
+            .join(AssessmentCycle,
+                  and_(AssessmentCycle.class_id == ClassSubject.class_id,
+                       AssessmentCycle.subject_id == ClassSubject.subject_id))
+            .where(ClassSubject.id.in_(cs_ids),
+                   AssessmentCycle.org_id == org_id,
+                   AssessmentCycle.date == d,
+                   or_(has_score, has_page))))
+
+    def _tests_today(self, m: CurrentMember, class_id: uuid.UUID,
+                     cs_id: uuid.UUID | None, d: date) -> list[ExamSummary]:
+        """The tests recorded for this class-subject on this date.
+
+        Founder, 2026-08-18: a test photographed from the period card vanished
+        the moment the review sheet closed, so the teacher could neither see
+        what she had just recorded nor get back to the papers. This is the way
+        back — the same rows the exams feed builds, so the two screens cannot
+        disagree about how many were scored.
+
+        Only exams carrying something are listed. Starting a capture creates
+        its cycle up front, and discarding leaves that empty cycle behind; an
+        exam with no mark and no photographed paper is that ghost, not a
+        record, and offering it would be a row that opens onto nothing.
+        """
+        if cs_id is None:
+            return []
+        subject_id = self.db.scalar(
+            select(ClassSubject.subject_id).where(ClassSubject.id == cs_id))
+        if subject_id is None:
+            return []
+        from app.services.exams import ExamService  # noqa: PLC0415
+        rows = ExamService(self.db).feed(
+            m, class_id, limit=20, subject_id=subject_id, on_date=d)
+        return [r for r in rows if r.scored_count > 0 or r.page_count > 0]
+
     def _plan_and_homework(
         self, m: CurrentMember, class_id: uuid.UUID, cs_id: uuid.UUID | None,
         period_no: int, d: date, monday: date, period: ClassPeriod | None,
@@ -1070,7 +1135,11 @@ class ClassroomService:
             present_count=sheet.present_count if sheet.marked else None,
             absent_count=sheet.absent_count if sheet.marked else None,
             late_count=sheet.late_count if sheet.marked else None,
-            plan=plan, homework=homework)
+            plan=plan, homework=homework,
+            # Per class, not per room: the capture surface photographs ONE
+            # class's papers, so a combined period lists the tests of the class
+            # whose card this is. The other half's own card lists its own.
+            tests=self._tests_today(m, class_id, cs_id, d))
 
     # ── deep log — lesson observations (optional, exception-only) ────────────
     def _observation_scope(self, m: CurrentMember, body: ObservationSectionIn,

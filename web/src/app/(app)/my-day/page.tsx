@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, ChevronRight, ClipboardCheck, Link2, ListTodo, Moon, Send, Users } from "lucide-react";
+import { BookOpen, Check, ChevronRight, ClipboardCheck, FileText, Link2, ListTodo, Moon, Send, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -183,6 +183,9 @@ function PeriodRow({ p }: { p: MyDayPeriod }) {
             )}
             {p.logged ? <Badge tone="success"><Check className="h-3 w-3" /> topic</Badge> : null}
             {p.homework_set ? <Badge tone="primary"><BookOpen className="h-3 w-3" /> hw</Badge> : null}
+            {/* A test she photographed this period. The card behind this row
+                lists it by name and opens the marked papers. */}
+            {p.test_recorded ? <Badge tone="success"><FileText className="h-3 w-3" /> test</Badge> : null}
           </>
         )}
         <ChevronRight className="h-4 w-4 text-muted-foreground" />

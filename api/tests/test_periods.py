@@ -277,3 +277,111 @@ def test_card_requires_teaching_the_class(client, cleanup):
     o = client.post("/api/v1/periods/open", headers=th, json={
         "class_id": klass["id"], "period_no": 1})
     assert o.status_code == 403
+
+
+# A 1x1 white PNG — enough to make a page real evidence on the upload path.
+_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000d4944415478da63f8ffff3f0005fe02fea72d1f200000000049454e44ae426082")
+
+
+def _whole_year_term(client, h, year):
+    client.post("/api/v1/academics/terms", headers=h,
+                json={"academic_year_id": year["id"], "name": "T1",
+                      "start_date": year["start_date"], "end_date": year["end_date"]})
+
+
+def test_card_lists_the_tests_recorded_today(client, cleanup):
+    """Founder, 2026-08-18: a test photographed FROM the period card left no
+    trace ON it — the review sheet closed and the section went back to offering
+    a capture that had already happened, so there was no way to see what had
+    just been recorded, or back to the papers.
+
+    The other half of this is the ghost rule: starting a capture creates its
+    cycle before there is a mark or a paper on it, and an exam with neither is
+    not a record — listing it would offer a row that opens onto nothing.
+    """
+    h, year, _mid, klass, cs = _setup(client, cleanup)
+    _double_period(client, h, klass, cs)
+    _whole_year_term(client, h, year)
+    today = datetime.now(IST).date()
+    kid = client.post("/api/v1/students", headers=h, json={
+        "admission_no": uuid.uuid4().hex[:10], "full_name": "Ravi",
+        "class_id": klass["id"]}).json()
+
+    def card(period_no=1):
+        return client.get(
+            f"/api/v1/periods/card?class_id={klass['id']}&period_no={period_no}",
+            headers=h).json()
+
+    assert card()["tests"] == []
+
+    # The cycle exists the moment "Record a test" is tapped — and on its own it
+    # is not yet a record of anything.
+    cyc = client.post("/api/v1/assessments/cycles", headers=h, json={
+        "type": "daily_test", "name": "Mental maths", "date": today.isoformat(),
+        "class_id": klass["id"], "subject_id": cs["subject_id"]}).json()
+    assert card()["tests"] == []
+
+    # A photographed paper IS a record, even before a single mark is entered.
+    cap = client.post("/api/v1/assessments/captures", headers=h, json={
+        "cycle_id": cyc["id"], "class_id": klass["id"],
+        "subject_id": cs["subject_id"]}).json()
+    client.post(f"/api/v1/assessments/captures/{cap['id']}/pages", headers=h,
+                files={"file": ("page1.png", _PNG, "image/png")})
+    rows = card()["tests"]
+    assert [r["name"] for r in rows] == ["Mental maths"]
+    assert rows[0]["id"] == cyc["id"], "the row must open the exam it recorded"
+    assert rows[0]["page_count"] == 1 and rows[0]["scored_count"] == 0
+    assert rows[0]["created_at"], "the row says when it was recorded"
+
+    # Day-scoped like homework: the day's second period of the same subject
+    # shows the same test.
+    assert [r["id"] for r in card(4)["tests"]] == [cyc["id"]]
+
+    client.post(f"/api/v1/assessments/captures/{cap['id']}/confirm", headers=h, json={
+        "rows": [{"student_id": kid["id"], "score": 8, "max_score": 10}]})
+    scored = card()["tests"][0]
+    assert scored["scored_count"] == 1 and scored["avg_pct"] == 80.0
+
+    # …and My Day says a test is on the record for that period.
+    day = client.get("/api/v1/classroom/my-day", headers=h).json()
+    mine = [p for p in day["periods"] if p["class_subject_id"] == cs["id"]]
+    assert mine and all(p["test_recorded"] for p in mine)
+
+
+def test_card_only_lists_this_class_subject_and_this_day(client, cleanup):
+    """A test belongs to one class-subject on one date. Yesterday's paper and
+    another subject's paper are somebody else's card."""
+    h, year, mid, klass, cs = _setup(client, cleanup)
+    _double_period(client, h, klass, cs)
+    _whole_year_term(client, h, year)
+    today = datetime.now(IST).date()
+    kid = client.post("/api/v1/students", headers=h, json={
+        "admission_no": uuid.uuid4().hex[:10], "full_name": "Meera",
+        "class_id": klass["id"]}).json()
+    other = client.post("/api/v1/academics/subjects", headers=h,
+                        json={"name": "Science"}).json()
+    client.post("/api/v1/academics/class-subjects", headers=h,
+                json={"class_id": klass["id"], "subject_id": other["id"],
+                      "teacher_member_id": mid, "periods_per_week": 4})
+
+    def record(subject_id, on_date, name):
+        cyc = client.post("/api/v1/assessments/cycles", headers=h, json={
+            "type": "daily_test", "name": name, "date": on_date.isoformat(),
+            "class_id": klass["id"], "subject_id": subject_id}).json()
+        cap = client.post("/api/v1/assessments/captures", headers=h, json={
+            "cycle_id": cyc["id"], "class_id": klass["id"],
+            "subject_id": subject_id}).json()
+        client.post(f"/api/v1/assessments/captures/{cap['id']}/confirm", headers=h, json={
+            "rows": [{"student_id": kid["id"], "score": 5, "max_score": 10}]})
+        return cyc
+
+    mine = record(cs["subject_id"], today, "Today, mine")
+    record(other["id"], today, "Today, Science")
+    record(cs["subject_id"], today - timedelta(days=1), "Yesterday, mine")
+
+    rows = client.get(
+        f"/api/v1/periods/card?class_id={klass['id']}&period_no=1",
+        headers=h).json()["tests"]
+    assert [r["id"] for r in rows] == [mine["id"]]

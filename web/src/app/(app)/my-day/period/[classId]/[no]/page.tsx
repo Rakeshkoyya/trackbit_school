@@ -6,8 +6,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BookOpen, Camera, Check, ChevronDown, ChevronRight, Link2, ListChecks,
-  Plus, Send, UserCheck, Users, X,
+  ArrowLeft, BookOpen, Camera, Check, ChevronDown, ChevronRight, FileText, Link2,
+  ListChecks, Paperclip, Plus, Send, UserCheck, Users, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -22,8 +22,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageLoading } from "@/components/ui/page-loading";
 import { showApiError } from "@/lib/errors";
+import { dayLabel, timeLabel } from "@/lib/format";
 import { schoolApi } from "@/lib/school-api";
-import type { DailyCheck, ObservationSection, PeriodCard, PeriodPlan } from "@/lib/school-types";
+import type {
+  DailyCheck, ExamSummary, ObservationSection, PeriodCard, PeriodPlan,
+} from "@/lib/school-types";
 
 function Section({ title, icon, children, aside }: {
   title: string; icon: React.ReactNode; children: React.ReactNode; aside?: React.ReactNode;
@@ -684,8 +687,66 @@ function DeepLogSection({ card }: { card: PeriodCard }) {
 }
 
 // ── page ─────────────────────────────────────────────────────────────────────
+/** One test already recorded for this class-subject today.
+ *
+ *  Founder, 2026-08-18: photographing a test from this card left NOTHING on
+ *  it. The review sheet closed and the section went straight back to offering
+ *  a capture that had already happened — so the teacher could not see what she
+ *  had just recorded, and the papers she photographed were unreachable from
+ *  the screen she photographed them on.
+ *
+ *  The row is the way back. It opens the exam on Students → Exams, which is
+ *  where the marks, the marked scripts and the PDFs already live; a second
+ *  viewer here would be a second place for the same evidence to be rendered
+ *  differently.
+ *
+ *  Not-captured is a word, never a zero: a test whose papers are attached but
+ *  whose marks are not in yet says exactly that, and is not coloured as a
+ *  failure — she is part-way through a job, not failing one.
+ */
+function RecordedTestRow({ exam }: { exam: ExamSummary }) {
+  const at = timeLabel(exam.created_at);
+  const onDay = dayLabel(exam.date);
+  const scored = exam.scored_count > 0;
+  return (
+    <Link href={`/students/academics/exams/exam/${exam.id}`}
+      className="flex items-center gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:bg-muted/40 active:scale-[0.995]">
+      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${
+        scored ? "bg-[color:var(--success,#234a37)]/10 text-[color:var(--success,#234a37)]"
+          : "bg-muted text-muted-foreground"}`}>
+        <FileText className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">{exam.name}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {/* The wall clock is the only thing that tells two tests recorded off
+              the same period card apart. */}
+          Recorded {at ? `at ${at}` : onDay ? `on ${onDay}` : "today"}
+          {exam.type_label ? ` · ${exam.type_label}` : ""}
+          {scored
+            ? ` · ${exam.scored_count} of ${exam.roster_count} marked`
+            : " · marks not entered yet"}
+          {exam.total_marks != null ? ` · out of ${exam.total_marks}` : ""}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {exam.page_count > 0 ? (
+          <Badge tone="neutral">
+            <Paperclip className="h-3 w-3" /> {exam.page_count}
+          </Badge>
+        ) : null}
+        {scored && exam.avg_pct != null ? (
+          <Badge tone="success">avg {exam.avg_pct}%</Badge>
+        ) : null}
+        {exam.locked ? <Badge tone="success">locked</Badge> : null}
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+      </div>
+    </Link>
+  );
+}
+
 // ── test capture (SC-2) — photograph today's evaluated test, confirm scores ──
-function TestCaptureSection({ card }: { card: PeriodCard }) {
+function TestCaptureSection({ card, onSaved }: { card: PeriodCard; onSaved: () => void }) {
   const [captureId, setCaptureId] = useState<string | null>(null);
   const { data: classSubjects = [] } = useQuery({
     queryKey: ["class-subjects", card.class_id],
@@ -696,6 +757,7 @@ function TestCaptureSection({ card }: { card: PeriodCard }) {
   const start = useStartCapture(setCaptureId);
   if (card.class_subject_id == null) return null;
 
+  const tests = card.tests ?? [];
   return (
     <Section title="Today's test" icon={<Camera className="h-4 w-4" />}
       aside={!captureId ? (
@@ -704,15 +766,27 @@ function TestCaptureSection({ card }: { card: PeriodCard }) {
             cycle: { type: "daily_test", name: `${card.subject_name ?? "Test"} · ${card.date}`,
               date: card.date, class_id: card.class_id, subject_id: subjectId },
             class_id: card.class_id, subject_id: subjectId })}>
-          {start.isPending ? "Starting…" : "Record a test"}
+          {start.isPending ? "Starting…" : tests.length ? "Record another" : "Record a test"}
         </Button>
       ) : null}>
+      {tests.length > 0 ? (
+        <ul className="mb-3 space-y-2">
+          {tests.map((t) => <li key={t.id}><RecordedTestRow exam={t} /></li>)}
+        </ul>
+      ) : null}
       {captureId ? (
-        <CaptureReview captureId={captureId} onDone={() => setCaptureId(null)} />
-      ) : (
+        // Refreshed on the way OUT as well as on confirm: a capture discarded
+        // after its pages went up still changes what this section should show.
+        <CaptureReview captureId={captureId}
+          onDone={() => { setCaptureId(null); onSaved(); }} />
+      ) : tests.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           Took a test this period? Photograph the evaluated papers — the scores read
           themselves; you just confirm.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Tap a test to see the marks and the papers you photographed.
         </p>
       )}
     </Section>
@@ -870,7 +944,7 @@ function PeriodPageInner() {
           <TopicSection card={card} onSaved={refresh} />
           <HomeworkSection card={card} onSaved={refresh} />
           <ChecksSection card={card} />
-          <TestCaptureSection card={card} />
+          <TestCaptureSection card={card} onSaved={refresh} />
           <DeepLogSection card={card} />
           {!card.closed ? (
             <Button className="w-full" size="lg" disabled={closeSession.isPending}

@@ -1,7 +1,7 @@
 """Assessments & bands schemas (M3, SPRD §5.3)."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -289,6 +289,10 @@ class ExamSummary(BaseModel):
     verified: bool
     created_by_name: str | None
     page_count: int                  # photo evidence pages
+    # When the record was MADE, not what day the paper was sat. A test recorded
+    # from My Day carries today's date on both, so the wall clock is the only
+    # thing that tells two of them apart on the screen it was recorded from.
+    created_at: datetime | None = None
     # Org-wide / diagnostic cycles have no single-subject exam page — they open
     # in the score grid instead.
     grid_only: bool

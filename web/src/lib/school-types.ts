@@ -271,6 +271,9 @@ export interface MyDayPeriod {
   absent_count: number | null;
   late_count: number | null;
   homework_set: boolean;
+  /** A test has been recorded for this class-subject today. Shallow on purpose
+   *  — the row says one exists, the period card says which, and links to it. */
+  test_recorded: boolean;
 }
 
 export interface MyDay {
@@ -1091,6 +1094,9 @@ export interface ExamSummary {
   verified: boolean;
   created_by_name: string | null;
   page_count: number;
+  /** When the record was MADE — not the day the paper was sat. Two tests
+   *  recorded from the same period card differ only by the wall clock. */
+  created_at: string | null;
   /** Org-wide / diagnostic cycles open in the score grid, not the exam page. */
   grid_only: boolean;
 }
@@ -1831,6 +1837,12 @@ export interface PeriodCard {
   late_count: number | null;
   plan: PeriodPlan;
   homework: PeriodHomework[];
+  /** The tests already recorded for this class-subject today — the way back to
+   *  the papers she just photographed. Same rows as the exams feed, so the two
+   *  screens cannot disagree about how many were scored. Exams with neither a
+   *  mark nor a photographed page are left out: starting a capture creates its
+   *  cycle up front, and a discarded one would be a row opening onto nothing. */
+  tests: ExamSummary[];
 }
 
 // ── My Class — the class teacher's area (V1-3, D-03) ────────────────────────
