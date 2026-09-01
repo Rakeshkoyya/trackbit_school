@@ -18,13 +18,14 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Camera, Lock, MoreHorizontal, Paperclip, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, Camera, Lock, MoreHorizontal, Paperclip, Pencil, Trash2, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { use, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { FeeConversation } from "@/components/school/fee-conversation";
+import { FeeReviseSheet } from "@/components/school/fee-revise-sheet";
 import { FeeSetupSheet } from "@/components/school/fee-setup-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -361,6 +362,8 @@ function FamilyInner({ studentId }: { studentId: string }) {
   const [addOpen, setAddOpen] = useState(false);
   // FE-2 — the setup sheet, for a student who has no record yet.
   const [setupOpen, setSetupOpen] = useState(false);
+  // FE-3 — the same numbers, editable again after they were saved.
+  const [editOpen, setEditOpen] = useState(false);
   const [addAmount, setAddAmount] = useState("");
   const [addDate, setAddDate] = useState("");
 
@@ -453,18 +456,24 @@ function FamilyInner({ studentId }: { studentId: string }) {
             Reopen record
           </Button>
         ) : (
-          <Button size="sm" variant="outline" disabled={act.isPending}
-            onClick={() => {
-              if (window.confirm(
-                "Close this record on transfer?\n\nUnpaid instalments are voided "
-                + "and the balance comes off the total. You can undo this "
-                + "afterwards.")) {
-                act.mutate(() =>
-                  schoolApi.closeFeeRecord(record.id, "Transferred"));
-              }
-            }}>
-            Transfer out
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* FE-3 — everything typed at enrolment, editable again. */}
+            <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4" /> Edit fee
+            </Button>
+            <Button size="sm" variant="outline" disabled={act.isPending}
+              onClick={() => {
+                if (window.confirm(
+                  "Close this record on transfer?\n\nUnpaid instalments are voided "
+                  + "and the balance comes off the total. You can undo this "
+                  + "afterwards.")) {
+                  act.mutate(() =>
+                    schoolApi.closeFeeRecord(record.id, "Transferred"));
+                }
+              }}>
+              Transfer out
+            </Button>
+          </div>
         )}
       </div>
 
@@ -697,6 +706,8 @@ function FamilyInner({ studentId }: { studentId: string }) {
         ? <FeeConversation studentFeeId={record.id} />
         : <TransactionsTab sfId={record.id} />}
 
+      <FeeReviseSheet detail={editOpen ? detail : null}
+        onClose={() => setEditOpen(false)} />
       <PaySheet inst={payFor} sfId={record.id} onClose={() => setPayFor(null)} />
       <SplitModal inst={splitFor} sfId={record.id}
         onClose={() => setSplitFor(null)} />

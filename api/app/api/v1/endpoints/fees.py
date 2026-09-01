@@ -36,6 +36,7 @@ from app.schemas.fees import (
     ConfirmProofIn,
     DueDateUpdate,
     FeeEventOut,
+    FeeReviseIn,
     FeeSetupOut,
     FeeSetupPreview,
     FeeSetupPreviewIn,
@@ -193,6 +194,22 @@ def get_student_fee(sf_id: uuid.UUID, m: CurrentMember = Depends(require_admin),
 def update_discount(sf_id: uuid.UUID, body: StudentFeeUpdate,
                     m: CurrentMember = Depends(require_admin), db: Session = Depends(get_db)):
     return FeeService(db).update_discount(m, sf_id, body)
+
+
+# ── FE-3: correcting a record that was set up wrong ──────────────────────────
+@router.put("/student-fees/{sf_id}/revise", response_model=StudentFeeDetail)
+def revise_record(sf_id: uuid.UUID, body: FeeReviseIn,
+                  m: CurrentMember = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    """Edit everything the office typed at enrolment — the total, the discount,
+    the previous dues and the whole instalment schedule — as **one** decision.
+
+    Deliberately not a PATCH per field. A record that should have been ₹45,000
+    in 6 instalments instead of ₹60,000 in 4 cannot be corrected one field at a
+    time: every intermediate state would have to balance, and the first step is
+    refused. Admin-only, and it refuses to un-bill money that has been
+    collected."""
+    return FeeScheduleService(db).revise(m, sf_id, body)
 
 
 # ── D-127: the transfer (founder Q-2) ────────────────────────────────────────

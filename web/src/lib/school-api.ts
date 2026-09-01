@@ -1017,6 +1017,13 @@ export const schoolApi = {
   removeInstallment: (instId: string) =>
     api.del<StudentFeeDetail>(`/fees/installments/${instId}`),
 
+  /** FE-3 — correct a record that was set up wrong: the total, the discount,
+   *  the previous dues and the whole schedule, as ONE decision. Not a PATCH per
+   *  field: every intermediate state would have to balance, so "₹60,000 in 4
+   *  should have been ₹45,000 in 6" would be refused at the first step. */
+  reviseFee: (sfId: string, b: import("@/lib/school-types").FeeRevise) =>
+    api.put<StudentFeeDetail>(`/fees/student-fees/${sfId}/revise`, b),
+
   /** `D-127` — the transfer, and its undo. */
   closeFeeRecord: (sfId: string, reason?: string) =>
     api.post<StudentFeeDetail>(`/fees/student-fees/${sfId}/close`, { reason }),

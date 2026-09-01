@@ -240,6 +240,11 @@ FEE_EVENT_KINDS = (
     "due_date_changed", "payment_recorded", "payment_undone", "proof_added",
     "proof_removed", "reminder_sent", "followup_assigned", "note_added",
     "record_closed", "record_reopened",
+    # FE-3: the office corrected the record itself — the price, the discount, or
+    # the whole schedule. Distinct from `discount_changed` on purpose: that one
+    # says "the family was given something", this one says "what we wrote down
+    # was wrong". Six months later those are different conversations.
+    "fee_revised",
 )
 
 

@@ -1551,6 +1551,9 @@ export interface StudentFeeDetail {
   class_label: string | null;
   category_name: string | null;
   academic_year_id: string;
+  /** The structure she was priced from. The revise sheet reads it so a re-plan
+   *  keeps the class's own terms rather than inventing monthly dates. */
+  fee_structure_id: string | null;
   total_fee: string;
   discount: string;
   net_fee: string;
@@ -1560,6 +1563,33 @@ export interface StudentFeeDetail {
   balance: string;
   status: string;
   installments: Installment[];
+}
+
+/** FE-3 — one row of the schedule the office wants the record to end up with.
+ *
+ *  `id` is the whole design: a row carrying one is an EXISTING instalment being
+ *  kept, with whatever has been paid against it; a row without one is new; and
+ *  an existing row the sheet does not send is deleted. That is what makes
+ *  "clear them all and type them again" safe — a wipe that dropped a paid row
+ *  would orphan the receipt the family is holding, and the server refuses it. */
+export interface ReviseInstallment {
+  id?: string | null;
+  label: string | null;
+  amount: string;
+  due_date: string | null;
+}
+
+/** Correct a record after it was saved. Every field is optional and **unset
+ *  means unchanged**, so the sheet sends only what the office actually touched
+ *  and the log reads as one decision rather than a sequence to reassemble. */
+export interface FeeRevise {
+  total_fee?: string;
+  discount?: string;
+  opening_dues?: string;
+  /** Re-plan the net evenly into N. Mutually exclusive with `installments`. */
+  num_installments?: number | null;
+  installments?: ReviseInstallment[];
+  reason?: string | null;
 }
 
 export interface FeeTransaction {

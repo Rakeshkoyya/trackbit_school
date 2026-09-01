@@ -284,6 +284,55 @@ class StudentFeeUpdate(BaseModel):
     opening_dues: Decimal | None = None
 
 
+# ── FE-3: correcting a record that was set up wrong ──────────────────────────
+class ReviseInstallmentIn(BaseModel):
+    """One row of the schedule the office wants the record to end up with.
+
+    `id` is the whole design. A row that carries an `id` is an EXISTING
+    instalment being kept — with whatever has been paid against it, and the
+    transactions that prove it. A row with no `id` is new. An existing row the
+    office does not list is deleted.
+
+    That is what makes "delete them all and type them again" safe: the office
+    describes the schedule it wants, and the server works out which rows that
+    means keeping. A wipe-and-recreate that dropped a paid row would orphan the
+    receipt the family is holding.
+    """
+
+    id: uuid.UUID | None = None
+    label: str | None = Field(default=None, max_length=60)
+    amount: Decimal
+    due_date: date | None = None
+
+
+class FeeReviseIn(BaseModel):
+    """Correct a fee record after it was saved (FE-3).
+
+    Every field is optional and **unset means unchanged** — so the sheet can send
+    only the price, only the schedule, or both in one go, and each is one
+    decision in the log rather than a sequence the reader has to reassemble.
+
+    The two ways to give a new schedule are mutually exclusive:
+
+    * `installments` — the exact rows, which must sum to the net. This is what
+      the sheet sends, because the office has just seen those rows on screen.
+    * `num_installments` — re-plan the net evenly into N. A convenience for
+      "make it six instead of four" with no other change.
+
+    Sending neither keeps the schedule and re-scales the unpaid rows to the new
+    net, which is what changing only the discount has always meant.
+    """
+
+    total_fee: Decimal | None = None
+    discount: Decimal | None = None
+    opening_dues: Decimal | None = None
+    num_installments: int | None = Field(default=None, ge=1, le=24)
+    installments: list[ReviseInstallmentIn] | None = None
+    #: Why. Free text, straight into the actor log — "admitted at the counter as
+    #: 60,000, the register says 55,000" is the sentence the next admin needs.
+    reason: str | None = Field(default=None, max_length=300)
+
+
 class CloseFeeIn(BaseModel):
     """`D-127`, founder Q-2 — the student transferred out.
 
@@ -331,6 +380,10 @@ class StudentFeeDetail(BaseModel):
     class_label: str | None
     category_name: str | None
     academic_year_id: uuid.UUID
+    #: The structure she was priced from, if any. The revise sheet reads it
+    #: so a re-plan keeps the class's own terms and due dates rather than
+    #: inventing monthly ones.
+    fee_structure_id: uuid.UUID | None = None
     total_fee: Decimal
     discount: Decimal
     net_fee: Decimal

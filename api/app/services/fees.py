@@ -125,6 +125,7 @@ class FeeService:
             student_name=sf.student.full_name if sf.student else "",
             class_label=self._class_label(sf.student.class_id) if sf.student else None,
             category_name=cat, academic_year_id=sf.academic_year_id,
+            fee_structure_id=sf.fee_structure_id,
             total_fee=q(sf.total_fee), discount=q(sf.discount), net_fee=q(sf.net_fee),
             opening_dues=opening, total_payable=total_payable, paid=paid,
             balance=q(total_payable - paid), status=sf.status,
@@ -496,19 +497,42 @@ class FeeService:
         return self._detail(sf)
 
     def update_discount(self, m: CurrentMember, sf_id: uuid.UUID, body: StudentFeeUpdate) -> StudentFeeDetail:
+        """Change what this family owes, and re-scale the unpaid instalments.
+
+        Three fences were missing here until FE-3, and each let the schedule
+        stop adding up to the net **silently** — the one failure `D-121` exists
+        to prevent:
+
+        * a **closed** record was editable, and its voided rows re-scaled with
+          the live ones, so a transfer could be quietly un-done by arithmetic;
+        * `live_installments` was not applied, so a voided row absorbed money
+          that nobody was being billed for;
+        * nothing proved the result balanced. With every instalment fully paid
+          there is no unpaid row to absorb a reduced discount, so the extra
+          landed nowhere and the record simply stopped reconciling.
+        """
         sf = self._load_sf(m.org_id, sf_id)
+        if sf.closed_at is not None:
+            raise ValidationError(
+                "This fee record is closed. Reopen it before changing what is "
+                "owed.")
         if body.opening_dues is not None:
             sf.opening_dues = q(body.opening_dues)
         if body.discount is not None:
             old_net = q(sf.net_fee)
             sf.discount = q(body.discount)
             sf.net_fee = q(q(sf.total_fee) - sf.discount)
-            paid = aggregate_paid(sf.installments)
+            if sf.net_fee < 0:
+                raise ValidationError(
+                    f"A discount of ₹{q(sf.discount):,.0f} is more than the fee "
+                    f"of ₹{q(sf.total_fee):,.0f}.")
+            live = live_installments(sf.installments)
+            paid = aggregate_paid(live)
             remaining = q(sf.net_fee - paid)
             if remaining < 0:
                 raise ValidationError(
                     "Discount makes net payable lower than the amount already paid.")
-            unpaid = [i for i in sf.installments if q(i.paid_amount) < q(i.amount)]
+            unpaid = [i for i in live if q(i.paid_amount) < q(i.amount)]
             if unpaid:
                 current_unpaid_total = q(sum(q(i.amount) - q(i.paid_amount) for i in unpaid))
                 scaled = (
@@ -517,6 +541,13 @@ class FeeService:
                 )
                 for idx, i in enumerate(unpaid):
                     i.amount = q(q(i.paid_amount) + scaled[idx])
+            elif q(sum(q(i.amount) for i in live)) != q(sf.net_fee):
+                raise ValidationError(
+                    "Every instalment on this record is fully paid, so there is "
+                    "nothing left to re-scale. Use Edit fee to re-enter the "
+                    "schedule as well.")
+            # Refuse rather than record and apologise (`D-121`).
+            assert_balanced(sf.net_fee, sf.installments)
             self.db.add(self._txn(m, sf.id, None, q(sf.net_fee - old_net), "discount",
                                   f"Discount updated to ₹{sf.discount}"))
             fee_events.record(
