@@ -21,7 +21,15 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <AuthProvider>{children}</AuthProvider>
-      <Toaster position="bottom-center" theme={theme} richColors closeButton />
+      {/* FB-1h — clear of the mobile bottom nav.
+          At `bottom-center` with no offset the toast landed ON the tab bar, so
+          "Upload failed" sat across My Day / Tasks / Students / Lucy and the
+          teacher could read neither. The mobile offset clears the 4rem bar plus
+          the phone's home indicator; desktop has no bar and keeps an ordinary
+          margin. */}
+      <Toaster position="bottom-center" theme={theme} richColors closeButton
+        offset="1.5rem"
+        mobileOffset="calc(5rem + env(safe-area-inset-bottom))" />
     </QueryClientProvider>
   );
 }

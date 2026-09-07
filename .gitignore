@@ -45,3 +45,9 @@ docs/reference/
 
 # Cygwin/MSYS crash dumps (a killed pytest leaves these)
 *.stackdump
+
+# Field feedback from the schools actually using the app — WhatsApp exports,
+# screenshots, voice-note transcripts. Real staff names, phone numbers and
+# student data land in here verbatim, so none of it goes to a remote. The
+# distilled version (the change plan) is what gets committed, under docs/.
+docs/feedback/

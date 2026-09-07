@@ -2,6 +2,17 @@
 append-only ledger, role gates (admin-only in v2), org isolation."""
 
 import uuid
+from datetime import date, timedelta
+
+# The schedule must stay AHEAD of today, or the record is legitimately `overdue`
+# and every status assertion below fails for a reason that has nothing to do
+# with the code. This test was written with 2026-04-15 / 08-15 / 12-15 hard-coded
+# and started failing on 16 August 2026 — a calendar time-bomb, not a
+# regression, and it cost the suite its green bar for three weeks. Anchor the
+# dates to the run instead.
+_D1 = (date.today() + timedelta(days=30)).isoformat()
+_D2 = (date.today() + timedelta(days=60)).isoformat()
+_D3 = (date.today() + timedelta(days=90)).isoformat()
 
 
 def _register_admin(client, cleanup, *, org="Fee Org", email=None):
@@ -40,9 +51,9 @@ def _structure(client, h, year_id):
         "class_name": "6", "academic_year_id": year_id, "total_amount": "30000",
         "num_installments": 3,
         "installments": [
-            {"installment_number": 1, "amount": "10000", "due_date": "2026-04-15"},
-            {"installment_number": 2, "amount": "10000", "due_date": "2026-08-15"},
-            {"installment_number": 3, "amount": "10000", "due_date": "2026-12-15"},
+            {"installment_number": 1, "amount": "10000", "due_date": _D1},
+            {"installment_number": 2, "amount": "10000", "due_date": _D2},
+            {"installment_number": 3, "amount": "10000", "due_date": _D3},
         ],
     }
     r = client.post("/api/v1/fees/structures", headers=h, json=body)

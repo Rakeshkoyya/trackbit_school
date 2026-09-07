@@ -286,8 +286,42 @@ export interface MyDay {
   // cards are GONE from `periods` rather than sitting there unlogged — leaving
   // them would invent work on a holiday and make the capture rate lie.
   day_closed: boolean;
+  // FB-1a: an exam runs today. NOT a closure — the school is open, the register
+  // is still owed and the periods are still listed; only the lesson stops being
+  // asked for. Rendering this as "school closed" is what stopped a whole
+  // school's teachers logging for a fortnight.
+  exam_day: boolean;
+  exam_title: string | null;
   locked_periods: number[];
   lock_reason: string | null;
+}
+
+// FB-1a — recording a class the timetable did not schedule.
+export interface RecordableSubject {
+  class_subject_id: string;
+  subject_name: string;
+}
+
+export interface RecordableClass {
+  class_id: string;
+  class_label: string;
+  // Empty for a class teacher who takes none of her own class's subjects — she
+  // may still take its register, which is exactly her job.
+  subjects: RecordableSubject[];
+}
+
+export interface RecordableSlot {
+  period_no: number;
+  start: string | null;
+  end: string | null;
+}
+
+export interface Recordable {
+  date: string;
+  classes: RecordableClass[];
+  periods: RecordableSlot[];
+  // False when the school never set clock times — show "Period 3", no clock.
+  has_timings: boolean;
 }
 
 // â”€â”€ timetable (V2-P1, SPRD2 Â§5.3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1846,6 +1880,10 @@ export interface PeriodCard {
    *  period from capacity twice. */
   locked: boolean;
   lock_reason: string | null;
+  /** FB-1a: an exam runs today. The card stays OPEN and the register is still
+   *  owed — this only says why there is no topic to log. */
+  exam_day: boolean;
+  exam_title: string | null;
   opened: boolean;
   closed: boolean;
   attendance_marked: boolean;

@@ -185,7 +185,13 @@ function PortionBand({ school }: { school: SyllabusNode }) {
               {
                 label: "Of what is planned",
                 value: school.coverage_pct != null ? `${school.coverage_pct}%` : "—",
-                sub: `${school.taught_topics} of ${school.planned_topics} scheduled`,
+                // FB-1g: with no approved plan this read "10 of 0 scheduled" —
+                // ten taught out of nothing, which is not a figure, it is a
+                // division by zero shown to a principal. A missing plan is a
+                // STATE and gets a word, the same as the "—" above it.
+                sub: school.planned_topics > 0
+                  ? `${school.taught_topics} of ${school.planned_topics} scheduled`
+                  : "no plan approved yet",
               },
               {
                 label: "Class-subjects",

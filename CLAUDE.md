@@ -32,6 +32,7 @@ Read the one that answers your question. Do not read them all.
 | **Which agent tools are approved to build** — ⚠️ build nothing not ticked there | [`docs/architecture/MCP-TOOL-LIST.md`](docs/architecture/MCP-TOOL-LIST.md) |
 | **How the school day is shaped** — bell schedules, typed periods, blocks | [`docs/architecture/TT2-DAY-SHAPE-PLAN.md`](docs/architecture/TT2-DAY-SHAPE-PLAN.md) |
 | **How fees are priced and collected** — structures, the schedule, proof, the actor log | [`docs/architecture/FE1-FEE-DESK-PLAN.md`](docs/architecture/FE1-FEE-DESK-PLAN.md) |
+| **What the live school is reporting, and what we owe them** — triaged, scope-locked | [`docs/architecture/FB1-FIELD-FEEDBACK-PLAN.md`](docs/architecture/FB1-FIELD-FEEDBACK-PLAN.md) |
 | The current build spec | `docs/trackbit-school-prd-v2.md` (cite as `SPRD2 §x.y`) |
 | The "why" — principles and fences | `docs/trackbit-product-architecture.md` |
 | Reference for carried v1 modules (fees, tasks, sessions) | `docs/trackbit-school-prd-v1.md` |

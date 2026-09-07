@@ -54,7 +54,13 @@ function ExamsInner() {
 
   // Subject trajectories share one x-axis of test labels; each subject is a
   // series in fixed palette order, so a filter never repaints the survivors.
-  const trendKeys = data.trends.slice(0, 6);
+  // FB-1g: the hint below promises "a subject with a single test has no
+  // trajectory and is left out" — and nothing was leaving it out. The gate was
+  // on the number of DATES across the whole school, so one Biology test on
+  // 18 August plus one Maths test on the 19th passed it, and Biology drew a
+  // flat line across a range it had no second point in. A trajectory is two
+  // points of the SAME subject; anything else is a dot pretending to be a trend.
+  const trendKeys = data.trends.filter((t) => t.points.length > 1).slice(0, 6);
   const trendLabels = Array.from(
     new Set(trendKeys.flatMap((t) => t.points.map((p) => p.date))),
   ).sort();

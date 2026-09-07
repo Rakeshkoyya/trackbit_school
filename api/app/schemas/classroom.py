@@ -127,6 +127,11 @@ class MyDayOut(BaseModel):
     # teacher is told why instead, in one line she is asked nothing about.
     # `S-132`: this is the one thing on My Day that gives without asking.
     day_closed: bool = False
+    # `FB-1a`: an exam day is NOT a closure — the school is open, the register is
+    # owed and the periods are still listed. Only the lesson stops being asked
+    # for. Surfaces read this to say "PA2 today" instead of "school is closed".
+    exam_day: bool = False
+    exam_title: str | None = None
     locked_periods: list[int] = []
     lock_reason: str | None = None
     # D-41/D-43: the narrow task window BELOW the periods — rail follow-ups from

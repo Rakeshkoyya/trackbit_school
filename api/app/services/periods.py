@@ -111,6 +111,16 @@ def assert_can_take_class(
         ClassSubject.teacher_member_id == m.membership.id).limit(1))
     if teaches is not None:
         return
+    # The homeroom she owns, which `visible_class_ids` has counted since
+    # 2026-08-05 and this guard did not. The two disagreeing is what put a class
+    # on a teacher's board that the register then refused her with a 403 — and
+    # it bites hardest on exactly the class that needs her, one with no
+    # `class_subjects` at all (SHANA's 11-A and 12-A), where the branch above
+    # can never match. `visible_class_ids` is the rule; this is the same rule.
+    if db.scalar(select(SchoolClass.id).where(
+            SchoolClass.id == class_id, SchoolClass.org_id == m.org_id,
+            SchoolClass.class_teacher_member_id == m.membership.id).limit(1)):
+        return
     if on_date is not None:
         from app.services.substitution import SubstitutionService  # noqa: PLC0415
 

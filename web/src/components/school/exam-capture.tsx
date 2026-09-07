@@ -203,6 +203,12 @@ export function ExamCapture({ classId, studentIds, examId, fixedType,
       applyParsed(parsed);
       if (parsed.status === "parsed" && !parsed.parse_error) {
         toast.success("Papers read — check the prefilled marks");
+      } else {
+        // FB-1b: never go quiet. The pages ARE saved at this point, and with no
+        // model configured the old code showed neither a success nor a failure
+        // — so a teacher who had just uploaded thirty scripts had no way to
+        // tell whether anything had happened, and reasonably assumed it hadn't.
+        toast.success("Photos saved — type the marks below");
       }
     } catch (e) {
       showApiError(e, "Could not read the papers");
@@ -551,9 +557,20 @@ export function ExamCapture({ classId, studentIds, examId, fixedType,
         <Button disabled={!ready || overMax} onClick={() => setReviewing(true)}>
           <Pencil className="h-4 w-4" /> Review {rows.length}/{roster.length} marks
         </Button>
+        {/* FB-1c — a disabled button must always say why.
+            This covered only the title and the marks, so a missing subject or a
+            blank "out of" left the button dead next to an EMPTY hint: nothing
+            to read, nothing to fix, and a teacher who reported that her marks
+            "didn't save". Every branch of `ready` is answered here now, and the
+            fallback is a sentence rather than "". */}
         {!ready ? (
           <p className="text-xs text-muted-foreground">
-            {!name.trim() ? "Give the test a title." : !rows.length ? "Enter at least one mark." : ""}
+            {!name.trim() ? "Give the test a title."
+              : !date ? "Pick the date of the test."
+              : !effSubject ? "Choose the subject."
+              : !(totalNum > 0) ? "Set the total marks — what is the test out of?"
+              : !rows.length ? "Enter at least one mark."
+              : "Fill in the fields above to save."}
           </p>
         ) : overMax ? <p className="text-xs text-muted-foreground">A mark is over the total.</p> : null}
       </div>

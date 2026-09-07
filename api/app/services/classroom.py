@@ -69,12 +69,21 @@ from app.schemas.periods import (
     PeriodHomeworkOut,
     PeriodLogOut,
     PeriodPlanOut,
+    RecordableClass,
+    RecordableOut,
+    RecordableSlot,
+    RecordableSubject,
 )
 from app.schemas.timetable import TeacherSlot
 from app.services.attendance import AttendanceService, day_absence_maps, is_day_absent
 from app.services.calendar import day_lock
 from app.services.notify_guardian import notify_guardians
-from app.services.periods import assert_can_take_class, find_period, get_or_create_period
+from app.services.periods import (
+    assert_can_take_class,
+    find_period,
+    get_or_create_period,
+    visible_class_ids,
+)
 from app.services.planner import PlannerService
 from app.services.timetable import TimetableService
 
@@ -231,6 +240,11 @@ class ClassroomService:
         # Leaving it would invent work on a holiday and make the capture rate
         # lie. What was already recorded against it is untouched (`Q-65`) — this
         # drops the ask, never the record.
+        #
+        # `FB-1a`: an EXAM day is not a closure. The children are in the
+        # building and the register is still owed, so the periods stay on her
+        # surface — what changes is that the lesson is no longer asked for. The
+        # card knows it is an exam day and says so; nothing nags her for a topic.
         lock = day_lock(self.db, m.org_id, today, year.id)
         if lock.closed:
             day_slots = []
@@ -412,6 +426,8 @@ class ClassroomService:
         return MyDayOut(date=today, classes=classes, periods=periods,
                         homework_pending=pending, tasks=tasks, older_task_count=older,
                         day_closed=lock.closed,
+                        exam_day=lock.exam,
+                        exam_title=lock.exam_title,
                         locked_periods=sorted(lock.periods),
                         lock_reason=lock.title)
 
@@ -991,12 +1007,72 @@ class ClassroomService:
                     HomeworkAssignment.date == d).order_by(HomeworkAssignment.created_at))]
         return plan, homework
 
-    def period_card(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
-                    on_date: date | None = None) -> PeriodCardOut:
-        """Everything the period-detail page needs, in one call. Purely a read —
-        the period row is created by "Start attendance", not by opening the page."""
+    def recordable(self, m: CurrentMember, on_date: date | None = None) -> RecordableOut:
+        """What this member could record right now, off the timetable (`FB-1a`).
+
+        The grid is the norm, not the whole truth. Her day is legitimately empty
+        during an exam window, on a Saturday extra class, when she is covering a
+        room the grid gives to somebody else, or when the class has no grid at
+        all — and before this she had nowhere to put the lesson she had just
+        taught. It went unrecorded, and the school's syllabus board read 3%.
+
+        The offer must match `assert_can_take_class` exactly. A picker that lists
+        a class the card then refuses is worse than no picker: it is the
+        "Loading roster…" forever bug, wearing a different hat.
+        """
+        from app.services import bell  # noqa: PLC0415
+
         d = on_date or self._today(m)
-        assert_can_take_class(self.db, m, class_id, None, d, period_no)
+        year = self._active_year(m.org_id)
+        shape = bell.resolve(self.db, year, d)
+
+        klass_q = select(SchoolClass).where(SchoolClass.org_id == m.org_id)
+        if year is not None:
+            klass_q = klass_q.where(SchoolClass.academic_year_id == year.id)
+        visible = visible_class_ids(self.db, m)
+        if visible is not None:
+            if not visible:
+                return RecordableOut(date=d, has_timings=shape.has_timings)
+            klass_q = klass_q.where(SchoolClass.id.in_(visible))
+        classes = list(self.db.scalars(klass_q.order_by(SchoolClass.name, SchoolClass.section)))
+
+        subj_q = (select(ClassSubject.id, ClassSubject.class_id, Subject.name)
+                  .join(Subject, Subject.id == ClassSubject.subject_id)
+                  .where(ClassSubject.org_id == m.org_id,
+                         ClassSubject.class_id.in_([c.id for c in classes])))
+        # An admin may record any subject; a teacher only the ones that are
+        # hers. A class teacher who takes none of her class's subjects gets an
+        # empty list and the register, which is precisely her job.
+        if not m.is_coordinator_up:
+            subj_q = subj_q.where(ClassSubject.teacher_member_id == m.membership.id)
+        by_class: dict[uuid.UUID, list[RecordableSubject]] = {}
+        for cs_id, cls_id, subject_name in self.db.execute(subj_q).all():
+            by_class.setdefault(cls_id, []).append(
+                RecordableSubject(class_subject_id=cs_id, subject_name=subject_name))
+        for rows in by_class.values():
+            rows.sort(key=lambda r: r.subject_name)
+
+        return RecordableOut(
+            date=d, has_timings=shape.has_timings,
+            classes=[RecordableClass(class_id=c.id, class_label=_label(c),
+                                     subjects=by_class.get(c.id, []))
+                     for c in classes],
+            periods=[RecordableSlot(period_no=p.period_no, start=p.start, end=p.end)
+                     for p in shape.periods])
+
+    def period_card(self, m: CurrentMember, class_id: uuid.UUID, period_no: int,
+                    on_date: date | None = None,
+                    class_subject_id: uuid.UUID | None = None) -> PeriodCardOut:
+        """Everything the period-detail page needs, in one call. Purely a read —
+        the period row is created by "Start attendance", not by opening the page.
+
+        `class_subject_id` is the `FB-1a` off-timetable case: the teacher picked
+        the subject herself because the grid has nothing here. It is a FALLBACK
+        and never an override — an opened period and the timetable both outrank
+        it, so a caller cannot relabel a lesson that already happened.
+        """
+        d = on_date or self._today(m)
+        assert_can_take_class(self.db, m, class_id, class_subject_id, d, period_no)
         monday = d - timedelta(days=d.weekday())
         period = find_period(self.db, m.org_id, class_id, d, period_no)
 
@@ -1008,6 +1084,8 @@ class ClassroomService:
                     TimetableSlot.weekday == d.weekday(), TimetableSlot.period_no == period_no,
                     TimetableSlot.effective_from <= d,
                     or_(TimetableSlot.effective_to.is_(None), TimetableSlot.effective_to > d)))
+        if cs_id is None:
+            cs_id = class_subject_id
 
         sheet = AttendanceService(self.db).roster(m, class_id, period_no, d, combined=False)
         marks_attendance, day_taken = self._marks_attendance(m, period_no, class_id, d)
@@ -1045,7 +1123,12 @@ class ClassroomService:
             id=e.id, title=e.title, type=e.type,
             affects_teaching=e.affects_teaching, blocks_periods=e.blocks_periods)
             for e in lock.events]
-        locked = not lock.expects(period_no)
+        # `FB-1a`: `locked` blanks the whole capture body — so it must mean "the
+        # school is not asking for ANYTHING here", which is the register's
+        # question, not the lesson's. An exam day keeps the card open (the roll
+        # is still owed); it only stops asking for a topic, and `exam_day` is how
+        # the card says so.
+        locked = not lock.expects_attendance(period_no)
 
         return PeriodCardOut(
             class_id=class_id, class_label=sheet.class_label, period_no=period_no, date=d,
@@ -1060,6 +1143,8 @@ class ClassroomService:
             day_events=day_events,
             locked=locked,
             lock_reason=lock.title if locked else None,
+            exam_day=lock.exam,
+            exam_title=lock.exam_title,
             opened=period is not None,
             closed=period is not None and period.closed_at is not None,
             attendance_marked=sheet.marked,

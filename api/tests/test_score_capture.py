@@ -225,3 +225,75 @@ def test_capture_requires_teaching_the_class(client, cleanup):
     r = client.post("/api/v1/assessments/cycles", headers=th, json={
         "type": "unit_test", "name": "Nope", "date": "2026-07-10"})
     assert r.status_code == 403
+
+
+# ── FB-1b — the file picker must not decide whether a photo is a photo ───────
+def _upload_as(client, h, cap_id, *, name: str, blob: bytes, ctype: str):
+    return client.post(f"/api/v1/assessments/captures/{cap_id}/pages", headers=h,
+                       files={"file": (name, io.BytesIO(blob), ctype)})
+
+
+def _capture(client, h, klass, subject):
+    return client.post("/api/v1/assessments/captures", headers=h, json={
+        "class_id": klass["id"], "subject_id": subject["id"]}).json()["id"]
+
+
+def test_a_page_picked_from_drive_uploads(client, cleanup):
+    """`FB-1b`, and the fortnight of missing exam data it caused.
+
+    Two teachers, twelve days apart, could not upload a marked script; one said
+    he picked his "from the drive". The Android Drive/Files picker hands the
+    browser `application/octet-stream` — or nothing — for a perfectly good
+    JPEG, and the endpoint defaults a missing type to `octet-stream` too. The
+    service then refused it as `bad_page_type`, so the school's exam board read
+    "all exam data is missing" because a file picker could not name a file.
+
+    The browser's claim is a hint. The bytes are the fact.
+    """
+    h, klass, subject, _ = _setup(client, cleanup)
+    cap_id = _capture(client, h, klass, subject)
+
+    for ctype in ("application/octet-stream", ""):
+        r = _upload_as(client, h, cap_id, name="script.jpg", blob=_PNG, ctype=ctype)
+        assert r.status_code == 200, f"{ctype!r} was refused: {r.text}"
+
+    # …and the stored page is recorded as what it ACTUALLY is, not as the
+    # nonsense the picker claimed — the downscaler and the model read this.
+    pages = r.json()["pages"]
+    assert pages[-1]["content_type"] == "image/png"
+
+
+def test_a_pdf_with_no_declared_type_uploads(client, cleanup):
+    """The other half of the same report: "I tried uploading the test PDF …
+    each time it showed Failed"."""
+    h, klass, subject, _ = _setup(client, cleanup)
+    cap_id = _capture(client, h, klass, subject)
+
+    r = _upload_as(client, h, cap_id, name="CET.pdf",
+                   blob=b"%PDF-1.5\ntrailer\n%%EOF\n", ctype="application/octet-stream")
+    assert r.status_code == 200, r.text
+    assert r.json()["pages"][-1]["content_type"] == "application/pdf"
+
+
+def test_something_that_is_not_a_paper_is_still_refused(client, cleanup):
+    """Sniffing is the check done properly, not the check removed.
+
+    The contract `FB-1b` sets is narrow on purpose: **a file is no longer
+    refused merely because the picker could not name it.** A believable claim is
+    still taken at its word — the browser knows about TIFF and SVG and this
+    table does not, and refusing those would trade one school's bug for
+    another's. What is refused is a file that neither the picker nor the bytes
+    can identify as a paper.
+    """
+    h, klass, subject, _ = _setup(client, cleanup)
+    cap_id = _capture(client, h, klass, subject)
+
+    r = _upload_as(client, h, cap_id, name="notes.docx",
+                   blob=b"PK\x03\x04 this is a zip, not a photo",
+                   ctype="application/octet-stream")
+    assert r.status_code == 422, r.text
+    assert r.json()["error"]["code"] == "bad_page_type"
+
+    empty = _upload_as(client, h, cap_id, name="blank.jpg", blob=b"", ctype="image/jpeg")
+    assert empty.status_code == 422, empty.text
+    assert empty.json()["error"]["code"] == "empty_page"

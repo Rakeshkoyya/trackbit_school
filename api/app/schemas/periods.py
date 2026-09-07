@@ -175,6 +175,11 @@ class PeriodCardOut(BaseModel):
     # day is subtracted from capacity twice.
     locked: bool = False
     lock_reason: str | None = None
+    # `FB-1a`: an exam runs today. The card stays OPEN and the register is still
+    # owed — this only tells the teacher why there is no topic to log, so she is
+    # not left wondering whether she has missed something.
+    exam_day: bool = False
+    exam_title: str | None = None
     opened: bool = False
     closed: bool = False
 
@@ -199,3 +204,54 @@ class PeriodCardOut(BaseModel):
 
     plan: PeriodPlanOut = PeriodPlanOut()
     homework: list[PeriodHomeworkOut] = []
+
+
+# ── `FB-1a` — recording a class the timetable did not schedule ───────────────
+#
+# The grid is the norm, not the whole truth. A teacher's day is legitimately
+# empty when an exam window stands the timetable down, when the school runs a
+# Saturday extra class, when a substitute takes a room the grid still gives to
+# somebody else, or when the class simply has no grid yet. Before this she had
+# nowhere to put what she had just taught, and the record of that lesson was
+# lost — which is how a school's syllabus board comes to read 3%.
+#
+# So: pick the class, pick the subject, pick the period. Everything after that
+# is the ORDINARY period card — same attendance, same lesson log, same
+# homework, same append-only history. This is a way IN to that card, never a
+# second way of recording a class.
+
+
+class RecordableSubject(BaseModel):
+    class_subject_id: uuid.UUID
+    subject_name: str
+
+
+class RecordableClass(BaseModel):
+    class_id: uuid.UUID
+    class_label: str
+    #: Empty for a class teacher who takes none of her own class's subjects —
+    #: she may still take its register, which is exactly her job.
+    subjects: list[RecordableSubject] = []
+
+
+class RecordableSlot(BaseModel):
+    """One period of today's bell schedule, as the picker offers it.
+
+    Deliberately just the clock. Whether a given (class, period) already holds a
+    record is the card's own answer, and she gets it by landing on that card —
+    the route is keyed on `(class, period, date)`, so picking one that already
+    exists opens it rather than making a second one.
+    """
+
+    period_no: int
+    start: str | None = None
+    end: str | None = None
+
+
+class RecordableOut(BaseModel):
+    date: Date
+    classes: list[RecordableClass] = []
+    periods: list[RecordableSlot] = []
+    #: False when the school never set clock times — the picker then shows
+    #: "Period 3" and no times, rather than an empty-looking row.
+    has_timings: bool = False

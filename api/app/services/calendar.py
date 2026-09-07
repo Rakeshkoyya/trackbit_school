@@ -112,10 +112,27 @@ def org_working_days(db: Session, org_id: uuid.UUID, start: date, end: date) -> 
     return [d for d in _daterange(start, end) if is_teaching_day(d, ww, blocked)]
 
 
+def _blocked_periods(events) -> frozenset[int]:
+    return frozenset(int(p) for e in events for p in (e.blocks_periods or ()))
+
+
+def _closed(events) -> bool:
+    """The school is SHUT. A whole-day event closes it — except an exam block,
+    which keeps the school open and merely stands the timetable down (`FB-1a`)."""
+    return any(e.type != EXAM_BLOCK and not e.blocks_periods for e in events)
+
+
+def _exam(events) -> bool:
+    """An exam runs for the whole day. An exam confined to named periods is an
+    ordinary partial lock and is already carried by `periods`."""
+    return any(e.type == EXAM_BLOCK and not e.blocks_periods for e in events)
+
+
 class DayLock(NamedTuple):
     """What the school's own calendar says about one date (V1-7, `S-145`).
 
-    `closed` — the whole day is locked, so nothing is expected of anybody.
+    `closed` — the school is SHUT, so nothing is expected of anybody.
+    `exam` — an exam block runs today. **This is not a closure** (`FB-1a`).
     `periods` — the specific period numbers locked on a day that otherwise runs.
     `events` — the approved rows behind it, in the order they were painted, so a
     surface can *name* the reason ("Independence Day") rather than saying a
@@ -126,22 +143,57 @@ class DayLock(NamedTuple):
     A school that closed at 11am genuinely did teach period 1. Locking removes a
     period from what is still ASKED FOR — the capture surface, the denominators,
     the 16:00 reminder — and never from what was already captured.
+
+    `FB-1a`, and the reason this type now answers two questions instead of one:
+    an exam block used to set `closed`, so PA2 told every teacher at SHANA
+    *"School is closed today · Nothing to mark or log"* on a day the school was
+    open and full of children. They believed it and stopped logging, and every
+    downstream board then read as staff failure. **An exam day is a school day.**
+    The register is still owed; the regular timetabled LESSON is not. Those are
+    two different questions and they now have two different methods — `expects`
+    for teaching, `expects_attendance` for the roll.
     """
 
     closed: bool = False
     periods: frozenset[int] = frozenset()
     events: tuple = ()
+    #: Declared last so any positional construction elsewhere keeps working.
+    exam: bool = False
+
+    @property
+    def teaching_off(self) -> bool:
+        """No regular timetabled lesson is expected today, for either reason."""
+        return self.closed or self.exam
 
     def expects(self, period_no: int) -> bool:
+        """Is a regular timetabled LESSON still expected in this period?
+
+        False on an exam day: the class sat a paper, so there is no topic to log
+        and no homework to set, and nothing should nag a teacher for either.
+        """
+        return not self.teaching_off and period_no not in self.periods
+
+    def expects_attendance(self, period_no: int) -> bool:
+        """Is the REGISTER still expected in this period?
+
+        An exam day is a school day — the children are in the building and being
+        counted. Only a real closure, or a lock on this specific period, removes
+        the roll from what is asked for.
+        """
         return not self.closed and period_no not in self.periods
 
     @property
     def any(self) -> bool:
-        return self.closed or bool(self.periods)
+        return self.closed or self.exam or bool(self.periods)
 
     @property
     def title(self) -> str | None:
         return self.events[0].title if self.events else None
+
+    @property
+    def exam_title(self) -> str | None:
+        """The name of the exam running today — "PA2", "Half-yearly"."""
+        return next((e.title for e in self.events if e.type == EXAM_BLOCK), None)
 
 
 def day_lock(db: Session, org_id: uuid.UUID, on_date: date,
@@ -166,12 +218,8 @@ def day_lock(db: Session, org_id: uuid.UUID, on_date: date,
     events = list(db.scalars(q.order_by(CalendarEvent.start_date)))
     if not events:
         return DayLock()
-    closed = any(not e.blocks_periods for e in events)
-    periods: set[int] = set()
-    for e in events:
-        for p in e.blocks_periods or ():
-            periods.add(int(p))
-    return DayLock(closed=closed, periods=frozenset(periods), events=tuple(events))
+    return DayLock(closed=_closed(events), periods=_blocked_periods(events),
+                   events=tuple(events), exam=_exam(events))
 
 
 def day_locks(db: Session, org_id: uuid.UUID, start: date, end: date,
@@ -191,9 +239,8 @@ def day_locks(db: Session, org_id: uuid.UUID, start: date, end: date,
             by_date.setdefault(d, []).append(e)
     out: dict[date, DayLock] = {}
     for d, evs in by_date.items():
-        closed = any(not e.blocks_periods for e in evs)
-        periods = {int(p) for e in evs for p in (e.blocks_periods or ())}
-        out[d] = DayLock(closed=closed, periods=frozenset(periods), events=tuple(evs))
+        out[d] = DayLock(closed=_closed(evs), periods=_blocked_periods(evs),
+                         events=tuple(evs), exam=_exam(evs))
     return out
 
 

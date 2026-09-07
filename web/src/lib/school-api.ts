@@ -313,9 +313,17 @@ export const schoolApi = {
     api.get<StudentHomeworkHistory>(
       `/homework/student/${studentId}${qs({ window_days: windowDays ? String(windowDays) : undefined })}`),
   // period detail page (V2-P6) — everything for one class-period in one call
-  periodCard: (classId: string, periodNo: number, onDate?: string) =>
+  periodCard: (classId: string, periodNo: number, onDate?: string, classSubjectId?: string) =>
     api.get<import("@/lib/school-types").PeriodCard>(
-      `/periods/card${qs({ class_id: classId, period_no: String(periodNo), on_date: onDate })}`),
+      `/periods/card${qs({ class_id: classId, period_no: String(periodNo), on_date: onDate,
+        // FB-1a: names the subject when the grid has nothing here. A fallback,
+        // never an override — an opened period and the timetable both win.
+        class_subject_id: classSubjectId })}`),
+  /** FB-1a — the classes, subjects and periods this member could record off the
+   *  timetable. Read-only; opens no period. */
+  recordable: (onDate?: string) =>
+    api.get<import("@/lib/school-types").Recordable>(
+      `/periods/recordable${qs({ on_date: onDate })}`),
   openPeriod: (b: { class_id: string; period_no: number; class_subject_id?: string | null; date?: string | null }) =>
     api.post<{ id: string }>("/periods/open", b),
   /** V1-7 (S-147): `eventId` files this against the approved calendar row, so

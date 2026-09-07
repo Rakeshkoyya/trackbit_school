@@ -53,6 +53,55 @@ from app.services.score_match import match_rows
 _MAX_PAGE_BYTES = 25 * 1024 * 1024
 _ALLOWED_TYPES = ("image/", "application/pdf")
 
+#: Magic bytes → the type the file ACTUALLY is (`FB-1b`).
+#:
+#: Two teachers at SHANA, twelve days apart, could not upload a marked script.
+#: Tejas said he picked his from "the drive" — and the Android Drive/Files
+#: picker routinely hands the browser `application/octet-stream`, or no type at
+#: all, for a perfectly good JPEG. The endpoint defaults a missing type to
+#: `application/octet-stream` too, and this service then rejected it as
+#: `bad_page_type`. The school's exam data was missing because a file picker
+#: could not name a file, not because there was anything wrong with the file.
+#:
+#: The browser's claim is a hint; the bytes are the fact. Trusting the bytes is
+#: not a relaxation of the check — they are what the downscaler and the model
+#: will read anyway, so this is the check done properly.
+_SNIFF: tuple[tuple[bytes, str], ...] = (
+    (bytes.fromhex("ffd8ff"), "image/jpeg"),
+    (bytes.fromhex("89504e470d0a1a0a"), "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+    (b"%PDF-", "application/pdf"),
+)
+
+#: ISO-BMFF brands that are stills, not video — an iPhone photo (HEIC) and what
+#: some Android cameras now save (AVIF). Their tag sits at offset 4, not 0.
+_STILL_BRANDS = {
+    b"heic": "image/heic", b"heix": "image/heic", b"heim": "image/heic",
+    b"mif1": "image/heic", b"msf1": "image/heic",
+    b"avif": "image/avif", b"avis": "image/avif",
+}
+
+
+def sniff_type(data: bytes, claimed: str) -> str | None:
+    """The file's real type, or None when it is neither an image nor a PDF.
+
+    A believable claim wins: it carries detail the magic bytes don't — which
+    flavour of image, which the downscaler wants. Otherwise the bytes decide.
+    """
+    if claimed.startswith(_ALLOWED_TYPES):
+        return claimed
+    head = data[:16]
+    for magic, kind in _SNIFF:
+        if head.startswith(magic):
+            return kind
+    if head[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp":
+        return _STILL_BRANDS.get(data[8:12])
+    return None
+
 
 class ScoreCaptureService:
     def __init__(self, db: Session):
@@ -153,9 +202,18 @@ class ScoreCaptureService:
                  content_type: str, filename: str) -> CaptureOut:
         cap = self._capture(m, capture_id)
         self._mutable(cap)
-        if not content_type.startswith(_ALLOWED_TYPES):
-            raise ValidationError("Only photos and PDFs can be captured.",
-                                  code="bad_page_type")
+        if not data:
+            raise ValidationError("That file came through empty — try again.",
+                                  code="empty_page")
+        # `FB-1b`: sniff, don't trust. See `_SNIFF` for the fortnight of missing
+        # exam data this cost.
+        sniffed = sniff_type(data, content_type)
+        if sniffed is None:
+            raise ValidationError(
+                "That file isn't a photo or a PDF. Take a photo of the paper, "
+                "or pick the PDF itself rather than a shortcut to it.",
+                code="bad_page_type")
+        content_type = sniffed
         if len(data) > _MAX_PAGE_BYTES:
             raise ValidationError("File is too large (max 25 MB).", code="page_too_large")
         key = storage.make_key(org_id=m.org_id, instance_id=cap.id, filename=filename)

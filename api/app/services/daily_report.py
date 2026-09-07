@@ -155,6 +155,13 @@ class DailyReportService:
             slots = []
         elif lock.periods:
             slots = [s for s in slots if s.period_no not in lock.periods]
+        # `FB-1a`: an exam day is NOT a closure. Its registers are still taken
+        # and still counted — the children are in the building — but no
+        # timetabled LESSON runs, so nothing below may report a class as
+        # unlogged or ask "was it logged?". Reporting 21 unlogged classes on a
+        # PA2 morning is how a school comes to believe its teachers stopped
+        # working during exam week.
+        teaching_off = lock.teaching_off
 
         # Only ATTENDANCE-MARKED periods count as marked; a period opened but
         # never submitted is not a capture (V2-P6).
@@ -207,28 +214,44 @@ class DailyReportService:
         #     not to this subject's period. Asking the Science teacher why she
         #     never took a register the class teacher took at nine o'clock is
         #     noise, and it fired on every afternoon subject in the school.
+        # TT-2 / `FB-1e`: a BLOCK — assembly, games, a hostel session — has no
+        # class-subject, so it has no topic, no lesson log and nothing to say
+        # here. It used to fall through into every set below as a `None`, which
+        # printed a literal "?" in the briefing and counted each block as one
+        # more "unlogged class" (SHANA's 21 August report claimed 21 unlogged
+        # classes and could name six). The teaching questions are about subject
+        # slots; attendance keeps the full timetable, because a block that takes
+        # the school roll does owe a register.
+        subject_slots = [s for s in slots if s.class_subject_id is not None]
         marked_cs: set[uuid.UUID] = {
-            s.class_subject_id for s in slots if (s.class_id, s.period_no) in marked_keys}
+            s.class_subject_id for s in subject_slots
+            if (s.class_id, s.period_no) in marked_keys}
         register_classes = {cid for cid, _p in marked_keys}
         register_cs: set[uuid.UUID] = (
-            {s.class_subject_id for s in slots if s.class_id in register_classes}
+            {s.class_subject_id for s in subject_slots if s.class_id in register_classes}
             if once else marked_cs)
 
         logged_cs = set(self.db.scalars(
             select(LessonLog.class_subject_id).where(
                 LessonLog.org_id == org_id, LessonLog.date == d)))
-        timetabled_cs = {s.class_subject_id for s in slots}
-        unlogged_cs = timetabled_cs - logged_cs
+        timetabled_cs = {s.class_subject_id for s in subject_slots}
+        unlogged_cs = set() if teaching_off else timetabled_cs - logged_cs
 
         # ── ambiguities ──
+        # `FB-1e`: name it or say nothing. `_named` drops an id the school has no
+        # label for instead of printing the placeholder — the 21 August briefing
+        # went out reading "? had attendance but no lesson log", which tells an
+        # admin nothing and costs him his trust in the rest of the page.
+        def _named(ids: set[uuid.UUID]) -> list[str]:
+            return sorted(cs_meta[c][1] for c in ids if c in cs_meta)
+
         ambiguities: list[str] = []
-        for csid in sorted(marked_cs - logged_cs, key=lambda c: cs_meta.get(c, (None, ""))[1]):
-            ambiguities.append(
-                f"{cs_meta.get(csid, (None, '?'))[1]} had attendance but no lesson log — was it logged?")
-        for csid in sorted((logged_cs & timetabled_cs) - register_cs,
-                           key=lambda c: cs_meta.get(c, (None, ""))[1]):
-            ambiguities.append(
-                f"{cs_meta.get(csid, (None, '?'))[1]} was logged but attendance wasn't taken.")
+        if not teaching_off:
+            for label in _named(marked_cs - logged_cs):
+                ambiguities.append(
+                    f"{label} had attendance but no lesson log — was it logged?")
+        for label in _named((logged_cs & timetabled_cs) - register_cs):
+            ambiguities.append(f"{label} was logged but attendance wasn't taken.")
         ambiguities.extend(self._staff_ambiguities(m, d))
         ambiguities.extend(self._homework_streak_ambiguities(m))
 
@@ -256,10 +279,24 @@ class DailyReportService:
                 att_lines.append(
                     f"{len(unmarked)} period(s) not marked: {', '.join(names[:6])}")
 
-        teach_lines = [f"{len(logged_cs & timetabled_cs)} of {len(timetabled_cs)} timetabled classes logged"]
-        if unlogged_cs:
-            labels = sorted(cs_meta.get(c, (None, "?"))[1] for c in unlogged_cs)
-            teach_lines.append(f"Not logged: {', '.join(labels[:6])}")
+        # `FB-1a`: on an exam day the timetable stood down, so "0 of 21 logged"
+        # would be a true number answering a question nobody asked. A holiday is
+        # `teaching_off` too and must say its own name — "Exams — no timetabled
+        # lessons" on Independence Day would be a new lie for an old one.
+        if lock.closed:
+            teach_lines = [f"{lock.title or 'School closed'} — no lessons today."]
+        elif lock.exam:
+            teach_lines = [f"{lock.exam_title or 'Exams'} — no timetabled lessons today."]
+        else:
+            teach_lines = [
+                f"{len(logged_cs & timetabled_cs)} of {len(timetabled_cs)} timetabled classes logged"]
+            if unlogged_cs:
+                labels = _named(unlogged_cs)
+                more = len(labels) - 6
+                teach_lines.append(
+                    f"Not logged: {', '.join(labels[:6])}"
+                    # `FB-1g`: "21 unlogged" over a list of six read as a bug.
+                    + (f" and {more} more" if more > 0 else ""))
 
         hw_given = self.db.scalar(select(func.count(HomeworkAssignment.id)).where(
             HomeworkAssignment.org_id == org_id, HomeworkAssignment.date == d)) or 0
@@ -308,6 +345,7 @@ class DailyReportService:
         # plan pace via forecast (reuse planner)
         red: list[str] = []
         amber: list[str] = []
+        paced = 0
         year = self.db.scalar(select(AcademicYear).where(
             AcademicYear.org_id == org_id, AcademicYear.is_active.is_(True)))
         if year is not None:
@@ -315,11 +353,21 @@ class DailyReportService:
             for cid in self.db.scalars(select(SchoolClass.id).where(
                     SchoolClass.org_id == org_id, SchoolClass.academic_year_id == year.id)):
                 for r in planner.forecast(m, cid):
+                    paced += 1
                     if r.status == "red":
                         red.append(f"{r.class_label} {r.subject_name} — {r.weeks_behind}w behind plan")
                     elif r.status == "amber":
                         amber.append(f"{r.class_label} {r.subject_name} — slipping")
-        pace_lines = [*[f"🔴 {x}" for x in red], *[f"🟠 {x}" for x in amber]] or ["All classes on pace"]
+        # `FB-1g`: "All classes on pace" against NO approved plan is a false
+        # all-clear, and it sat on the same briefing as a syllabus board reading
+        # 3% — the admin had every reason to think one of the two was broken.
+        # Not-planned is a state and gets a word, never a green tick (`ux §5`).
+        if red or amber:
+            pace_lines = [*[f"🔴 {x}" for x in red], *[f"🟠 {x}" for x in amber]]
+        elif paced:
+            pace_lines = ["All classes on pace"]
+        else:
+            pace_lines = ["No approved plan yet — there is nothing to pace against."]
 
         sections: list[tuple[str, list[str]]] = [
             ("Attendance", att_lines),
@@ -369,10 +417,19 @@ class DailyReportService:
         if len(unlogged_cs) >= max(2, len(timetabled_cs) // 2) and timetabled_cs:
             risks.append(f"{len(unlogged_cs)} classes still unlogged")
         wins: list[str] = []
-        if sessions:
+        # `FB-1g`: a session with nobody recorded is not a win. It went out under
+        # a green tick reading "1 session(s) run · 0 attended", which is a gap in
+        # the record dressed up as an achievement — `ux §5`, not-captured is a
+        # word and never a zero.
+        if sessions and attended:
             wins.append(f"{len(sessions)} session(s) run · {attended} attended")
-        greens = len(timetabled_cs) - len(unlogged_cs)
-        if greens > 0 and not unlogged_cs:
+        elif sessions:
+            ambiguities.append(
+                f"{len(sessions)} session(s) ran with nobody marked present — "
+                "was the roll taken?")
+        # `FB-1a`: on an exam day nothing was asked for, so "every class logged"
+        # would be a tick for work that never existed.
+        if timetabled_cs and not unlogged_cs and not teaching_off:
             wins.append("Every timetabled class logged today ✓")
         highlights = {"risks": risks, "ambiguities": ambiguities, "wins": wins}
         return sections, highlights

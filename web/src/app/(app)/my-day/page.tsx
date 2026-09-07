@@ -7,6 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { RecordClassSheet } from "@/components/school/record-class-sheet";
 import { OutcomeSheet } from "@/components/tasks/outcome-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -339,6 +340,7 @@ function EveningSection() {
 
 function MyDayInner() {
   const [hwFor, setHwFor] = useState<HwTarget | null>(null);
+  const [recordOpen, setRecordOpen] = useState(false);
   const { data } = useQuery({ queryKey: ["my-day"], queryFn: schoolApi.myDay });
 
   // S-100: the count that makes the button worth pressing. Its own query so a
@@ -358,8 +360,16 @@ function MyDayInner() {
   // across My Class (`DayNotice`, scoped to the class).
 
   // Classes already covered by a period row don't need a second card below.
+  //
+  // FB-1d: …and on a closed day there are no cards below at all. This section
+  // used to render "Today's classes", with live Covered / Partially / Set
+  // homework buttons, directly underneath "Nothing to mark or log. Enjoy it."
+  // The closed-day guard covered `periods` and forgot `classes`, so the one
+  // screen that was supposed to stop asking her for things carried on asking.
   const periodCsIds = new Set((data?.periods ?? []).map((p) => p.class_subject_id));
-  const otherClasses = (data?.classes ?? []).filter((c) => !periodCsIds.has(c.class_subject_id));
+  const otherClasses = data?.day_closed
+    ? []
+    : (data?.classes ?? []).filter((c) => !periodCsIds.has(c.class_subject_id));
 
   return (
     <div>
@@ -395,6 +405,16 @@ function MyDayInner() {
           ) : null}
           <p className="mt-0.5 text-xs text-muted-foreground">
             Nothing to mark or log. Enjoy it.
+          </p>
+        </div>
+      ) : data?.exam_day ? (
+        /* FB-1a — an exam is NOT a closure, and saying so was costing this
+           school its data. The register is still owed; the lesson is not. */
+        <div className="mb-6 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+          <span className="font-medium">{data.exam_title ?? "Exams"} today</span>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            No regular lessons — take the register as usual, and record any test
+            you marked. Nothing is being asked of you for a topic.
           </p>
         </div>
       ) : data?.locked_periods?.length ? (
@@ -439,8 +459,35 @@ function MyDayInner() {
         </section>
       ) : null}
 
+      {/* FB-1a — the way in when the grid has nothing for her.
+          Prominent on an empty day, because that is the day the record was
+          being lost: an exam window, a Saturday extra class, a room she
+          covered, a class with no timetable at all. Quiet otherwise — it is a
+          fallback, and the timetable stays the norm. Never on a closed day:
+          the whole point of a closure is that nothing is asked of her. */}
+      {data && !data.day_closed ? (
+        data.periods.length === 0 && otherClasses.length === 0 ? (
+          <section className="rounded-xl border border-border bg-card p-4">
+            <p className="text-sm font-medium">Taught a class anyway?</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Nothing is on your timetable today. If you took a class, record it
+              here so it counts towards the syllabus.
+            </p>
+            <Button className="mt-3" size="sm" onClick={() => setRecordOpen(true)}>
+              Record a class
+            </Button>
+          </section>
+        ) : (
+          <button type="button" onClick={() => setRecordOpen(true)}
+            className="mt-2 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">
+            Record a class that isn’t on your timetable
+          </button>
+        )
+      ) : null}
+
       <EveningSection />
 
+      <RecordClassSheet open={recordOpen} onOpenChange={setRecordOpen} />
       <HomeworkSheet target={hwFor} onClose={() => setHwFor(null)} />
     </div>
   );

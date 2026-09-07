@@ -248,8 +248,10 @@ class AttendanceInsights:
                 if once and held.get(cid):
                     expects = p.period_no == held[cid]
                 else:
+                    # `FB-1a`: this grid is about the REGISTER, so it asks the
+                    # register's question. An exam day still counts its rolls.
                     expects = ((not marking or p.period_no in marking)
-                               and lock.expects(p.period_no))
+                               and lock.expects_attendance(p.period_no))
                 if not expects and state == "pending":
                     cells.append(CaptureCell(
                         period_no=p.period_no, state="not_expected",

@@ -10,8 +10,8 @@ import {
   Plus, Send, UserCheck, Users, X,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthGuard } from "@/components/auth/auth-guard";
@@ -723,6 +723,11 @@ function PeriodPageInner() {
   const params = useParams<{ classId: string; no: string }>();
   const classId = params.classId;
   const periodNo = Number(params.no);
+  // FB-1a: the subject she picked in "Record a class", for a period the grid
+  // has nothing in. A FALLBACK — the server ignores it the moment the timetable
+  // or an already-opened period can answer, so a stale link cannot relabel a
+  // lesson that has happened.
+  const pickedCs = useSearchParams().get("cs") ?? undefined;
   const qc = useQueryClient();
   const [notHeldOpen, setNotHeldOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -731,12 +736,12 @@ function PeriodPageInner() {
   const [reasonEvent, setReasonEvent] = useState("");
 
   const { data: card, isLoading } = useQuery({
-    queryKey: ["period-card", classId, periodNo],
-    queryFn: () => schoolApi.periodCard(classId, periodNo),
+    queryKey: ["period-card", classId, periodNo, pickedCs ?? ""],
+    queryFn: () => schoolApi.periodCard(classId, periodNo, undefined, pickedCs),
   });
 
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["period-card", classId, periodNo] });
+    qc.invalidateQueries({ queryKey: ["period-card", classId, periodNo, pickedCs ?? ""] });
     qc.invalidateQueries({ queryKey: ["my-day"] });
   };
 
@@ -806,6 +811,10 @@ function PeriodPageInner() {
             <Badge tone="neutral">
               off today{card.lock_reason ? ` · ${card.lock_reason}` : ""}
             </Badge>
+          ) : card.exam_day ? (
+            /* FB-1a — the school is OPEN and this card works normally. The
+               badge only explains why no topic is being asked for. */
+            <Badge tone="neutral">{card.exam_title ?? "Exams"} · no lesson</Badge>
           ) : !notHeldOpen ? (
             <Button size="sm" variant="ghost" onClick={() => setNotHeldOpen(true)}>Period not held?</Button>
           ) : null}
@@ -887,7 +896,11 @@ function PeriodPageInner() {
 export default function PeriodPage() {
   return (
     <AuthGuard allow={["admin", "teacher"]}>
-      <PeriodPageInner />
+      {/* `useSearchParams` (FB-1a's `?cs=`) needs a Suspense boundary or the
+          build fails prerendering this route — same shape as /attendance. */}
+      <Suspense fallback={<PageLoading label="Loading the period…" />}>
+        <PeriodPageInner />
+      </Suspense>
     </AuthGuard>
   );
 }

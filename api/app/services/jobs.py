@@ -426,7 +426,9 @@ def run_teacher_reminder() -> int:
                     continue
                 expects_mark = not marking or s.period_no in marking
                 unmarked = expects_mark and (s.class_id, s.period_no) not in marked
-                unlogged = s.class_subject_id not in logged
+                # `FB-1a`: an exam day still wants its register, and must never
+                # nag for a lesson log — no lesson ran.
+                unlogged = not lock.teaching_off and s.class_subject_id not in logged
                 if unmarked or unlogged:
                     pending[tmid] = pending.get(tmid, 0) + 1
             for tmid, count in pending.items():

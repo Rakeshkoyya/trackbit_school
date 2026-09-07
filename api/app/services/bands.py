@@ -610,9 +610,18 @@ class BandService:
         # once children are moving, that is the news (`D-67`).
         no_owner = sum(1 for r in out.stuck if not r.owner_name)
         if no_owner == len(out.stuck) and no_owner and not moved_up and not slipped:
-            out.headline = (f"{len(current_c)} children are in Band C and none has an owner."
-                            if no_owner == len(current_c)
-                            else f"{no_owner} children in Band C have no owner.")
+            # `FB-1f`: "1 children are in Band C and none has an owner" is the
+            # sentence a teacher actually read on 5 September. The block three
+            # lines above already gets this right — same rule, applied here.
+            if no_owner == len(current_c):
+                n = len(current_c)
+                out.headline = (
+                    "1 child is in Band C and has no owner." if n == 1
+                    else f"{n} children are in Band C and none has an owner.")
+            else:
+                out.headline = (
+                    "1 child in Band C has no owner." if no_owner == 1
+                    else f"{no_owner} children in Band C have no owner.")
         return out
 
     def _stuck(self, m: CurrentMember, current_c: list, names: dict) -> list[ProgrammeRow]:

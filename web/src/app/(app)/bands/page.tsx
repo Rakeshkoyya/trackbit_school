@@ -51,12 +51,35 @@ export default function BandsOverviewPage() {
           title="ABC bands"
           subtitle={
             data?.subjects.length
-              ? `${data.term_name ?? "This term"} · ${data.subjects.join(", ")}`
+              // FB-1i: "Term-2 · English, Hindi, Maths" reads as a LIMIT, and a
+              // teacher wrote in asking us to "add other subjects under the ABC
+              // category". Nothing needed adding — the monitored set is
+              // configuration and an admin can change it in Settings — but
+              // nothing on this screen said so unless the set was empty. Name
+              // the list for what it is, and say who can change it.
+              ? `${data.term_name ?? "This term"} · monitoring ${data.subjects.join(", ")}`
               : "Staff-only support tiers — never shared with parents"
           }
         />
         <YearSwitcher />
       </div>
+
+      {data?.subjects.length ? (
+        <p className="-mt-2 mb-4 text-xs text-muted-foreground">
+          {isAdmin ? (
+            <>
+              Any subject can be monitored —{" "}
+              <Link href="/setup/settings"
+                className="underline underline-offset-4 hover:text-foreground">
+                choose them in Settings → Support programme
+              </Link>
+              .
+            </>
+          ) : (
+            "Any subject can be monitored — ask your admin to add one in Settings → Support programme."
+          )}
+        </p>
+      ) : null}
 
       {isLoading || !data ? (
         <div className="h-64 animate-pulse rounded-xl bg-muted" />
